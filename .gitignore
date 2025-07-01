@@ -1,0 +1,192 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# Translations
+*.mo
+*.pot
+
+# Django stuff:
+*.log
+local_settings.py
+db.sqlite3
+
+# Flask stuff:
+instance/
+.webassets-cache
+
+# Scrapy stuff:
+.scrapy
+
+# Sphinx documentation
+help/build/
+help/source/_build/
+
+# PyBuilder
+target/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# pyenv
+.python-version
+
+# celery beat schedule file
+celerybeat-schedule
+
+# SageMath parsed files
+*.sage.py
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Spyder project settings
+.spyderproject
+.spyproject
+
+# Rope project settings
+.ropeproject
+
+# mkdocs documentation
+/site
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# QGIS specific
+*.qgs~
+*.qgz~
+*.qgz.bak
+*.qgs.bak
+*.qgs.backup
+*.qgz.backup
+
+# QGIS project files (uncomment if you want to ignore project files)
+# *.qgs
+# *.qgz
+
+# QGIS cache and temporary files
+*.qgis2/
+*.qgis3/
+*.qgis/
+
+# QGIS plugin development
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Backup files
+*.bak
+*.backup
+*.old
+
+# Log files
+*.log
+logs/
+
+# Database files (except the symbology-style.db which seems to be part of the project)
+# *.db
+# *.sqlite
+# *.sqlite3
+
+# Compiled translation files
+*.qm
+
+# Temporary files
+*.tmp
+*.temp
+
+# Node.js (if any frontend components)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Local configuration files
+config.local.py
+settings.local.py
+.env.local
+
+# Test artifacts
+test-results/
+test-output/
+.coverage
+coverage.xml
+htmlcov/
+
+# Documentation build artifacts
+docs/_build/
+docs/build/
+
+# Plugin packaging artifacts
+*.zip
+*.tar.gz
+*.tar.bz2
+
+# QGIS plugin specific
+*.qgis-plugin 

@@ -1,0 +1,5 @@
+<RCC>
+    <qresource prefix="/plugins/archeo_sync" >
+        <file>icon.png</file>
+    </qresource>
+</RCC>
