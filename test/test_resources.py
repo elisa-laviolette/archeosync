@@ -24,7 +24,7 @@ except ImportError:
 
 
 @pytest.mark.skipif(not QGIS_AVAILABLE, reason="QGIS not available")
-class ArcheoSyncResourcesTest:
+class TestArcheoSyncResources:
     """Test rerources work."""
 
     def setup_method(self):

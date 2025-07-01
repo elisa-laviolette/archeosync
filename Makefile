@@ -46,7 +46,7 @@ PY_FILES = \
 	__init__.py \
 	archeo_sync.py archeo_sync_dialog.py
 
-UI_FILES = archeo_sync_dialog_base.ui
+UI_FILES = 
 
 EXTRAS = metadata.txt icon.png
 
@@ -109,12 +109,31 @@ test: compile transcompile
 	  QGIS_DEBUG=0 \
 	  QGIS_LOG_FILE=/dev/null \
 	  PYTHONWARNINGS="ignore::DeprecationWarning,ignore::PendingDeprecationWarning" \
-	  /Applications/QGIS-LTR.app/Contents/MacOS/bin/python3 -m pytest test/ -v --tb=short --disable-warnings || true
+	  /Applications/QGIS-LTR.app/Contents/MacOS/bin/python3 -m pytest test/ -v --tb=short -m "not qgis" || true
 	@echo "----------------------"
 	@echo "If you get a 'no module named qgis.core error, try sourcing"
 	@echo "the helper script we have provided first then run make test."
 	@echo "e.g. source scripts/run-env-macos.sh [qgis_path]; make test"
 	@echo "----------------------"
+
+# Test with QGIS dependencies (full test suite)
+test-qgis: compile transcompile
+	@echo
+	@echo "----------------------"
+	@echo "Full Test Suite (with QGIS)"
+	@echo "----------------------"
+	@echo "Note: This requires QGIS to be properly configured."
+	@echo "First source the environment script:"
+	@echo "  source scripts/run-env-macos.sh [qgis_path]"
+	@echo "----------------------"
+
+	@-QGIS_PREFIX_PATH=/Applications/QGIS-LTR.app/Contents/MacOS \
+	  PROJ_LIB=/Applications/QGIS-LTR.app/Contents/Resources/proj \
+	  PYTHONPATH=`pwd`:$(PYTHONPATH) \
+	  QGIS_DEBUG=0 \
+	  QGIS_LOG_FILE=/dev/null \
+	  PYTHONWARNINGS="ignore::DeprecationWarning,ignore::PendingDeprecationWarning" \
+	  /Applications/QGIS-LTR.app/Contents/MacOS/bin/python3 -m pytest test/ -v --tb=short || true
 
 # Test without QGIS dependencies (unit tests only)
 unittest: compile transcompile
@@ -125,6 +144,35 @@ unittest: compile transcompile
 
 	@-export PYTHONPATH=`pwd`:$(PYTHONPATH); \
 		python -m pytest test/ -v --tb=short -m "not qgis" || true
+
+# Run all tests (unit tests + QGIS tests)
+test-all: compile transcompile
+	@echo
+	@echo "======================================"
+	@echo "Complete Test Suite (All Tests)"
+	@echo "======================================"
+	@echo "This will run both unit tests and QGIS-dependent tests."
+	@echo "Note: This requires QGIS to be properly configured."
+	@echo "First source the environment script:"
+	@echo "  source scripts/run-env-macos.sh [qgis_path]"
+	@echo "======================================"
+	@echo
+	@echo "Step 1: Running unit tests (no QGIS dependencies)..."
+	@-export PYTHONPATH=`pwd`:$(PYTHONPATH); \
+		python -m pytest test/ -v --tb=short -m "not qgis" || true
+	@echo
+	@echo "Step 2: Running QGIS-dependent tests..."
+	@-QGIS_PREFIX_PATH=/Applications/QGIS-LTR.app/Contents/MacOS \
+	  PROJ_LIB=/Applications/QGIS-LTR.app/Contents/Resources/proj \
+	  PYTHONPATH=`pwd`:$(PYTHONPATH) \
+	  QGIS_DEBUG=0 \
+	  QGIS_LOG_FILE=/dev/null \
+	  PYTHONWARNINGS="ignore::DeprecationWarning,ignore::PendingDeprecationWarning" \
+	  /Applications/QGIS-LTR.app/Contents/MacOS/bin/python3 -m pytest test/ -v --tb=short || true
+	@echo
+	@echo "======================================"
+	@echo "Complete test suite finished!"
+	@echo "======================================"
 
 deploy: compile doc transcompile
 	@echo
