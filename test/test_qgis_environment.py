@@ -19,7 +19,7 @@ from .utilities import get_qgis_app
 
 # Try to import QGIS modules, skip tests if not available
 try:
-    from qgis.core import (
+    from qgis.core import ( # type: ignore
         QgsProviderRegistry,
         QgsCoordinateReferenceSystem,
         QgsRasterLayer)

@@ -22,23 +22,66 @@
  ***************************************************************************/
 """
 
-import os
-
-from qgis.PyQt import uic
 from qgis.PyQt import QtWidgets
-
-# This loads your .ui file so that PyQt can populate your plugin with the elements from Qt Designer
-FORM_CLASS, _ = uic.loadUiType(os.path.join(
-    os.path.dirname(__file__), 'archeo_sync_dialog_base.ui'))
+from qgis.PyQt.QtCore import Qt
 
 
-class ArcheoSyncDialog(QtWidgets.QDialog, FORM_CLASS):
+class ArcheoSyncDialog(QtWidgets.QDialog):
+    """
+    ArcheoSync Dialog - Pure PyQt implementation.
+    
+    This dialog provides the interface for the ArcheoSync plugin,
+    allowing archaeologists to prepare data for the field and import it back.
+    """
+    
     def __init__(self, parent=None):
-        """Constructor."""
+        """
+        Initialize the ArcheoSync dialog.
+        
+        Args:
+            parent: Parent widget for the dialog
+        """
         super(ArcheoSyncDialog, self).__init__(parent)
-        # Set up the user interface from Designer through FORM_CLASS.
-        # After self.setupUi() you can access any designer object by doing
-        # self.<objectname>, and you can use autoconnect slots - see
-        # http://qt-project.org/doc/qt-4.8/designer-using-a-ui-file.html
-        # #widgets-and-dialogs-with-auto-connect
-        self.setupUi(self)
+        
+        # Set dialog properties
+        self.setWindowTitle("ArcheoSync")
+        self.setGeometry(0, 0, 400, 300)
+        
+        # Create the main layout
+        self.setup_ui()
+        
+        # Connect signals
+        self.setup_connections()
+    
+    def setup_ui(self):
+        """Set up the user interface components."""
+        # Create main layout
+        main_layout = QtWidgets.QVBoxLayout(self)
+        
+        # Add content area (placeholder for future widgets)
+        content_widget = QtWidgets.QWidget()
+        content_layout = QtWidgets.QVBoxLayout(content_widget)
+        
+        # Add a label as placeholder content
+        placeholder_label = QtWidgets.QLabel("ArcheoSync Plugin")
+        placeholder_label.setAlignment(Qt.AlignCenter)
+        content_layout.addWidget(placeholder_label)
+        
+        # Add content widget to main layout
+        main_layout.addWidget(content_widget)
+        
+        # Create button box
+        self.button_box = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel,
+            Qt.Horizontal,
+            self
+        )
+        
+        # Add button box to main layout
+        main_layout.addWidget(self.button_box)
+    
+    def setup_connections(self):
+        """Set up signal connections."""
+        # Connect button box signals to dialog slots
+        self.button_box.accepted.connect(self.accept)
+        self.button_box.rejected.connect(self.reject)

@@ -38,6 +38,7 @@ def get_qgis_app():
 
     try:
         from qgis.PyQt import QtGui, QtCore # type: ignore
+        from qgis.PyQt.QtWidgets import QApplication # type: ignore
         from qgis.core import QgsApplication # type: ignore
         from qgis.gui import QgsMapCanvas # type: ignore
         from .qgis_interface import QgisInterface
@@ -47,26 +48,50 @@ def get_qgis_app():
     global QGIS_APP  # pylint: disable=W0603
 
     if QGIS_APP is None:
-        gui_flag = True  # All test will run qgis in gui mode
-        # Set QGIS_PREFIX_PATH explicitly
-        prefix_path = os.environ.get('QGIS_PREFIX_PATH', '/Applications/QGIS-LTR.app/Contents/MacOS')
-        QGIS_APP = QgsApplication(sys.argv, gui_flag)
-        QGIS_APP.setPrefixPath(prefix_path, True)
-        QGIS_APP.initQgis()
-        s = QGIS_APP.showSettings()
-        LOGGER.debug(s)
+        try:
+            gui_flag = True  # All test will run qgis in gui mode
+            # Set QGIS_PREFIX_PATH explicitly
+            prefix_path = os.environ.get('QGIS_PREFIX_PATH', '/Applications/QGIS-LTR.app/Contents/MacOS')
+            
+            # Ensure we have a QApplication instance first
+            if QApplication.instance() is None:
+                QApplication(sys.argv)
+            
+            QGIS_APP = QgsApplication.instance()
+            if QGIS_APP is None:
+                QGIS_APP = QgsApplication(sys.argv, gui_flag)
+                QGIS_APP.setPrefixPath(prefix_path, True)
+                QGIS_APP.initQgis()
+            
+            s = QGIS_APP.showSettings()
+            LOGGER.debug(s)
+        except Exception as e:
+            LOGGER.error(f"Failed to initialize QGIS: {e}")
+            return None, None, None, None
 
     global PARENT  # pylint: disable=W0603
     if PARENT is None:
-        PARENT = QtGui.QWidget()
+        try:
+            PARENT = QtGui.QWidget()
+        except Exception as e:
+            LOGGER.error(f"Failed to create parent widget: {e}")
+            return QGIS_APP, None, None, None
 
     global CANVAS  # pylint: disable=W0603
     if CANVAS is None:
-        CANVAS = QgsMapCanvas(PARENT)
-        CANVAS.resize(QtCore.QSize(400, 400))
+        try:
+            CANVAS = QgsMapCanvas(PARENT)
+            CANVAS.resize(QtCore.QSize(400, 400))
+        except Exception as e:
+            LOGGER.error(f"Failed to create map canvas: {e}")
+            return QGIS_APP, None, None, PARENT
 
     global IFACE  # pylint: disable=W0603
     if IFACE is None:
-        IFACE = QgisInterface(CANVAS)
+        try:
+            IFACE = QgisInterface(CANVAS)
+        except Exception as e:
+            LOGGER.error(f"Failed to create QGIS interface: {e}")
+            return QGIS_APP, CANVAS, None, PARENT
 
     return QGIS_APP, CANVAS, IFACE, PARENT
