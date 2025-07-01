@@ -16,7 +16,7 @@ import pytest
 
 # Try to import QGIS modules, skip tests if not available
 try:
-    from qgis.PyQt.QtGui import QDialogButtonBox, QDialog
+    from qgis.PyQt.QtGui import QDialogButtonBox, QDialog # type: ignore
     from archeo_sync_dialog import ArcheoSyncDialog
     QGIS_AVAILABLE = True
 except ImportError:
