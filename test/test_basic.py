@@ -24,18 +24,18 @@ class TestBasicFunctionality:
     def test_project_structure(self):
         """Test that the project has the expected structure."""
         # Check that main files exist
-        assert os.path.exists('archeo_sync_dialog.py')
         assert os.path.exists('archeo_sync.py')
         assert os.path.exists('__init__.py')
         assert os.path.exists('resources.py')
+        assert os.path.exists('ui/settings_dialog.py')
         
     def test_imports_available(self):
-        """Test that basic imports work."""
+        """Test that basic imports work for the new dialog."""
         try:
-            import archeo_sync_dialog
-            assert archeo_sync_dialog is not None
+            from ui.settings_dialog import SettingsDialog
+            assert SettingsDialog is not None
         except ImportError:
-            pytest.skip("archeo_sync_dialog module not available")
+            pytest.skip("SettingsDialog module not available")
             
     def test_resources_compiled(self):
         """Test that resources are properly compiled."""

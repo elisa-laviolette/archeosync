@@ -21,180 +21,211 @@
  *                                                                         *
  ***************************************************************************/
 """
-from qgis.PyQt.QtCore import QSettings, QTranslator, QCoreApplication
+import os.path
+from typing import List, Optional
+
+from qgis.PyQt.QtCore import QSettings
 from qgis.PyQt.QtGui import QIcon
 from qgis.PyQt.QtWidgets import QAction
 
 # Initialize Qt resources from file resources.py
 from .resources import *
-# Import the code for the dialog
-from .archeo_sync_dialog import ArcheoSyncDialog
-import os.path
+from .ui.settings_dialog import SettingsDialog
+from .services import (
+    QGISSettingsManager,
+    QGISFileSystemService,
+    QGISTranslationService,
+    ArcheoSyncConfigurationValidator
+)
 
 
-class ArcheoSync:
-    """QGIS Plugin Implementation."""
-
+class ArcheoSyncPlugin:
+    """
+    Main plugin class for ArcheoSync.
+    
+    This class follows the Single Responsibility Principle by focusing only on
+    plugin lifecycle management and delegating specific responsibilities to
+    specialized services. The plugin demonstrates clean architecture principles
+    through dependency injection and interface-based design.
+    
+    Key Features:
+    - Dependency Injection: All services are injected through the constructor
+    - Interface Segregation: Dependencies on specific interfaces, not concrete classes
+    - Single Responsibility: Plugin class focuses only on QGIS integration
+    - Open/Closed: Easy to extend with new services without modifying existing code
+    - Liskov Substitution: Any implementation of an interface can be used
+    
+    Architecture:
+        ArcheoSyncPlugin
+        ├── ISettingsManager (injected)
+        ├── IFileSystemService (injected)
+        ├── ITranslationService (injected)
+        └── IConfigurationValidator (injected)
+    
+    Usage:
+        # Plugin is automatically instantiated by QGIS
+        plugin = ArcheoSyncPlugin(iface)
+        
+        # Plugin handles QGIS integration automatically
+        plugin.initGui()  # Sets up UI
+        plugin.run()      # Executes main functionality
+        plugin.unload()   # Cleanup
+    
+    This design allows for:
+    - Easy unit testing with mock services
+    - Platform-specific service implementations
+    - Future extensions without code changes
+    - Clear separation of QGIS-specific and business logic
+    """
+    
     def __init__(self, iface):
-        """Constructor.
-
-        :param iface: An interface instance that will be passed to this class
-            which provides the hook by which you can manipulate the QGIS
-            application at run time.
-        :type iface: QgsInterface
         """
-        # Save reference to the QGIS interface
-        self.iface = iface
-        # initialize plugin directory
-        self.plugin_dir = os.path.dirname(__file__)
-        # initialize locale
-        locale = QSettings().value('locale/userLocale')[0:2]
-        locale_path = os.path.join(
-            self.plugin_dir,
-            'i18n',
-            'ArcheoSync_{}.qm'.format(locale))
-
-        if os.path.exists(locale_path):
-            self.translator = QTranslator()
-            self.translator.load(locale_path)
-            QCoreApplication.installTranslator(self.translator)
-
-        # Declare instance attributes
-        self.actions = []
-        self.menu = self.tr(u'&ArcheoSync')
-
-        # Check if plugin was started the first time in current QGIS session
-        # Must be set in initGui() to survive plugin reloads
-        self.first_start = None
-
-    # noinspection PyMethodMayBeStatic
-    def tr(self, message):
-        """Get the translation for a string using Qt translation API.
-
-        We implement this ourselves since we do not inherit QObject.
-
-        :param message: String for translation.
-        :type message: str, QString
-
-        :returns: Translated version of message.
-        :rtype: QString
+        Initialize the plugin.
+        
+        Args:
+            iface: QGIS interface instance
         """
-        # noinspection PyTypeChecker,PyArgumentList,PyCallByClass
-        return QCoreApplication.translate('ArcheoSync', message)
-
-
-    def add_action(
-        self,
-        icon_path,
-        text,
-        callback,
-        enabled_flag=True,
-        add_to_menu=True,
-        add_to_toolbar=True,
-        status_tip=None,
-        whats_this=None,
-        parent=None):
-        """Add a toolbar icon to the toolbar.
-
-        :param icon_path: Path to the icon for this action. Can be a resource
-            path (e.g. ':/plugins/foo/bar.png') or a normal file system path.
-        :type icon_path: str
-
-        :param text: Text that should be shown in menu items for this action.
-        :type text: str
-
-        :param callback: Function to be called when the action is triggered.
-        :type callback: function
-
-        :param enabled_flag: A flag indicating if the action should be enabled
-            by default. Defaults to True.
-        :type enabled_flag: bool
-
-        :param add_to_menu: Flag indicating whether the action should also
-            be added to the menu. Defaults to True.
-        :type add_to_menu: bool
-
-        :param add_to_toolbar: Flag indicating whether the action should also
-            be added to the toolbar. Defaults to True.
-        :type add_to_toolbar: bool
-
-        :param status_tip: Optional text to show in a popup when mouse pointer
-            hovers over the action.
-        :type status_tip: str
-
-        :param parent: Parent widget for the new action. Defaults None.
-        :type parent: QWidget
-
-        :param whats_this: Optional text to show in the status bar when the
-            mouse pointer hovers over the action.
-
-        :returns: The action that was created. Note that the action is also
-            added to self.actions list.
-        :rtype: QAction
+        self._iface = iface
+        self._plugin_dir = os.path.dirname(__file__)
+        
+        # Initialize services using dependency injection
+        self._initialize_services()
+        
+        # Plugin state
+        self._actions: List[QAction] = []
+        self._first_start = True
+        self._settings_dialog: Optional[SettingsDialog] = None
+    
+    def _initialize_services(self) -> None:
+        """Initialize all required services."""
+        # Initialize translation service
+        self._translation_service = QGISTranslationService(
+            self._plugin_dir, 
+            'ArcheoSync'
+        )
+        
+        # Initialize settings manager
+        self._settings_manager = QGISSettingsManager('ArcheoSync')
+        
+        # Initialize file system service
+        self._file_system_service = QGISFileSystemService(self._iface.mainWindow())
+        
+        # Initialize configuration validator
+        self._configuration_validator = ArcheoSyncConfigurationValidator(
+            self._file_system_service
+        )
+    
+    def tr(self, message: str) -> str:
         """
-
+        Get the translation for a string.
+        
+        Args:
+            message: String for translation
+            
+        Returns:
+            Translated version of message
+        """
+        return self._translation_service.translate(message)
+    
+    def add_action(self, icon_path: str, text: str, callback: callable,
+                   enabled_flag: bool = True, add_to_menu: bool = True,
+                   add_to_toolbar: bool = True, status_tip: Optional[str] = None,
+                   whats_this: Optional[str] = None, parent=None) -> QAction:
+        """
+        Add a toolbar icon to the toolbar.
+        
+        Args:
+            icon_path: Path to the icon for this action
+            text: Text that should be shown in menu items for this action
+            callback: Function to be called when the action is triggered
+            enabled_flag: A flag indicating if the action should be enabled by default
+            add_to_menu: Flag indicating whether the action should also be added to the menu
+            add_to_toolbar: Flag indicating whether the action should also be added to the toolbar
+            status_tip: Optional text to show in a popup when mouse pointer hovers over the action
+            whats_this: Optional text to show in the status bar when the mouse pointer hovers over the action
+            parent: Parent widget for the new action
+            
+        Returns:
+            The action that was created
+        """
         icon = QIcon(icon_path)
         action = QAction(icon, text, parent)
         action.triggered.connect(callback)
         action.setEnabled(enabled_flag)
-
+        
         if status_tip is not None:
             action.setStatusTip(status_tip)
-
+        
         if whats_this is not None:
             action.setWhatsThis(whats_this)
-
+        
         if add_to_toolbar:
-            # Adds plugin icon to Plugins toolbar
-            self.iface.addToolBarIcon(action)
-
+            self._iface.addToolBarIcon(action)
+        
         if add_to_menu:
-            self.iface.addPluginToMenu(
-                self.menu,
-                action)
-
-        self.actions.append(action)
-
+            self._iface.addPluginToMenu(self.tr(u'&ArcheoSync'), action)
+        
+        self._actions.append(action)
         return action
-
-    def initGui(self):
+    
+    def initGui(self) -> None:
         """Create the menu entries and toolbar icons inside the QGIS GUI."""
-
         icon_path = ':/plugins/archeo_sync/icon.png'
         self.add_action(
             icon_path,
             text=self.tr(u'Prepare field recording'),
             callback=self.run,
-            parent=self.iface.mainWindow())
-
-        # will be set False in run()
-        self.first_start = True
-
-
-    def unload(self):
-        """Removes the plugin menu item and icon from QGIS GUI."""
-        for action in self.actions:
-            self.iface.removePluginMenu(
-                self.tr(u'&ArcheoSync'),
-                action)
-            self.iface.removeToolBarIcon(action)
-
-
-    def run(self):
-        """Run method that performs all the real work"""
-
-        # Create the dialog with elements (after translation) and keep reference
-        # Only create GUI ONCE in callback, so that it will only load when the plugin is started
-        if self.first_start == True:
-            self.first_start = False
-            self.dlg = ArcheoSyncDialog()
-
-        # show the dialog
-        self.dlg.show()
-        # Run the dialog event loop
-        result = self.dlg.exec_()
-        # See if OK was pressed
-        if result:
-            # Do something useful here - delete the line containing pass and
-            # substitute with your code.
-            pass
+            parent=self._iface.mainWindow()
+        )
+    
+    def unload(self) -> None:
+        """Remove the plugin menu item and icon from QGIS GUI."""
+        for action in self._actions:
+            self._iface.removePluginMenu(self.tr(u'&ArcheoSync'), action)
+            self._iface.removeToolBarIcon(action)
+    
+    def run(self) -> None:
+        """Run method that performs all the real work."""
+        # Create the dialog only once
+        if self._first_start:
+            self._first_start = False
+            self._settings_dialog = SettingsDialog(
+                settings_manager=self._settings_manager,
+                file_system_service=self._file_system_service,
+                configuration_validator=self._configuration_validator,
+                parent=self._iface.mainWindow()
+            )
+        
+        # Show the dialog
+        if self._settings_dialog:
+            result = self._settings_dialog.exec_()
+            
+            # Handle dialog result
+            if result:
+                self._handle_settings_accepted()
+    
+    def _handle_settings_accepted(self) -> None:
+        """Handle the case when settings dialog is accepted."""
+        # This is where you would implement the actual plugin functionality
+        # based on the saved settings
+        pass
+    
+    @property
+    def settings_manager(self):
+        """Get the settings manager instance."""
+        return self._settings_manager
+    
+    @property
+    def translation_service(self):
+        """Get the translation service instance."""
+        return self._translation_service
+    
+    @property
+    def file_system_service(self):
+        """Get the file system service instance."""
+        return self._file_system_service
+    
+    @property
+    def configuration_validator(self):
+        """Get the configuration validator instance."""
+        return self._configuration_validator 

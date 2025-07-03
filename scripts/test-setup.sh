@@ -8,7 +8,7 @@ set -e
 echo "Setting up test environment for ArcheoSync plugin..."
 
 # Check if we're in the right directory
-if [ ! -f "archeo_sync_dialog.py" ]; then
+if [ ! -f "archeo_sync.py" ]; then
     echo "Error: Please run this script from the plugin root directory"
     exit 1
 fi

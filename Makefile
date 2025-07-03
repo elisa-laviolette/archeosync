@@ -38,13 +38,13 @@ LOCALES =
 # translation
 SOURCES = \
 	__init__.py \
-	archeo_sync.py archeo_sync_dialog.py
+	archeo_sync.py
 
 PLUGINNAME = archeo_sync
 
 PY_FILES = \
 	__init__.py \
-	archeo_sync.py archeo_sync_dialog.py
+	archeo_sync.py
 
 UI_FILES = 
 
@@ -135,15 +135,7 @@ test-qgis: compile transcompile
 	  PYTHONWARNINGS="ignore::DeprecationWarning,ignore::PendingDeprecationWarning" \
 	  /Applications/QGIS-LTR.app/Contents/MacOS/bin/python3 -m pytest test/ -v --tb=short || true
 
-# Test without QGIS dependencies (unit tests only)
-unittest: compile transcompile
-	@echo
-	@echo "----------------------"
-	@echo "Unit Test Suite (No QGIS)"
-	@echo "----------------------"
 
-	@-export PYTHONPATH=`pwd`:$(PYTHONPATH); \
-		python -m pytest test/ -v --tb=short -m "not qgis" || true
 
 # Run all tests (unit tests + QGIS tests)
 test-all: compile transcompile
@@ -158,8 +150,13 @@ test-all: compile transcompile
 	@echo "======================================"
 	@echo
 	@echo "Step 1: Running unit tests (no QGIS dependencies)..."
-	@-export PYTHONPATH=`pwd`:$(PYTHONPATH); \
-		python -m pytest test/ -v --tb=short -m "not qgis" || true
+	@-QGIS_PREFIX_PATH=/Applications/QGIS-LTR.app/Contents/MacOS \
+	  PROJ_LIB=/Applications/QGIS-LTR.app/Contents/Resources/proj \
+	  PYTHONPATH=`pwd`:$(PYTHONPATH) \
+	  QGIS_DEBUG=0 \
+	  QGIS_LOG_FILE=/dev/null \
+	  PYTHONWARNINGS="ignore::DeprecationWarning,ignore::PendingDeprecationWarning" \
+	  /Applications/QGIS-LTR.app/Contents/MacOS/bin/python3 -m pytest test/ -v --tb=short -m "not qgis" || true
 	@echo
 	@echo "Step 2: Running QGIS-dependent tests..."
 	@-QGIS_PREFIX_PATH=/Applications/QGIS-LTR.app/Contents/MacOS \

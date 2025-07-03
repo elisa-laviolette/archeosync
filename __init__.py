@@ -32,5 +32,5 @@ def classFactory(iface):  # pylint: disable=invalid-name
     :type iface: QgsInterface
     """
     #
-    from .archeo_sync import ArcheoSync
-    return ArcheoSync(iface)
+    from .archeo_sync import ArcheoSyncPlugin
+    return ArcheoSyncPlugin(iface)
