@@ -1,34 +1,37 @@
-# -*- coding: utf-8 -*-
-"""
-Tests for service implementations.
+# coding=utf-8
+"""Services tests.
 
-This module contains tests for the service implementations to ensure they
-follow SOLID principles and work correctly.
+.. note:: This program is free software; you can redistribute it and/or modify
+     it under the terms of the GNU General Public License as published by
+     the Free Software Foundation; either version 2 of the License, or
+     (at your option) any later version.
+
 """
+
+__author__ = 'elisa.laviolette@gmail.com'
+__date__ = '2025-07-01'
+__copyright__ = 'Copyright 2025, Elisa Caron-Laviolette'
 
 import unittest
-from unittest.mock import Mock, patch, MagicMock, call
 import tempfile
 import os
-from pathlib import Path
+import shutil
+from unittest.mock import Mock, patch, MagicMock
 
-# Add the parent directory to the path to allow importing the plugin
-import sys
-import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Try to import QGIS modules, skip tests if not available
+try:
+    from qgis.core import QgsProject, QgsVectorLayer
+    from services.settings_service import QGISSettingsManager
+    from services.file_system_service import QGISFileSystemService
+    from services.layer_service import QGISLayerService
+    from services.translation_service import QGISTranslationService
+    from services.configuration_validator import ArcheoSyncConfigurationValidator
+    from core.interfaces import ISettingsManager, IFileSystemService, ILayerService, ITranslationService, IConfigurationValidator
+    QGIS_AVAILABLE = True
+except ImportError:
+    QGIS_AVAILABLE = False
 
-from services import (
-    QGISSettingsManager,
-    QGISFileSystemService,
-    QGISTranslationService,
-    ArcheoSyncConfigurationValidator
-)
-from core.interfaces import (
-    ISettingsManager,
-    IFileSystemService,
-    ITranslationService,
-    IConfigurationValidator
-)
+from .utilities import get_qgis_app
 
 
 class TestQGISSettingsManager(unittest.TestCase):
@@ -228,6 +231,434 @@ class TestQGISFileSystemService(unittest.TestCase):
         self.assertEqual(result, [])
 
 
+class TestQGISLayerService(unittest.TestCase):
+    """Test cases for QGISLayerService."""
+    
+    def setUp(self):
+        """Set up test fixtures."""
+        self.layer_service = QGISLayerService()
+    
+    def test_implements_interface(self):
+        """Test that QGISLayerService implements ILayerService."""
+        self.assertIsInstance(self.layer_service, ILayerService)
+    
+    @patch('services.layer_service.QgsProject')
+    def test_get_polygon_layers_empty_project(self, mock_project):
+        """Test getting polygon layers from empty project."""
+        mock_instance = Mock()
+        mock_instance.mapLayers.return_value = {}
+        mock_project.instance.return_value = mock_instance
+        
+        polygon_layers = self.layer_service.get_polygon_layers()
+        
+        self.assertIsInstance(polygon_layers, list)
+        self.assertEqual(len(polygon_layers), 0)
+    
+    @patch('services.layer_service.QgsProject')
+    def test_get_polygon_layers_with_polygon_layer(self, mock_project):
+        """Test getting polygon layers with polygon layer."""
+        # Create mock polygon layer
+        mock_layer = Mock(spec=QgsVectorLayer)
+        mock_layer.geometryType.return_value = 3  # PolygonGeometry
+        mock_layer.id.return_value = "test_layer_id"
+        mock_layer.name.return_value = "Test Polygon Layer"
+        mock_layer.source.return_value = "/path/to/test.shp"
+        mock_layer.crs.return_value.authid.return_value = "EPSG:4326"
+        mock_layer.featureCount.return_value = 10
+        
+        mock_instance = Mock()
+        mock_instance.mapLayers.return_value = {"test_layer_id": mock_layer}
+        mock_project.instance.return_value = mock_instance
+        
+        polygon_layers = self.layer_service.get_polygon_layers()
+        
+        self.assertEqual(len(polygon_layers), 1)
+        layer_info = polygon_layers[0]
+        self.assertEqual(layer_info['id'], "test_layer_id")
+        self.assertEqual(layer_info['name'], "Test Polygon Layer")
+        self.assertEqual(layer_info['source'], "/path/to/test.shp")
+        self.assertEqual(layer_info['crs'], "EPSG:4326")
+        self.assertEqual(layer_info['feature_count'], 10)
+    
+    @patch('services.layer_service.QgsProject')
+    def test_get_polygon_layers_filters_non_polygon(self, mock_project):
+        """Test that only polygon layers are returned."""
+        # Create mock non-polygon layer
+        mock_non_polygon_layer = Mock(spec=QgsVectorLayer)
+        mock_non_polygon_layer.geometryType.return_value = 1  # LineGeometry
+        
+        # Create mock polygon layer
+        mock_polygon_layer = Mock(spec=QgsVectorLayer)
+        mock_polygon_layer.geometryType.return_value = 3  # PolygonGeometry
+        mock_polygon_layer.id.return_value = "polygon_layer_id"
+        mock_polygon_layer.name.return_value = "Polygon Layer"
+        mock_polygon_layer.source.return_value = "/path/to/polygon.shp"
+        mock_polygon_layer.crs.return_value.authid.return_value = "EPSG:4326"
+        mock_polygon_layer.featureCount.return_value = 5
+        
+        mock_instance = Mock()
+        mock_instance.mapLayers.return_value = {
+            "line_layer_id": mock_non_polygon_layer,
+            "polygon_layer_id": mock_polygon_layer
+        }
+        mock_project.instance.return_value = mock_instance
+        
+        polygon_layers = self.layer_service.get_polygon_layers()
+        
+        self.assertEqual(len(polygon_layers), 1)
+        self.assertEqual(polygon_layers[0]['id'], "polygon_layer_id")
+    
+    @patch('services.layer_service.QgsProject')
+    def test_get_layer_by_id_not_found(self, mock_project):
+        """Test getting layer by ID when not found."""
+        mock_instance = Mock()
+        mock_instance.mapLayer.return_value = None
+        mock_project.instance.return_value = mock_instance
+        
+        layer = self.layer_service.get_layer_by_id("non_existent_id")
+        self.assertIsNone(layer)
+    
+    @patch('services.layer_service.QgsProject')
+    def test_get_layer_by_id_found(self, mock_project):
+        """Test getting layer by ID when found."""
+        mock_layer = Mock(spec=QgsVectorLayer)
+        mock_layer.geometryType.return_value = 3  # PolygonGeometry
+        
+        mock_instance = Mock()
+        mock_instance.mapLayer.return_value = mock_layer
+        mock_project.instance.return_value = mock_instance
+        
+        layer = self.layer_service.get_layer_by_id("test_layer_id")
+        self.assertEqual(layer, mock_layer)
+    
+    @patch('services.layer_service.QgsProject')
+    def test_get_layer_by_id_wrong_type(self, mock_project):
+        """Test getting layer by ID when layer exists but is wrong type."""
+        mock_non_vector_layer = Mock()
+        
+        mock_instance = Mock()
+        mock_instance.mapLayer.return_value = mock_non_vector_layer
+        mock_project.instance.return_value = mock_instance
+        
+        layer = self.layer_service.get_layer_by_id("test_layer_id")
+        self.assertIsNone(layer)
+    
+    @patch.object(QGISLayerService, 'get_layer_by_id')
+    def test_is_valid_polygon_layer_valid(self, mock_get_layer):
+        """Test checking if layer is valid polygon layer."""
+        mock_layer = Mock(spec=QgsVectorLayer)
+        mock_layer.geometryType.return_value = 3  # PolygonGeometry
+        mock_get_layer.return_value = mock_layer
+        
+        is_valid = self.layer_service.is_valid_polygon_layer("test_layer_id")
+        self.assertTrue(is_valid)
+    
+    @patch.object(QGISLayerService, 'get_layer_by_id')
+    def test_is_valid_polygon_layer_invalid_geometry(self, mock_get_layer):
+        """Test checking if layer is valid polygon layer with wrong geometry."""
+        mock_layer = Mock(spec=QgsVectorLayer)
+        mock_layer.geometryType.return_value = 1  # LineGeometry
+        mock_get_layer.return_value = mock_layer
+        
+        is_valid = self.layer_service.is_valid_polygon_layer("test_layer_id")
+        self.assertFalse(is_valid)
+    
+    @patch.object(QGISLayerService, 'get_layer_by_id')
+    def test_is_valid_polygon_layer_not_found(self, mock_get_layer):
+        """Test checking if layer is valid polygon layer when not found."""
+        mock_get_layer.return_value = None
+        
+        is_valid = self.layer_service.is_valid_polygon_layer("test_layer_id")
+        self.assertFalse(is_valid)
+    
+    @patch.object(QGISLayerService, 'get_layer_by_id')
+    def test_get_layer_info_not_found(self, mock_get_layer):
+        """Test getting layer info when layer not found."""
+        mock_get_layer.return_value = None
+        
+        layer_info = self.layer_service.get_layer_info("test_layer_id")
+        self.assertIsNone(layer_info)
+    
+    @patch.object(QGISLayerService, 'get_layer_by_id')
+    def test_get_layer_info_found(self, mock_get_layer):
+        """Test getting layer info when layer found."""
+        mock_layer = Mock()
+        mock_layer.id = Mock(return_value="test_layer_id")
+        mock_layer.name = Mock(return_value="Test Layer")
+        mock_layer.source = Mock(return_value="/path/to/test.shp")
+        mock_layer.crs = Mock()
+        mock_layer.crs().authid = Mock(return_value="EPSG:4326")
+        mock_layer.featureCount = Mock(return_value=15)
+        mock_layer.isValid = Mock(return_value=True)
+        
+        mock_get_layer.return_value = mock_layer
+        
+        layer_info = self.layer_service.get_layer_info("test_layer_id")
+        
+        self.assertIsNotNone(layer_info)
+        self.assertEqual(layer_info['id'], "test_layer_id")
+        self.assertEqual(layer_info['name'], "Test Layer")
+        self.assertEqual(layer_info['source'], "/path/to/test.shp")
+        self.assertEqual(layer_info['crs'], "EPSG:4326")
+        self.assertEqual(layer_info['feature_count'], 15)
+        self.assertEqual(layer_info['geometry_type'], "Polygon")
+        self.assertTrue(layer_info['is_valid'])
+
+    @patch('services.layer_service.QgsProject')
+    @patch('services.layer_service.isinstance')
+    def test_get_polygon_layers(self, mock_isinstance, mock_qgs_project):
+        """Test getting polygon layers from the service."""
+        # Mock QGIS project and layers
+        mock_layer1 = Mock()
+        mock_layer1.id.return_value = "layer1"
+        mock_layer1.name.return_value = "Test Layer 1"
+        mock_layer1.source.return_value = "/path/to/layer1.shp"
+        mock_layer1.crs.return_value = Mock()
+        mock_layer1.crs().authid.return_value = "EPSG:4326"
+        mock_layer1.featureCount.return_value = 10
+        mock_layer1.geometryType.return_value = 2  # Polygon/MultiPolygon
+        
+        mock_layer2 = Mock()
+        mock_layer2.id.return_value = "layer2"
+        mock_layer2.name.return_value = "Test Layer 2"
+        mock_layer2.source.return_value = "/path/to/layer2.shp"
+        mock_layer2.crs.return_value = Mock()
+        mock_layer2.crs().authid.return_value = "EPSG:4326"
+        mock_layer2.featureCount.return_value = 5
+        mock_layer2.geometryType.return_value = 3  # Polygon
+        
+        # Mock isinstance to return True for our mock layers
+        def mock_isinstance_func(obj, cls):
+            return obj in [mock_layer1, mock_layer2]
+        mock_isinstance.side_effect = mock_isinstance_func
+        
+        mock_project = Mock()
+        mock_project.mapLayers.return_value = {
+            "layer1": mock_layer1,
+            "layer2": mock_layer2
+        }
+        
+        mock_qgs_project.instance.return_value = mock_project
+        
+        layer_service = QGISLayerService()
+        polygon_layers = layer_service.get_polygon_layers()
+        
+        self.assertEqual(len(polygon_layers), 2)
+        self.assertEqual(polygon_layers[0]['id'], "layer1")
+        self.assertEqual(polygon_layers[0]['name'], "Test Layer 1")
+        self.assertEqual(polygon_layers[0]['feature_count'], 10)
+        self.assertEqual(polygon_layers[1]['id'], "layer2")
+        self.assertEqual(polygon_layers[1]['name'], "Test Layer 2")
+        self.assertEqual(polygon_layers[1]['feature_count'], 5)
+    
+    @patch('services.layer_service.QgsProject')
+    @patch('services.layer_service.isinstance')
+    def test_get_polygon_and_multipolygon_layers(self, mock_isinstance, mock_qgs_project):
+        """Test getting polygon and multipolygon layers from the service."""
+        # Mock QGIS project and layers
+        mock_layer1 = Mock()
+        mock_layer1.id.return_value = "layer1"
+        mock_layer1.name.return_value = "Test Layer 1"
+        mock_layer1.source.return_value = "/path/to/layer1.shp"
+        mock_layer1.crs.return_value = Mock()
+        mock_layer1.crs().authid.return_value = "EPSG:4326"
+        mock_layer1.featureCount.return_value = 10
+        mock_layer1.geometryType.return_value = 2  # Polygon/MultiPolygon
+        
+        mock_layer2 = Mock()
+        mock_layer2.id.return_value = "layer2"
+        mock_layer2.name.return_value = "Test Layer 2"
+        mock_layer2.source.return_value = "/path/to/layer2.shp"
+        mock_layer2.crs.return_value = Mock()
+        mock_layer2.crs().authid.return_value = "EPSG:4326"
+        mock_layer2.featureCount.return_value = 5
+        mock_layer2.geometryType.return_value = 3  # Polygon
+        
+        # Mock isinstance to return True for our mock layers
+        def mock_isinstance_func(obj, cls):
+            return obj in [mock_layer1, mock_layer2]
+        mock_isinstance.side_effect = mock_isinstance_func
+        
+        mock_project = Mock()
+        mock_project.mapLayers.return_value = {
+            "layer1": mock_layer1,
+            "layer2": mock_layer2
+        }
+        
+        mock_qgs_project.instance.return_value = mock_project
+        
+        layer_service = QGISLayerService()
+        layers = layer_service.get_polygon_and_multipolygon_layers()
+        
+        self.assertEqual(len(layers), 2)
+        self.assertEqual(layers[0]['id'], "layer1")
+        self.assertEqual(layers[0]['name'], "Test Layer 1")
+        self.assertEqual(layers[0]['feature_count'], 10)
+        self.assertEqual(layers[1]['id'], "layer2")
+        self.assertEqual(layers[1]['name'], "Test Layer 2")
+        self.assertEqual(layers[1]['feature_count'], 5)
+    
+    def test_is_valid_polygon_or_multipolygon_layer(self):
+        """Test validation of polygon or multipolygon layers."""
+        # Mock layer service
+        mock_layer = Mock()
+        mock_layer.geometryType.return_value = 2  # Polygon/MultiPolygon
+        
+        with patch.object(self.layer_service, 'get_layer_by_id', return_value=mock_layer):
+            result = self.layer_service.is_valid_polygon_or_multipolygon_layer("test_layer")
+            self.assertTrue(result)
+        
+        # Test with polygon geometry
+        mock_layer.geometryType.return_value = 3  # Polygon
+        with patch.object(self.layer_service, 'get_layer_by_id', return_value=mock_layer):
+            result = self.layer_service.is_valid_polygon_or_multipolygon_layer("test_layer")
+            self.assertTrue(result)
+        
+        # Test with invalid geometry
+        mock_layer.geometryType.return_value = 1  # Line
+        with patch.object(self.layer_service, 'get_layer_by_id', return_value=mock_layer):
+            result = self.layer_service.is_valid_polygon_or_multipolygon_layer("test_layer")
+            self.assertFalse(result)
+        
+        # Test with non-existent layer
+        with patch.object(self.layer_service, 'get_layer_by_id', return_value=None):
+            result = self.layer_service.is_valid_polygon_or_multipolygon_layer("non_existent")
+            self.assertFalse(result)
+
+    def test_get_layer_fields_success(self):
+        """Test successful retrieval of layer fields."""
+        # Create mock layer with fields
+        mock_layer = MagicMock()
+        mock_field1 = MagicMock()
+        mock_field1.name.return_value = "id"
+        mock_field1.typeName.return_value = "Integer"
+        mock_field1.type.return_value = 2  # QGIS integer type
+        mock_field1.comment.return_value = "Primary key"
+        mock_field1.isNumeric.return_value = True
+        
+        mock_field2 = MagicMock()
+        mock_field2.name.return_value = "name"
+        mock_field2.typeName.return_value = "String"
+        mock_field2.type.return_value = 10  # QGIS string type
+        mock_field2.comment.return_value = "Feature name"
+        mock_field2.isNumeric.return_value = False
+        
+        mock_layer.fields.return_value = [mock_field1, mock_field2]
+        mock_layer.id.return_value = "test_layer_id"
+        
+        # Mock the layer service to return the layer when get_layer_by_id is called
+        self.layer_service.get_layer_by_id = MagicMock(return_value=mock_layer)
+        
+        # Test field retrieval
+        fields = self.layer_service.get_layer_fields("test_layer_id")
+        
+        # Verify results
+        self.assertIsNotNone(fields)
+        self.assertEqual(len(fields), 2)
+        
+        # Check first field (integer)
+        self.assertEqual(fields[0]['name'], "id")
+        self.assertEqual(fields[0]['type'], "Integer")
+        self.assertEqual(fields[0]['type_id'], 2)
+        self.assertEqual(fields[0]['comment'], "Primary key")
+        self.assertTrue(fields[0]['is_numeric'])
+        self.assertTrue(fields[0]['is_integer'])
+        
+        # Check second field (string)
+        self.assertEqual(fields[1]['name'], "name")
+        self.assertEqual(fields[1]['type'], "String")
+        self.assertEqual(fields[1]['type_id'], 10)
+        self.assertEqual(fields[1]['comment'], "Feature name")
+        self.assertFalse(fields[1]['is_numeric'])
+        self.assertFalse(fields[1]['is_integer'])
+    
+    def test_get_layer_fields_integer_vs_real_types(self):
+        """Test that Real type fields are not marked as integer fields."""
+        # Create mock layer with integer and real fields
+        mock_layer = MagicMock()
+        
+        # Integer field
+        mock_integer_field = MagicMock()
+        mock_integer_field.name.return_value = "integer_field"
+        mock_integer_field.typeName.return_value = "Integer"
+        mock_integer_field.type.return_value = 2  # QGIS integer type
+        mock_integer_field.comment.return_value = "Integer field"
+        mock_integer_field.isNumeric.return_value = True
+        
+        # Real (float) field
+        mock_real_field = MagicMock()
+        mock_real_field.name.return_value = "real_field"
+        mock_real_field.typeName.return_value = "Real"
+        mock_real_field.type.return_value = 6  # QGIS real type
+        mock_real_field.comment.return_value = "Real field"
+        mock_real_field.isNumeric.return_value = True
+        
+        # String field
+        mock_string_field = MagicMock()
+        mock_string_field.name.return_value = "string_field"
+        mock_string_field.typeName.return_value = "String"
+        mock_string_field.type.return_value = 10  # QGIS string type
+        mock_string_field.comment.return_value = "String field"
+        mock_string_field.isNumeric.return_value = False
+        
+        mock_layer.fields.return_value = [mock_integer_field, mock_real_field, mock_string_field]
+        mock_layer.id.return_value = "test_layer_id"
+        
+        # Mock the layer service to return the layer when get_layer_by_id is called
+        self.layer_service.get_layer_by_id = MagicMock(return_value=mock_layer)
+        
+        # Test field retrieval
+        fields = self.layer_service.get_layer_fields("test_layer_id")
+        
+        # Verify results
+        self.assertIsNotNone(fields)
+        self.assertEqual(len(fields), 3)
+        
+        # Check integer field
+        integer_field = next(f for f in fields if f['name'] == 'integer_field')
+        self.assertTrue(integer_field['is_integer'])
+        self.assertTrue(integer_field['is_numeric'])
+        
+        # Check real field - should NOT be marked as integer
+        real_field = next(f for f in fields if f['name'] == 'real_field')
+        self.assertFalse(real_field['is_integer'])
+        self.assertTrue(real_field['is_numeric'])
+        
+        # Check string field
+        string_field = next(f for f in fields if f['name'] == 'string_field')
+        self.assertFalse(string_field['is_integer'])
+        self.assertFalse(string_field['is_numeric'])
+    
+    def test_get_layer_fields_layer_not_found(self):
+        """Test field retrieval when layer is not found."""
+        # Mock the layer service with no layers
+        self.layer_service._qgis_interface = MagicMock()
+        self.layer_service._qgis_interface.mapCanvas.return_value.layers.return_value = []
+        
+        # Test field retrieval
+        fields = self.layer_service.get_layer_fields("nonexistent_layer_id")
+        
+        # Verify result
+        self.assertIsNone(fields)
+    
+    def test_get_layer_fields_empty_fields(self):
+        """Test field retrieval when layer has no fields."""
+        # Create mock layer with no fields
+        mock_layer = MagicMock()
+        mock_layer.fields.return_value = []
+        mock_layer.id.return_value = "test_layer_id"
+        
+        # Mock the layer service to return the layer when get_layer_by_id is called
+        self.layer_service.get_layer_by_id = MagicMock(return_value=mock_layer)
+        
+        # Test field retrieval
+        fields = self.layer_service.get_layer_fields("test_layer_id")
+        
+        # Verify results
+        self.assertIsNotNone(fields)
+        self.assertEqual(len(fields), 0)
+
+
 class TestQGISTranslationService(unittest.TestCase):
     """Test cases for QGISTranslationService."""
     
@@ -316,17 +747,9 @@ class TestArcheoSyncConfigurationValidator(unittest.TestCase):
     
     def setUp(self):
         """Set up test fixtures."""
-        # Create a more complete mock that includes all methods
         self.file_system_service = Mock()
-        # Add the methods that the validator uses
-        self.file_system_service.path_exists = Mock()
-        self.file_system_service.is_directory = Mock()
-        self.file_system_service.is_file = Mock()
-        self.file_system_service.list_files = Mock()
-        self.file_system_service.create_directory = Mock()
-        self.file_system_service.select_directory = Mock()
-        
-        self.validator = ArcheoSyncConfigurationValidator(self.file_system_service)
+        self.layer_service = Mock()
+        self.validator = ArcheoSyncConfigurationValidator(self.file_system_service, self.layer_service)
         
         # Create temporary directory for testing
         self.temp_dir = tempfile.mkdtemp()
@@ -345,49 +768,44 @@ class TestArcheoSyncConfigurationValidator(unittest.TestCase):
     
     def test_validate_field_projects_folder_empty_path(self):
         """Test validation of empty field projects folder path."""
-        errors = self.validator.validate_field_projects_folder("")
+        errors = self.validator.validate_field_projects_folder('')
         self.assertEqual(len(errors), 1)
-        self.assertIn("required", errors[0])
+        self.assertIn('Field projects folder path is required', errors[0])
     
     def test_validate_field_projects_folder_nonexistent(self):
-        """Test validation of nonexistent field projects folder."""
+        """Test validation of non-existent field projects folder path."""
         self.file_system_service.path_exists.return_value = False
         
-        errors = self.validator.validate_field_projects_folder("/nonexistent/path")
-        
+        errors = self.validator.validate_field_projects_folder('/nonexistent/path')
         self.assertEqual(len(errors), 1)
-        self.assertIn("does not exist", errors[0])
+        self.assertIn('Field projects folder does not exist', errors[0])
     
     def test_validate_field_projects_folder_not_directory(self):
-        """Test validation of field projects folder that is not a directory."""
+        """Test validation of field projects folder path that is not a directory."""
         self.file_system_service.path_exists.return_value = True
         self.file_system_service.is_directory.return_value = False
         
-        errors = self.validator.validate_field_projects_folder("/path/to/file")
-        
+        errors = self.validator.validate_field_projects_folder('/path/to/file')
         self.assertEqual(len(errors), 1)
-        self.assertIn("not a directory", errors[0])
+        self.assertIn('Field projects path is not a directory', errors[0])
     
     def test_validate_field_projects_folder_not_writable(self):
         """Test validation of field projects folder that is not writable."""
         self.file_system_service.path_exists.return_value = True
         self.file_system_service.is_directory.return_value = True
         
-        # Mock Path to raise PermissionError on touch()
-        with patch('services.configuration_validator.Path') as mock_path_class:
-            # Create a mock instance that behaves like Path
+        # Mock Path to raise PermissionError
+        with patch('services.configuration_validator.Path') as mock_path:
             mock_path_instance = Mock()
-            mock_path_instance.__truediv__ = Mock(return_value=mock_path_instance)
-            mock_path_instance.touch = Mock(side_effect=PermissionError())
-            mock_path_instance.unlink = Mock()
-            mock_path_class.return_value = mock_path_instance
+            mock_file = Mock()
+            mock_file.touch.side_effect = PermissionError()
+            # Set up the chain: Path() -> __truediv__() -> touch()
+            mock_path_instance.__truediv__ = Mock(return_value=mock_file)
+            mock_path.return_value = mock_path_instance
             
-            # Use a real path string
-            test_path = "/test/path"
-            errors = self.validator.validate_field_projects_folder(test_path)
-            
+            errors = self.validator.validate_field_projects_folder('/readonly/path')
             self.assertEqual(len(errors), 1)
-            self.assertIn("not writable", errors[0])
+            self.assertIn('Field projects folder is not writable', errors[0])
     
     def test_validate_total_station_folder_no_csv_files(self):
         """Test validation of total station folder with no CSV files."""
@@ -395,10 +813,9 @@ class TestArcheoSyncConfigurationValidator(unittest.TestCase):
         self.file_system_service.is_directory.return_value = True
         self.file_system_service.list_files.return_value = []
         
-        errors = self.validator.validate_total_station_folder(self.temp_dir)
-        
+        errors = self.validator.validate_total_station_folder('/path/to/folder')
         self.assertEqual(len(errors), 1)
-        self.assertIn("No CSV files found", errors[0])
+        self.assertIn('No CSV files found in total station folder', errors[0])
     
     def test_validate_template_project_folder_no_qgis_files(self):
         """Test validation of template project folder with no QGIS files."""
@@ -406,71 +823,366 @@ class TestArcheoSyncConfigurationValidator(unittest.TestCase):
         self.file_system_service.is_directory.return_value = True
         self.file_system_service.list_files.return_value = []
         
-        errors = self.validator.validate_template_project_folder(self.temp_dir)
-        
+        errors = self.validator.validate_template_project_folder('/path/to/folder')
         self.assertEqual(len(errors), 1)
-        self.assertIn("No QGIS project files", errors[0])
+        self.assertIn('No QGIS project files (.qgz or .qgs) found in template folder', errors[0])
+    
+    def test_validate_recording_areas_layer_empty_layer_id(self):
+        """Test validation of empty recording areas layer ID."""
+        errors = self.validator.validate_recording_areas_layer('')
+        self.assertEqual(len(errors), 0)  # Empty layer ID is optional
+    
+    def test_validate_recording_areas_layer_nonexistent_layer(self):
+        """Test validation of non-existent recording areas layer."""
+        self.layer_service.is_valid_polygon_layer.return_value = False
+        
+        errors = self.validator.validate_recording_areas_layer('non_existent_layer_id')
+        self.assertEqual(len(errors), 1)
+        self.assertIn('Selected layer is not a valid polygon layer', errors[0])
+    
+    def test_validate_recording_areas_layer_invalid_layer(self):
+        """Test validation of invalid recording areas layer."""
+        self.layer_service.is_valid_polygon_layer.return_value = True
+        self.layer_service.get_layer_info.return_value = {
+            'id': 'test_layer',
+            'name': 'Test Layer',
+            'is_valid': False
+        }
+        
+        errors = self.validator.validate_recording_areas_layer('test_layer')
+        self.assertEqual(len(errors), 1)
+        self.assertIn('Selected layer is not valid', errors[0])
+    
+    def test_validate_recording_areas_layer_layer_not_found(self):
+        """Test validation of recording areas layer that doesn't exist."""
+        self.layer_service.is_valid_polygon_layer.return_value = True
+        self.layer_service.get_layer_info.return_value = None
+        
+        errors = self.validator.validate_recording_areas_layer('test_layer')
+        self.assertEqual(len(errors), 1)
+        self.assertIn('Layer not found in current project', errors[0])
+    
+    def test_validate_objects_layer_empty_layer_id(self):
+        """Test validation of empty objects layer ID."""
+        errors = self.validator.validate_objects_layer('')
+        self.assertEqual(len(errors), 1)  # Empty layer ID is now mandatory
+        self.assertIn('Objects layer is required', errors[0])
+    
+    def test_validate_objects_layer_nonexistent_layer(self):
+        """Test validation of non-existent objects layer."""
+        self.layer_service.is_valid_polygon_or_multipolygon_layer.return_value = False
+        
+        errors = self.validator.validate_objects_layer('non_existent_layer_id')
+        self.assertEqual(len(errors), 1)
+        self.assertIn('Selected layer is not a valid polygon or multipolygon layer', errors[0])
+    
+    def test_validate_objects_layer_invalid_layer(self):
+        """Test validation of invalid objects layer."""
+        self.layer_service.is_valid_polygon_or_multipolygon_layer.return_value = True
+        self.layer_service.get_layer_info.return_value = {
+            'id': 'test_layer',
+            'name': 'Test Layer',
+            'is_valid': False
+        }
+        
+        errors = self.validator.validate_objects_layer('test_layer')
+        self.assertEqual(len(errors), 1)
+        self.assertIn('Selected layer is not valid', errors[0])
+    
+    def test_validate_objects_layer_layer_not_found(self):
+        """Test validation of objects layer that doesn't exist."""
+        self.layer_service.is_valid_polygon_or_multipolygon_layer.return_value = True
+        self.layer_service.get_layer_info.return_value = None
+        
+        errors = self.validator.validate_objects_layer('test_layer')
+        self.assertEqual(len(errors), 1)
+        self.assertIn('Layer not found in current project', errors[0])
+    
+    def test_validate_features_layer_empty_layer_id(self):
+        """Test validation of empty features layer ID."""
+        errors = self.validator.validate_features_layer('')
+        self.assertEqual(len(errors), 0)  # Empty layer ID is optional
+    
+    def test_validate_features_layer_nonexistent_layer(self):
+        """Test validation of non-existent features layer."""
+        self.layer_service.is_valid_polygon_or_multipolygon_layer.return_value = False
+        
+        errors = self.validator.validate_features_layer('non_existent_layer_id')
+        self.assertEqual(len(errors), 1)
+        self.assertIn('Selected layer is not a valid polygon or multipolygon layer', errors[0])
+    
+    def test_validate_features_layer_invalid_layer(self):
+        """Test validation of invalid features layer."""
+        self.layer_service.is_valid_polygon_or_multipolygon_layer.return_value = True
+        self.layer_service.get_layer_info.return_value = {
+            'id': 'test_layer',
+            'name': 'Test Layer',
+            'is_valid': False
+        }
+        
+        errors = self.validator.validate_features_layer('test_layer')
+        self.assertEqual(len(errors), 1)
+        self.assertIn('Selected layer is not valid', errors[0])
+    
+    def test_validate_features_layer_layer_not_found(self):
+        """Test validation of features layer that doesn't exist."""
+        self.layer_service.is_valid_polygon_or_multipolygon_layer.return_value = True
+        self.layer_service.get_layer_info.return_value = None
+        
+        errors = self.validator.validate_features_layer('test_layer')
+        self.assertEqual(len(errors), 1)
+        self.assertIn('Layer not found in current project', errors[0])
     
     def test_validate_all_settings(self):
         """Test validation of all settings at once."""
-        settings = {
-            'field_projects_folder': '/path/to/field',
-            'total_station_folder': '/path/to/total',
-            'completed_projects_folder': '/path/to/completed',
-            'template_project_folder': '/path/to/template'
-        }
+        # Mock file system service for valid paths
+        self.file_system_service.path_exists.return_value = True
+        self.file_system_service.is_directory.return_value = True
+        self.file_system_service.list_files.return_value = ['test.csv']
         
-        # Mock all validation methods to return errors
-        with patch.object(self.validator, 'validate_field_projects_folder') as mock_field:
-            with patch.object(self.validator, 'validate_total_station_folder') as mock_total:
-                with patch.object(self.validator, 'validate_completed_projects_folder') as mock_completed:
-                    with patch.object(self.validator, 'validate_template_project_folder') as mock_template:
-                        mock_field.return_value = ['Field error']
-                        mock_total.return_value = ['Total error']
-                        mock_completed.return_value = []
-                        mock_template.return_value = ['Template error']
-                        
-                        results = self.validator.validate_all_settings(settings)
-                        
-                        self.assertIn('field_projects_folder', results)
-                        self.assertIn('total_station_folder', results)
-                        self.assertIn('completed_projects_folder', results)
-                        self.assertIn('template_project_folder', results)
-                        
-                        self.assertEqual(len(results['field_projects_folder']), 1)
-                        self.assertEqual(len(results['total_station_folder']), 1)
-                        self.assertEqual(len(results['completed_projects_folder']), 0)
-                        self.assertEqual(len(results['template_project_folder']), 1)
+        # Mock layer service for valid layers
+        self.layer_service.is_valid_polygon_layer.return_value = True
+        self.layer_service.is_valid_polygon_or_multipolygon_layer.return_value = True
+        self.layer_service.get_layer_info.return_value = {
+            'id': 'test_layer',
+            'name': 'Test Layer',
+            'is_valid': True
+        }
+        # Mock layer fields for field validation
+        self.layer_service.get_layer_fields.return_value = [
+            {'name': 'id', 'is_integer': True},
+            {'name': 'number', 'is_integer': True},
+            {'name': 'level', 'is_integer': False}
+        ]
+        
+        # Mock Path operations for writability checks
+        with patch('services.configuration_validator.Path') as mock_path:
+            mock_path_instance = Mock()
+            mock_test_file = Mock()
+            mock_test_file.touch.return_value = None
+            mock_test_file.unlink.return_value = None
+            mock_path_instance.__truediv__ = Mock(return_value=mock_test_file)
+            mock_path_instance.iterdir.return_value = []
+            mock_path.return_value = mock_path_instance
+            
+            # Test with QField disabled (template folder required)
+            settings_without_qfield = {
+                'field_projects_folder': '/valid/path',
+                'total_station_folder': '/valid/path',
+                'completed_projects_folder': '/valid/path',
+                'template_project_folder': '/valid/path',
+                'recording_areas_layer': 'test_layer',
+                'objects_layer': 'test_layer',
+                'features_layer': 'test_layer',
+                'use_qfield': False
+            }
+            
+            results = self.validator.validate_all_settings(settings_without_qfield)
+            
+            self.assertIn('field_projects_folder', results)
+            self.assertIn('total_station_folder', results)
+            self.assertIn('completed_projects_folder', results)
+            self.assertIn('template_project_folder', results)
+            self.assertIn('recording_areas_layer', results)
+            self.assertIn('objects_layer', results)
+            self.assertIn('features_layer', results)
+            
+            # All validations should pass
+            for field_errors in results.values():
+                self.assertEqual(len(field_errors), 0)
+            
+            # Test with QField enabled (template folder not required)
+            settings_with_qfield = {
+                'field_projects_folder': '/valid/path',
+                'total_station_folder': '/valid/path',
+                'completed_projects_folder': '/valid/path',
+                'template_project_folder': '',  # Empty when QField is used
+                'recording_areas_layer': 'test_layer',
+                'objects_layer': 'test_layer',
+                'features_layer': 'test_layer',
+                'use_qfield': True
+            }
+            
+            results = self.validator.validate_all_settings(settings_with_qfield)
+            
+            self.assertIn('field_projects_folder', results)
+            self.assertIn('total_station_folder', results)
+            self.assertIn('completed_projects_folder', results)
+            self.assertIn('template_project_folder', results)
+            self.assertIn('recording_areas_layer', results)
+            self.assertIn('objects_layer', results)
+            self.assertIn('features_layer', results)
+            
+            # All validations should pass, including empty template folder when QField is used
+            for field_errors in results.values():
+                self.assertEqual(len(field_errors), 0)
     
     def test_has_validation_errors(self):
-        """Test checking for validation errors."""
-        # Test with errors
-        validation_results = {
-            'field_projects_folder': ['Error 1'],
-            'total_station_folder': []
-        }
-        self.assertTrue(self.validator.has_validation_errors(validation_results))
-        
-        # Test without errors
-        validation_results = {
+        """Test checking if validation results contain errors."""
+        # Test with no errors
+        results_no_errors = {
             'field_projects_folder': [],
             'total_station_folder': []
         }
-        self.assertFalse(self.validator.has_validation_errors(validation_results))
+        self.assertFalse(self.validator.has_validation_errors(results_no_errors))
+        
+        # Test with errors
+        results_with_errors = {
+            'field_projects_folder': ['Path is required'],
+            'total_station_folder': []
+        }
+        self.assertTrue(self.validator.has_validation_errors(results_with_errors))
     
     def test_get_all_errors(self):
-        """Test getting all errors as a flat list."""
-        validation_results = {
-            'field_projects_folder': ['Field error 1', 'Field error 2'],
-            'total_station_folder': ['Total error 1']
+        """Test getting all error messages from validation results."""
+        results = {
+            'field_projects_folder': ['Path is required'],
+            'total_station_folder': ['Path does not exist', 'Path is not readable']
         }
         
-        all_errors = self.validator.get_all_errors(validation_results)
-        
+        all_errors = self.validator.get_all_errors(results)
+        self.assertIsInstance(all_errors, list)
         self.assertEqual(len(all_errors), 3)
-        self.assertIn('field_projects_folder: Field error 1', all_errors)
-        self.assertIn('field_projects_folder: Field error 2', all_errors)
-        self.assertIn('total_station_folder: Total error 1', all_errors)
+        self.assertTrue(any('field_projects_folder: Path is required' in error for error in all_errors))
+        self.assertTrue(any('total_station_folder: Path does not exist' in error for error in all_errors))
+        self.assertTrue(any('total_station_folder: Path is not readable' in error for error in all_errors))
+
+    def test_validate_template_project_folder_conditional_on_qfield(self):
+        """Test that template project folder validation is conditional on QField setting."""
+        # Mock file system service
+        self.file_system_service.path_exists.return_value = True
+        self.file_system_service.is_directory.return_value = True
+        self.file_system_service.list_files.return_value = ['test.qgz']
+        
+        # Test with QField disabled - template folder should be required
+        settings_without_qfield = {
+            'template_project_folder': '',
+            'use_qfield': False
+        }
+        
+        results = self.validator.validate_all_settings(settings_without_qfield)
+        self.assertIn('template_project_folder', results)
+        self.assertGreater(len(results['template_project_folder']), 0)
+        self.assertIn('Template project folder path is required', results['template_project_folder'][0])
+        
+        # Test with QField enabled - template folder should not be required
+        settings_with_qfield = {
+            'template_project_folder': '',
+            'use_qfield': True
+        }
+        
+        results = self.validator.validate_all_settings(settings_with_qfield)
+        self.assertIn('template_project_folder', results)
+        self.assertEqual(len(results['template_project_folder']), 0)
+
+    def test_validate_objects_layer_fields_no_layer_selected(self):
+        """Test field validation when no layer is selected."""
+        result = self.validator.validate_objects_layer_fields("", "number_field", "level_field")
+        
+        self.assertTrue(result.is_valid)
+        self.assertEqual(result.message, "No layer selected, field validation skipped")
+    
+    def test_validate_objects_layer_fields_layer_not_found(self):
+        """Test field validation when layer is not found."""
+        # Mock layer service to return None for fields
+        self.validator._layer_service.get_layer_fields.return_value = None
+        
+        result = self.validator.validate_objects_layer_fields("test_layer_id", "number_field", "level_field")
+        
+        self.assertFalse(result.is_valid)
+        self.assertIn("Could not retrieve fields for layer test_layer_id", result.message)
+    
+    def test_validate_objects_layer_fields_valid_selections(self):
+        """Test field validation with valid field selections."""
+        # Mock fields data
+        fields = [
+            {'name': 'id', 'is_integer': True},
+            {'name': 'number', 'is_integer': True},
+            {'name': 'level', 'is_integer': False},
+            {'name': 'name', 'is_integer': False}
+        ]
+        self.validator._layer_service.get_layer_fields.return_value = fields
+        
+        result = self.validator.validate_objects_layer_fields("test_layer_id", "number", "level")
+        
+        self.assertTrue(result.is_valid)
+        self.assertEqual(result.message, "Field validation successful")
+    
+    def test_validate_objects_layer_fields_number_field_not_found(self):
+        """Test field validation when number field is not found."""
+        # Mock fields data
+        fields = [
+            {'name': 'id', 'is_integer': True},
+            {'name': 'level', 'is_integer': False}
+        ]
+        self.validator._layer_service.get_layer_fields.return_value = fields
+        
+        result = self.validator.validate_objects_layer_fields("test_layer_id", "nonexistent_number", "level")
+        
+        self.assertFalse(result.is_valid)
+        self.assertIn("Number field 'nonexistent_number' not found in layer", result.message)
+    
+    def test_validate_objects_layer_fields_number_field_not_integer(self):
+        """Test field validation when number field is not an integer."""
+        # Mock fields data
+        fields = [
+            {'name': 'id', 'is_integer': True},
+            {'name': 'number', 'is_integer': False},  # Not an integer field
+            {'name': 'level', 'is_integer': False}
+        ]
+        self.validator._layer_service.get_layer_fields.return_value = fields
+        
+        result = self.validator.validate_objects_layer_fields("test_layer_id", "number", "level")
+        
+        self.assertFalse(result.is_valid)
+        self.assertIn("Number field 'number' must be an integer field", result.message)
+    
+    def test_validate_objects_layer_fields_level_field_not_found(self):
+        """Test field validation when level field is not found."""
+        # Mock fields data
+        fields = [
+            {'name': 'id', 'is_integer': True},
+            {'name': 'number', 'is_integer': True}
+        ]
+        self.validator._layer_service.get_layer_fields.return_value = fields
+        
+        result = self.validator.validate_objects_layer_fields("test_layer_id", "number", "nonexistent_level")
+        
+        self.assertFalse(result.is_valid)
+        self.assertIn("Level field 'nonexistent_level' not found in layer", result.message)
+    
+    def test_validate_objects_layer_fields_optional_fields_not_selected(self):
+        """Test field validation when optional fields are not selected."""
+        # Mock fields data
+        fields = [
+            {'name': 'id', 'is_integer': True},
+            {'name': 'number', 'is_integer': True},
+            {'name': 'level', 'is_integer': False}
+        ]
+        self.validator._layer_service.get_layer_fields.return_value = fields
+        
+        result = self.validator.validate_objects_layer_fields("test_layer_id", None, None)
+        
+        self.assertTrue(result.is_valid)
+        self.assertEqual(result.message, "Field validation successful")
+    
+    def test_validate_objects_layer_fields_partial_selection(self):
+        """Test field validation when only one field is selected."""
+        # Mock fields data
+        fields = [
+            {'name': 'id', 'is_integer': True},
+            {'name': 'number', 'is_integer': True},
+            {'name': 'level', 'is_integer': False}
+        ]
+        self.validator._layer_service.get_layer_fields.return_value = fields
+        
+        # Test with only number field selected
+        result = self.validator.validate_objects_layer_fields("test_layer_id", "number", None)
+        self.assertTrue(result.is_valid)
+        
+        # Test with only level field selected
+        result = self.validator.validate_objects_layer_fields("test_layer_id", None, "level")
+        self.assertTrue(result.is_valid)
 
 
 if __name__ == '__main__':

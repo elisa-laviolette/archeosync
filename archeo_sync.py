@@ -35,47 +35,39 @@ from .services import (
     QGISSettingsManager,
     QGISFileSystemService,
     QGISTranslationService,
-    ArcheoSyncConfigurationValidator
+    ArcheoSyncConfigurationValidator,
+    QGISLayerService
 )
 
 
 class ArcheoSyncPlugin:
     """
-    Main plugin class for ArcheoSync.
+    ArcheoSync QGIS Plugin.
     
-    This class follows the Single Responsibility Principle by focusing only on
-    plugin lifecycle management and delegating specific responsibilities to
-    specialized services. The plugin demonstrates clean architecture principles
-    through dependency injection and interface-based design.
+    This plugin provides functionality for archaeologists to prepare data for field work
+    and import it back into the project. It follows clean architecture principles with
+    dependency injection and separation of concerns.
     
     Key Features:
-    - Dependency Injection: All services are injected through the constructor
-    - Interface Segregation: Dependencies on specific interfaces, not concrete classes
-    - Single Responsibility: Plugin class focuses only on QGIS integration
-    - Open/Closed: Easy to extend with new services without modifying existing code
-    - Liskov Substitution: Any implementation of an interface can be used
+    - Field project preparation from templates
+    - Total station data import from CSV files
+    - Completed project import and processing
+    - QField integration for mobile data collection
+    - Recording areas layer selection from QGIS project
     
     Architecture:
-        ArcheoSyncPlugin
-        ├── ISettingsManager (injected)
-        ├── IFileSystemService (injected)
-        ├── ITranslationService (injected)
-        └── IConfigurationValidator (injected)
+    - Dependency Injection: All services are injected for testability
+    - Interface Segregation: Services depend on interfaces, not concretions
+    - Single Responsibility: Each class has a single, well-defined purpose
+    - Clean Separation: UI, business logic, and data access are separated
     
     Usage:
-        # Plugin is automatically instantiated by QGIS
-        plugin = ArcheoSyncPlugin(iface)
+        # Plugin is automatically initialized by QGIS
+        # Access settings through the settings manager
+        settings = plugin.settings_manager.get_value('field_projects_folder')
         
-        # Plugin handles QGIS integration automatically
-        plugin.initGui()  # Sets up UI
-        plugin.run()      # Executes main functionality
-        plugin.unload()   # Cleanup
-    
-    This design allows for:
-    - Easy unit testing with mock services
-    - Platform-specific service implementations
-    - Future extensions without code changes
-    - Clear separation of QGIS-specific and business logic
+        # Access translation service
+        translated_text = plugin.translation_service.translate('Hello World')
     """
     
     def __init__(self, iface):
@@ -110,9 +102,13 @@ class ArcheoSyncPlugin:
         # Initialize file system service
         self._file_system_service = QGISFileSystemService(self._iface.mainWindow())
         
+        # Initialize layer service
+        self._layer_service = QGISLayerService()
+        
         # Initialize configuration validator
         self._configuration_validator = ArcheoSyncConfigurationValidator(
-            self._file_system_service
+            self._file_system_service,
+            self._layer_service
         )
     
     def tr(self, message: str) -> str:
@@ -127,10 +123,18 @@ class ArcheoSyncPlugin:
         """
         return self._translation_service.translate(message)
     
-    def add_action(self, icon_path: str, text: str, callback: callable,
-                   enabled_flag: bool = True, add_to_menu: bool = True,
-                   add_to_toolbar: bool = True, status_tip: Optional[str] = None,
-                   whats_this: Optional[str] = None, parent=None) -> QAction:
+    def add_action(
+        self,
+        icon_path: str,
+        text: str,
+        callback: callable,
+        enabled_flag: bool = True,
+        add_to_menu: bool = True,
+        add_to_toolbar: bool = True,
+        status_tip: Optional[str] = None,
+        whats_this: Optional[str] = None,
+        parent=None
+    ) -> QAction:
         """
         Add a toolbar icon to the toolbar.
         
@@ -142,8 +146,8 @@ class ArcheoSyncPlugin:
             add_to_menu: Flag indicating whether the action should also be added to the menu
             add_to_toolbar: Flag indicating whether the action should also be added to the toolbar
             status_tip: Optional text to show in a popup when mouse pointer hovers over the action
-            whats_this: Optional text to show in the status bar when the mouse pointer hovers over the action
-            parent: Parent widget for the new action
+            whats_this: Optional text to show in the status bar when the action is triggered
+            parent: Parent widget for the action
             
         Returns:
             The action that was created
@@ -173,7 +177,7 @@ class ArcheoSyncPlugin:
         icon_path = ':/plugins/archeo_sync/icon.png'
         self.add_action(
             icon_path,
-            text=self.tr(u'Prepare field recording'),
+            text=self.tr(u'Configuration'),
             callback=self.run,
             parent=self._iface.mainWindow()
         )
@@ -192,6 +196,7 @@ class ArcheoSyncPlugin:
             self._settings_dialog = SettingsDialog(
                 settings_manager=self._settings_manager,
                 file_system_service=self._file_system_service,
+                layer_service=self._layer_service,
                 configuration_validator=self._configuration_validator,
                 parent=self._iface.mainWindow()
             )
@@ -221,11 +226,6 @@ class ArcheoSyncPlugin:
         return self._translation_service
     
     @property
-    def file_system_service(self):
-        """Get the file system service instance."""
-        return self._file_system_service
-    
-    @property
-    def configuration_validator(self):
-        """Get the configuration validator instance."""
-        return self._configuration_validator 
+    def layer_service(self):
+        """Get the layer service instance."""
+        return self._layer_service 

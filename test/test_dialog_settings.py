@@ -53,6 +53,8 @@ class TestArcheoSyncDialogSettings(unittest.TestCase):
         
         # Create mock services
         self.mock_file_service = Mock()
+        self.mock_layer_service = Mock()
+        self.mock_layer_service.get_polygon_layers = Mock(return_value=[])
         self.mock_validator = Mock()
         
         # Mock QMessageBox globally to prevent GUI dialogs during tests
@@ -67,6 +69,7 @@ class TestArcheoSyncDialogSettings(unittest.TestCase):
         self.dialog = SettingsDialog(
             settings_manager=self.mock_settings,
             file_system_service=self.mock_file_service,
+            layer_service=self.mock_layer_service,
             configuration_validator=self.mock_validator
         )
 
@@ -136,6 +139,9 @@ class TestArcheoSyncDialogSettings(unittest.TestCase):
             test_folder_path,  # field_projects_folder
             '',                # total_station_folder (not tested here)
             '',                # completed_projects_folder (not tested here)
+            '',                # recording_areas_layer (not tested here)
+            '',                # objects_layer (not tested here)
+            '',                # features_layer (not tested here)
             True               # use_qfield
         ]
         

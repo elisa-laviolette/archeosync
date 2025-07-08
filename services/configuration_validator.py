@@ -10,6 +10,7 @@ Key Features:
 - Comprehensive path validation
 - Permission checking for directories
 - File type validation
+- Layer validation for QGIS layers
 - Detailed error reporting
 - Batch validation for multiple settings
 
@@ -18,10 +19,12 @@ Validation Rules:
 - Total Station Folder: Must exist, be readable, and contain CSV files
 - Completed Projects Folder: Must exist, be readable, and be a directory
 - Template Project Folder: Must exist, be readable, and contain QGIS project files
+- Recording Areas Layer: Must be a valid polygon layer in the current project
 
 Usage:
     file_service = QGISFileSystemService()
-    validator = ArcheoSyncConfigurationValidator(file_service)
+    layer_service = QGISLayerService()
+    validator = ArcheoSyncConfigurationValidator(file_service, layer_service)
     
     # Validate individual settings
     errors = validator.validate_field_projects_folder('/path/to/folder')
@@ -29,13 +32,14 @@ Usage:
     # Validate all settings at once
     settings = {
         'field_projects_folder': '/path/to/field',
-        'total_station_folder': '/path/to/total'
+        'total_station_folder': '/path/to/total',
+        'recording_areas_layer': 'layer_id_123'
     }
     results = validator.validate_all_settings(settings)
     
     if validator.has_validation_errors(results):
         all_errors = validator.get_all_errors(results)
-        print("Validation errors:", all_errors)
+        # Validation errors would be handled by the calling code
 
 The validator provides:
 - Clear, actionable error messages
@@ -44,13 +48,15 @@ The validator provides:
 - Extensible validation rules
 """
 
-from typing import List
+from typing import List, Optional
 from pathlib import Path
 
 try:
-    from ..core.interfaces import IConfigurationValidator, IFileSystemService
+    from ..core.interfaces import IConfigurationValidator, IFileSystemService, ILayerService, ValidationResult
 except ImportError:
-    from core.interfaces import IConfigurationValidator, IFileSystemService
+    from core.interfaces import IConfigurationValidator, IFileSystemService, ILayerService, ValidationResult
+
+
 
 
 class ArcheoSyncConfigurationValidator(IConfigurationValidator):
@@ -58,17 +64,19 @@ class ArcheoSyncConfigurationValidator(IConfigurationValidator):
     Configuration validator for ArcheoSync plugin settings.
     
     This class provides validation logic for all plugin configuration settings,
-    ensuring that paths are valid and accessible.
+    ensuring that paths are valid and accessible, and layers are valid.
     """
     
-    def __init__(self, file_system_service: IFileSystemService):
+    def __init__(self, file_system_service: IFileSystemService, layer_service: ILayerService = None):
         """
         Initialize the configuration validator.
         
         Args:
             file_system_service: Service for file system operations
+            layer_service: Service for layer operations (optional)
         """
         self._file_system_service = file_system_service
+        self._layer_service = layer_service
     
     def validate_field_projects_folder(self, path: str) -> List[str]:
         """
@@ -188,6 +196,139 @@ class ArcheoSyncConfigurationValidator(IConfigurationValidator):
         
         return errors
     
+    def validate_recording_areas_layer(self, layer_id: str) -> List[str]:
+        """
+        Validate recording areas layer configuration.
+        
+        Args:
+            layer_id: Layer ID to validate
+            
+        Returns:
+            List of validation error messages (empty if valid)
+        """
+        errors = []
+        
+        if not layer_id:
+            # Recording areas layer is optional, so no error if not set
+            return errors
+        
+        if not self._layer_service:
+            errors.append("Layer service not available for validation")
+            return errors
+        
+        if not self._layer_service.is_valid_polygon_layer(layer_id):
+            errors.append(f"Selected layer is not a valid polygon layer: {layer_id}")
+        
+        layer_info = self._layer_service.get_layer_info(layer_id)
+        if not layer_info:
+            errors.append(f"Layer not found in current project: {layer_id}")
+        elif not layer_info.get('is_valid', False):
+            errors.append(f"Selected layer is not valid: {layer_info.get('name', layer_id)}")
+        
+        return errors
+    
+    def validate_objects_layer(self, layer_id: str) -> List[str]:
+        """
+        Validate objects layer configuration.
+        
+        Args:
+            layer_id: Layer ID to validate
+            
+        Returns:
+            List of validation error messages (empty if valid)
+        """
+        errors = []
+        
+        if not layer_id:
+            # Objects layer is mandatory, so error if not set
+            errors.append("Objects layer is required")
+            return errors
+        
+        if not self._layer_service:
+            errors.append("Layer service not available for validation")
+            return errors
+        
+        if not self._layer_service.is_valid_polygon_or_multipolygon_layer(layer_id):
+            errors.append(f"Selected layer is not a valid polygon or multipolygon layer: {layer_id}")
+        
+        layer_info = self._layer_service.get_layer_info(layer_id)
+        if not layer_info:
+            errors.append(f"Layer not found in current project: {layer_id}")
+        elif not layer_info.get('is_valid', False):
+            errors.append(f"Selected layer is not valid: {layer_info.get('name', layer_id)}")
+        
+        return errors
+    
+    def validate_features_layer(self, layer_id: str) -> List[str]:
+        """
+        Validate features layer configuration.
+        
+        Args:
+            layer_id: Layer ID to validate
+            
+        Returns:
+            List of validation error messages (empty if valid)
+        """
+        errors = []
+        
+        if not layer_id:
+            # Features layer is optional, so no error if not set
+            return errors
+        
+        if not self._layer_service:
+            errors.append("Layer service not available for validation")
+            return errors
+        
+        if not self._layer_service.is_valid_polygon_or_multipolygon_layer(layer_id):
+            errors.append(f"Selected layer is not a valid polygon or multipolygon layer: {layer_id}")
+        
+        layer_info = self._layer_service.get_layer_info(layer_id)
+        if not layer_info:
+            errors.append(f"Layer not found in current project: {layer_id}")
+        elif not layer_info.get('is_valid', False):
+            errors.append(f"Selected layer is not valid: {layer_info.get('name', layer_id)}")
+        
+        return errors
+    
+    def validate_objects_layer_fields(self, layer_id: str, number_field: Optional[str], level_field: Optional[str]) -> ValidationResult:
+        """
+        Validate the field selections for the objects layer.
+        
+        Args:
+            layer_id: The layer ID to validate fields for
+            number_field: The selected number field (should be integer)
+            level_field: The selected level field (can be any type)
+            
+        Returns:
+            ValidationResult indicating success or failure with details
+        """
+        # If no layer is selected, fields are not applicable
+        if not layer_id:
+            return ValidationResult(True, "No layer selected, field validation skipped")
+        
+        # Get layer fields
+        fields = self._layer_service.get_layer_fields(layer_id)
+        if fields is None:
+            return ValidationResult(False, f"Could not retrieve fields for layer {layer_id}")
+        
+        # Create a map of field names to field info for easy lookup
+        field_map = {field['name']: field for field in fields}
+        
+        # Validate number field if provided
+        if number_field:
+            if number_field not in field_map:
+                return ValidationResult(False, f"Number field '{number_field}' not found in layer")
+            
+            if not field_map[number_field]['is_integer']:
+                return ValidationResult(False, f"Number field '{number_field}' must be an integer field")
+        
+        # Validate level field if provided
+        if level_field:
+            if level_field not in field_map:
+                return ValidationResult(False, f"Level field '{level_field}' not found in layer")
+        
+        return ValidationResult(True, "Field validation successful")
+    
     def validate_all_settings(self, settings: dict) -> dict:
         """
         Validate all plugin settings at once.
@@ -216,9 +357,43 @@ class ArcheoSyncConfigurationValidator(IConfigurationValidator):
                 settings['completed_projects_folder']
             )
         
+        # Template project folder is only required when QField is not used
         if 'template_project_folder' in settings:
-            validation_results['template_project_folder'] = self.validate_template_project_folder(
-                settings['template_project_folder']
+            use_qfield = settings.get('use_qfield', False)
+            if not use_qfield:
+                # Only validate template project folder if QField is not being used
+                validation_results['template_project_folder'] = self.validate_template_project_folder(
+                    settings['template_project_folder']
+                )
+            else:
+                # QField is being used, so template project folder is not required
+                validation_results['template_project_folder'] = []
+        
+        if 'recording_areas_layer' in settings:
+            validation_results['recording_areas_layer'] = self.validate_recording_areas_layer(
+                settings['recording_areas_layer']
+            )
+        
+        if 'objects_layer' in settings:
+            validation_results['objects_layer'] = self.validate_objects_layer(
+                settings['objects_layer']
+            )
+            
+            # Validate objects layer fields if layer is selected
+            if settings['objects_layer']:
+                number_field = settings.get('objects_number_field', '')
+                level_field = settings.get('objects_level_field', '')
+                field_validation = self.validate_objects_layer_fields(
+                    settings['objects_layer'], 
+                    number_field if number_field else None, 
+                    level_field if level_field else None
+                )
+                if not field_validation.is_valid:
+                    validation_results['objects_layer_fields'] = [field_validation.message]
+        
+        if 'features_layer' in settings:
+            validation_results['features_layer'] = self.validate_features_layer(
+                settings['features_layer']
             )
         
         return validation_results

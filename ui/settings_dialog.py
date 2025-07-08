@@ -12,6 +12,7 @@ Key Features:
 - Comprehensive validation with user feedback
 - Revert functionality for cancelled changes
 - Responsive UI with conditional visibility
+- QGIS layer selection for recording areas
 
 Architecture Benefits:
 - Single Responsibility: Only handles UI presentation
@@ -22,11 +23,13 @@ Architecture Benefits:
 Usage:
     settings_manager = QGISSettingsManager()
     file_system_service = QGISFileSystemService()
-    validator = ArcheoSyncConfigurationValidator(file_system_service)
+    layer_service = QGISLayerService()
+    validator = ArcheoSyncConfigurationValidator(file_system_service, layer_service)
     
     dialog = SettingsDialog(
         settings_manager=settings_manager,
         file_system_service=file_system_service,
+        layer_service=layer_service,
         configuration_validator=validator,
         parent=parent_widget
     )
@@ -37,6 +40,7 @@ Usage:
 
 The dialog provides:
 - Intuitive folder selection with browse buttons
+- QGIS layer selection for recording areas
 - Real-time validation feedback
 - Clear error messages
 - Consistent user experience
@@ -48,9 +52,9 @@ from qgis.PyQt import QtWidgets
 from qgis.PyQt.QtCore import Qt
 
 try:
-    from ..core.interfaces import ISettingsManager, IFileSystemService, IConfigurationValidator
+    from ..core.interfaces import ISettingsManager, IFileSystemService, ILayerService, IConfigurationValidator
 except ImportError:
-    from core.interfaces import ISettingsManager, IFileSystemService, IConfigurationValidator
+    from core.interfaces import ISettingsManager, IFileSystemService, ILayerService, IConfigurationValidator
 
 
 class SettingsDialog(QtWidgets.QDialog):
@@ -65,6 +69,7 @@ class SettingsDialog(QtWidgets.QDialog):
     def __init__(self, 
                  settings_manager: ISettingsManager,
                  file_system_service: IFileSystemService,
+                 layer_service: ILayerService,
                  configuration_validator: IConfigurationValidator,
                  parent=None):
         """
@@ -73,6 +78,7 @@ class SettingsDialog(QtWidgets.QDialog):
         Args:
             settings_manager: Service for managing settings
             file_system_service: Service for file system operations
+            layer_service: Service for QGIS layer operations
             configuration_validator: Service for validating configuration
             parent: Parent widget for the dialog
         """
@@ -81,6 +87,7 @@ class SettingsDialog(QtWidgets.QDialog):
         # Store injected dependencies
         self._settings_manager = settings_manager
         self._file_system_service = file_system_service
+        self._layer_service = layer_service
         self._configuration_validator = configuration_validator
         
         # Store original values for cancel functionality
@@ -95,7 +102,7 @@ class SettingsDialog(QtWidgets.QDialog):
     def _setup_ui(self) -> None:
         """Set up the user interface components."""
         self.setWindowTitle("ArcheoSync Settings")
-        self.setGeometry(0, 0, 600, 450)
+        self.setGeometry(0, 0, 600, 500)
         
         # Create main layout
         main_layout = QtWidgets.QVBoxLayout(self)
@@ -135,6 +142,22 @@ class SettingsDialog(QtWidgets.QDialog):
         )
         settings_layout.addRow("Completed Field Projects:", self._completed_projects_widget)
         
+        # Recording areas layer
+        self._recording_areas_widget = self._create_layer_selector()
+        settings_layout.addRow("Recording Areas Layer:", self._recording_areas_widget)
+        
+        # Objects layer
+        self._objects_widget = self._create_layer_selector()
+        settings_layout.addRow("Objects Layer:", self._objects_widget)
+        
+        # Objects layer field selections (initially hidden)
+        self._objects_fields_widget = self._create_objects_fields_widget()
+        settings_layout.addRow("", self._objects_fields_widget)  # Empty label for indentation
+        
+        # Features layer
+        self._features_widget = self._create_layer_selector()
+        settings_layout.addRow("Features Layer:", self._features_widget)
+        
         # QField integration
         self._qfield_checkbox = QtWidgets.QCheckBox("Use QField for field data collection")
         settings_layout.addRow("QField Integration:", self._qfield_checkbox)
@@ -171,6 +194,64 @@ class SettingsDialog(QtWidgets.QDialog):
         
         return widget
     
+    def _create_layer_selector(self) -> QtWidgets.QWidget:
+        """Create a layer selection widget."""
+        widget = QtWidgets.QWidget()
+        layout = QtWidgets.QHBoxLayout(widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Combo box for layer selection
+        combo_box = QtWidgets.QComboBox()
+        combo_box.setMinimumWidth(300)
+        combo_box.addItem("-- Select a polygon layer --", "")
+        
+        # Refresh button
+        refresh_button = QtWidgets.QPushButton("Refresh")
+        refresh_button.setToolTip("Refresh the list of available polygon layers")
+        
+        layout.addWidget(combo_box)
+        layout.addWidget(refresh_button)
+        
+        # Store references
+        widget.combo_box = combo_box
+        widget.refresh_button = refresh_button
+        
+        return widget
+    
+    def _create_objects_fields_widget(self) -> QtWidgets.QWidget:
+        """Create a widget for selecting objects layer fields."""
+        widget = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(widget)
+        layout.setContentsMargins(20, 0, 0, 0)  # Indent to show hierarchy
+        
+        # Number field selection
+        number_layout = QtWidgets.QHBoxLayout()
+        number_label = QtWidgets.QLabel("Number Field:")
+        self._number_field_combo = QtWidgets.QComboBox()
+        self._number_field_combo.addItem("-- Select number field --", "")
+        self._number_field_combo.setMinimumWidth(200)
+        number_layout.addWidget(number_label)
+        number_layout.addWidget(self._number_field_combo)
+        number_layout.addStretch()
+        
+        # Level field selection
+        level_layout = QtWidgets.QHBoxLayout()
+        level_label = QtWidgets.QLabel("Level Field:")
+        self._level_field_combo = QtWidgets.QComboBox()
+        self._level_field_combo.addItem("-- Select level field --", "")
+        self._level_field_combo.setMinimumWidth(200)
+        level_layout.addWidget(level_label)
+        level_layout.addWidget(self._level_field_combo)
+        level_layout.addStretch()
+        
+        layout.addLayout(number_layout)
+        layout.addLayout(level_layout)
+        
+        # Initially hide the widget
+        widget.setVisible(False)
+        
+        return widget
+    
     def _create_button_box(self, parent_layout: QtWidgets.QVBoxLayout) -> None:
         """Create the dialog button box."""
         self._button_box = QtWidgets.QDialogButtonBox(
@@ -204,6 +285,12 @@ class SettingsDialog(QtWidgets.QDialog):
                                       "Select Folder for Template QGIS Project")
         )
         
+        # Layer selector connections
+        self._recording_areas_widget.refresh_button.clicked.connect(self._refresh_layer_list)
+        self._objects_widget.refresh_button.clicked.connect(self._refresh_objects_layer_list)
+        self._objects_widget.combo_box.currentIndexChanged.connect(self._on_objects_layer_changed)
+        self._features_widget.refresh_button.clicked.connect(self._refresh_features_layer_list)
+        
         # QField checkbox connection
         self._qfield_checkbox.stateChanged.connect(self._update_ui_state)
     
@@ -216,6 +303,130 @@ class SettingsDialog(QtWidgets.QDialog):
         
         if folder_path:
             input_field.setText(folder_path)
+    
+    def _refresh_layer_list(self) -> None:
+        """Refresh the list of available polygon layers."""
+        try:
+            combo_box = self._recording_areas_widget.combo_box
+            current_layer_id = combo_box.currentData()
+            
+            # Clear existing items except the first placeholder
+            combo_box.clear()
+            combo_box.addItem("-- Select a polygon layer --", "")
+            
+            # Get polygon layers from the service
+            polygon_layers = self._layer_service.get_polygon_layers()
+            
+            # Add layers to combo box
+            for layer_info in polygon_layers:
+                display_text = f"{layer_info['name']} ({layer_info['feature_count']} features)"
+                combo_box.addItem(display_text, layer_info['id'])
+            
+            # Restore previously selected layer if it still exists
+            if current_layer_id:
+                index = combo_box.findData(current_layer_id)
+                if index >= 0:
+                    combo_box.setCurrentIndex(index)
+            
+        except Exception as e:
+            self._show_error("Layer Error", f"Failed to refresh layer list: {str(e)}")
+    
+    def _refresh_objects_layer_list(self) -> None:
+        """Refresh the list of available polygon and multipolygon layers for objects."""
+        try:
+            combo_box = self._objects_widget.combo_box
+            current_layer_id = combo_box.currentData()
+            
+            # Clear existing items except the first placeholder
+            combo_box.clear()
+            combo_box.addItem("-- Select a polygon or multipolygon layer --", "")
+            
+            # Get polygon and multipolygon layers from the service
+            layers = self._layer_service.get_polygon_and_multipolygon_layers()
+            
+            # Add layers to combo box
+            for layer_info in layers:
+                display_text = f"{layer_info['name']} ({layer_info['feature_count']} features)"
+                combo_box.addItem(display_text, layer_info['id'])
+            
+            # Restore previously selected layer if it still exists
+            if current_layer_id:
+                index = combo_box.findData(current_layer_id)
+                if index >= 0:
+                    combo_box.setCurrentIndex(index)
+            
+        except Exception as e:
+            self._show_error("Layer Error", f"Failed to refresh objects layer list: {str(e)}")
+    
+    def _refresh_features_layer_list(self) -> None:
+        """Refresh the list of available polygon and multipolygon layers for features."""
+        try:
+            combo_box = self._features_widget.combo_box
+            current_layer_id = combo_box.currentData()
+            
+            # Clear existing items except the first placeholder
+            combo_box.clear()
+            combo_box.addItem("-- Select a polygon or multipolygon layer --", "")
+            
+            # Get polygon and multipolygon layers from the service
+            layers = self._layer_service.get_polygon_and_multipolygon_layers()
+            
+            # Add layers to combo box
+            for layer_info in layers:
+                display_text = f"{layer_info['name']} ({layer_info['feature_count']} features)"
+                combo_box.addItem(display_text, layer_info['id'])
+            
+            # Restore previously selected layer if it still exists
+            if current_layer_id:
+                index = combo_box.findData(current_layer_id)
+                if index >= 0:
+                    combo_box.setCurrentIndex(index)
+            
+        except Exception as e:
+            self._show_error("Layer Error", f"Failed to refresh features layer list: {str(e)}")
+    
+    def _on_objects_layer_changed(self) -> None:
+        """Handle changes to the objects layer selection."""
+        layer_id = self._objects_widget.combo_box.currentData()
+        
+        if layer_id:
+            # Show field selection widgets and populate them
+            self._objects_fields_widget.setVisible(True)
+            self._populate_objects_fields(layer_id)
+        else:
+            # Hide field selection widgets
+            self._objects_fields_widget.setVisible(False)
+    
+    def _populate_objects_fields(self, layer_id: str) -> None:
+        """Populate the field selection combo boxes for the objects layer."""
+        try:
+            # Get fields from the layer
+            fields = self._layer_service.get_layer_fields(layer_id)
+            if fields is None:
+                self._show_error("Field Error", f"Could not retrieve fields for layer {layer_id}")
+                return
+            
+            # Clear existing items
+            self._number_field_combo.clear()
+            self._level_field_combo.clear()
+            
+            # Add placeholder items
+            self._number_field_combo.addItem("-- Select number field --", "")
+            self._level_field_combo.addItem("-- Select level field --", "")
+            
+            # Add fields to number field combo (only integer fields)
+            integer_fields = [field for field in fields if field['is_integer']]
+            for field in integer_fields:
+                display_text = f"{field['name']} ({field['type']})"
+                self._number_field_combo.addItem(display_text, field['name'])
+            
+            # Add all fields to level field combo
+            for field in fields:
+                display_text = f"{field['name']} ({field['type']})"
+                self._level_field_combo.addItem(display_text, field['name'])
+            
+        except Exception as e:
+            self._show_error("Field Error", f"Failed to populate field lists: {str(e)}")
     
     def _update_ui_state(self) -> None:
         """Update UI state based on current settings."""
@@ -241,6 +452,41 @@ class SettingsDialog(QtWidgets.QDialog):
             completed_projects_path = self._settings_manager.get_value('completed_projects_folder', '')
             self._completed_projects_widget.input_field.setText(completed_projects_path)
             
+            # Load recording areas layer
+            recording_areas_layer_id = self._settings_manager.get_value('recording_areas_layer', '')
+            self._refresh_layer_list()  # Populate the combo box
+            if recording_areas_layer_id:
+                index = self._recording_areas_widget.combo_box.findData(recording_areas_layer_id)
+                if index >= 0:
+                    self._recording_areas_widget.combo_box.setCurrentIndex(index)
+            
+            # Load objects layer
+            objects_layer_id = self._settings_manager.get_value('objects_layer', '')
+            self._refresh_objects_layer_list()  # Populate the combo box
+            if objects_layer_id:
+                index = self._objects_widget.combo_box.findData(objects_layer_id)
+                if index >= 0:
+                    self._objects_widget.combo_box.setCurrentIndex(index)
+                    # Load field selections after layer is set
+                    number_field = self._settings_manager.get_value('objects_number_field', '')
+                    level_field = self._settings_manager.get_value('objects_level_field', '')
+                    if number_field:
+                        index = self._number_field_combo.findData(number_field)
+                        if index >= 0:
+                            self._number_field_combo.setCurrentIndex(index)
+                    if level_field:
+                        index = self._level_field_combo.findData(level_field)
+                        if index >= 0:
+                            self._level_field_combo.setCurrentIndex(index)
+            
+            # Load features layer
+            features_layer_id = self._settings_manager.get_value('features_layer', '')
+            self._refresh_features_layer_list()  # Populate the combo box
+            if features_layer_id:
+                index = self._features_widget.combo_box.findData(features_layer_id)
+                if index >= 0:
+                    self._features_widget.combo_box.setCurrentIndex(index)
+            
             # Load QField setting
             use_qfield = self._settings_manager.get_value('use_qfield', False)
             self._qfield_checkbox.setChecked(bool(use_qfield))
@@ -254,6 +500,11 @@ class SettingsDialog(QtWidgets.QDialog):
                 'field_projects_folder': field_projects_path,
                 'total_station_folder': total_station_path,
                 'completed_projects_folder': completed_projects_path,
+                'recording_areas_layer': recording_areas_layer_id,
+                'objects_layer': objects_layer_id,
+                'objects_number_field': self._settings_manager.get_value('objects_number_field', ''),
+                'objects_level_field': self._settings_manager.get_value('objects_level_field', ''),
+                'features_layer': features_layer_id,
                 'use_qfield': bool(use_qfield),
                 'template_project_folder': template_project_path
             }
@@ -269,6 +520,11 @@ class SettingsDialog(QtWidgets.QDialog):
                 'field_projects_folder': self._field_projects_widget.input_field.text(),
                 'total_station_folder': self._total_station_widget.input_field.text(),
                 'completed_projects_folder': self._completed_projects_widget.input_field.text(),
+                'recording_areas_layer': self._recording_areas_widget.combo_box.currentData(),
+                'objects_layer': self._objects_widget.combo_box.currentData(),
+                'objects_number_field': self._number_field_combo.currentData(),
+                'objects_level_field': self._level_field_combo.currentData(),
+                'features_layer': self._features_widget.combo_box.currentData(),
                 'use_qfield': self._qfield_checkbox.isChecked(),
                 'template_project_folder': self._template_project_widget.input_field.text()
             }
@@ -310,6 +566,50 @@ class SettingsDialog(QtWidgets.QDialog):
             self._template_project_widget.input_field.setText(
                 self._original_values.get('template_project_folder', '')
             )
+            
+            # Revert recording areas layer selection
+            recording_areas_layer_id = self._original_values.get('recording_areas_layer', '')
+            if recording_areas_layer_id:
+                index = self._recording_areas_widget.combo_box.findData(recording_areas_layer_id)
+                if index >= 0:
+                    self._recording_areas_widget.combo_box.setCurrentIndex(index)
+                else:
+                    self._recording_areas_widget.combo_box.setCurrentIndex(0)
+            else:
+                self._recording_areas_widget.combo_box.setCurrentIndex(0)
+            
+            # Revert objects layer selection
+            objects_layer_id = self._original_values.get('objects_layer', '')
+            if objects_layer_id:
+                index = self._objects_widget.combo_box.findData(objects_layer_id)
+                if index >= 0:
+                    self._objects_widget.combo_box.setCurrentIndex(index)
+                    # Revert field selections
+                    number_field = self._original_values.get('objects_number_field', '')
+                    level_field = self._original_values.get('objects_level_field', '')
+                    if number_field:
+                        index = self._number_field_combo.findData(number_field)
+                        if index >= 0:
+                            self._number_field_combo.setCurrentIndex(index)
+                    if level_field:
+                        index = self._level_field_combo.findData(level_field)
+                        if index >= 0:
+                            self._level_field_combo.setCurrentIndex(index)
+                else:
+                    self._objects_widget.combo_box.setCurrentIndex(0)
+            else:
+                self._objects_widget.combo_box.setCurrentIndex(0)
+            
+            # Revert features layer selection
+            features_layer_id = self._original_values.get('features_layer', '')
+            if features_layer_id:
+                index = self._features_widget.combo_box.findData(features_layer_id)
+                if index >= 0:
+                    self._features_widget.combo_box.setCurrentIndex(index)
+                else:
+                    self._features_widget.combo_box.setCurrentIndex(0)
+            else:
+                self._features_widget.combo_box.setCurrentIndex(0)
             
             # Revert settings in manager
             for key, value in self._original_values.items():

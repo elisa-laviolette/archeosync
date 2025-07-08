@@ -27,6 +27,14 @@ Example usage:
 from abc import ABC, abstractmethod
 from typing import Any, Optional, Dict, List
 from pathlib import Path
+from dataclasses import dataclass
+
+
+@dataclass
+class ValidationResult:
+    """Result of a validation operation."""
+    is_valid: bool
+    message: str
 
 
 class ISettingsManager(ABC):
@@ -157,4 +165,71 @@ class IConfigurationValidator(ABC):
     @abstractmethod
     def validate_template_project_folder(self, path: str) -> List[str]:
         """Validate template project folder configuration."""
+        pass
+    
+    @abstractmethod
+    def validate_recording_areas_layer(self, layer_id: str) -> List[str]:
+        """Validate recording areas layer configuration."""
+        pass
+    
+    @abstractmethod
+    def validate_objects_layer(self, layer_id: str) -> List[str]:
+        """Validate objects layer configuration."""
+        pass
+    
+    @abstractmethod
+    def validate_features_layer(self, layer_id: str) -> List[str]:
+        """Validate features layer configuration."""
+        pass
+
+    @abstractmethod
+    def validate_objects_layer_fields(self, layer_id: str, number_field: Optional[str], level_field: Optional[str]) -> ValidationResult:
+        """
+        Validate the field selections for the objects layer.
+        
+        Args:
+            layer_id: The layer ID to validate fields for
+            number_field: The selected number field (should be integer)
+            level_field: The selected level field (can be any type)
+            
+        Returns:
+            ValidationResult indicating success or failure with details
+        """
+        pass
+
+
+class ILayerService(ABC):
+    """Interface for QGIS layer operations."""
+    
+    @abstractmethod
+    def get_polygon_layers(self) -> List[Dict[str, Any]]:
+        """Get all polygon layers from the current QGIS project."""
+        pass
+    
+    @abstractmethod
+    def get_layer_by_id(self, layer_id: str) -> Optional[Any]:
+        """Get a layer by its ID."""
+        pass
+    
+    @abstractmethod
+    def is_valid_polygon_layer(self, layer_id: str) -> bool:
+        """Check if a layer is a valid polygon layer."""
+        pass
+    
+    @abstractmethod
+    def get_layer_info(self, layer_id: str) -> Optional[Dict[str, Any]]:
+        """Get detailed information about a layer."""
+        pass
+
+    @abstractmethod
+    def get_layer_fields(self, layer_id: str) -> Optional[List[Dict[str, Any]]]:
+        """
+        Get field information from a layer.
+        
+        Args:
+            layer_id: The layer ID to get fields for
+            
+        Returns:
+            List of field information dictionaries or None if layer not found
+        """
         pass 

@@ -31,6 +31,7 @@ from .utilities import get_qgis_app
 from services.settings_service import QGISSettingsManager
 from services.file_system_service import QGISFileSystemService
 from services.configuration_validator import ArcheoSyncConfigurationValidator
+from services.layer_service import QGISLayerService
 
 
 @pytest.mark.unit
@@ -61,10 +62,14 @@ class TestSettingsDialog:
         # Create mock services for dependency injection
         self.mock_settings = Mock()
         self.mock_file_service = Mock()
+        self.mock_layer_service = Mock()
         self.mock_validator = Mock()
         
         # Mock the settings manager to return empty values to prevent setText errors
         self.mock_settings.get_value.return_value = ''
+        
+        # Mock the layer service to return empty list
+        self.mock_layer_service.get_polygon_layers.return_value = []
         
         # Mock the configuration validator to pass validation
         self.mock_validator.validate_all_settings.return_value = {}
@@ -82,6 +87,7 @@ class TestSettingsDialog:
             self.dialog = SettingsDialog(
                 settings_manager=self.mock_settings,
                 file_system_service=self.mock_file_service,
+                layer_service=self.mock_layer_service,
                 configuration_validator=self.mock_validator,
                 parent=self.parent
             )
@@ -117,6 +123,7 @@ class TestSettingsDialog:
         assert hasattr(self.dialog, '_field_projects_widget')
         assert hasattr(self.dialog, '_total_station_widget')
         assert hasattr(self.dialog, '_completed_projects_widget')
+        assert hasattr(self.dialog, '_recording_areas_widget')
         assert hasattr(self.dialog, '_qfield_checkbox')
         assert hasattr(self.dialog, '_template_project_widget')
 
@@ -132,6 +139,12 @@ class TestSettingsDialog:
         assert self.dialog._completed_projects_widget.input_field.isReadOnly() is True
         assert self.dialog._completed_projects_widget.input_field.placeholderText() == "Select folder containing completed field projects..."
 
+    def test_recording_areas_widget_properties(self):
+        assert hasattr(self.dialog._recording_areas_widget, 'combo_box')
+        assert hasattr(self.dialog._recording_areas_widget, 'refresh_button')
+        assert self.dialog._recording_areas_widget.combo_box.count() > 0
+        assert self.dialog._recording_areas_widget.combo_box.itemText(0) == "-- Select a polygon layer --"
+
     def test_qfield_checkbox_properties(self):
         assert self.dialog._qfield_checkbox.text() == "Use QField for field data collection"
         assert self.dialog._qfield_checkbox.isChecked() is False
@@ -139,6 +152,82 @@ class TestSettingsDialog:
     def test_template_project_input_properties(self):
         assert self.dialog._template_project_widget.input_field.isReadOnly() is True
         assert self.dialog._template_project_widget.input_field.placeholderText() == "Select folder containing template QGIS project..."
+
+    def test_refresh_layer_list(self):
+        """Test refreshing the layer list."""
+        # Mock layer service to return test layers
+        test_layers = [
+            {
+                'id': 'layer1',
+                'name': 'Test Layer 1',
+                'source': '/path/to/layer1.shp',
+                'crs': 'EPSG:4326',
+                'feature_count': 10
+            },
+            {
+                'id': 'layer2',
+                'name': 'Test Layer 2',
+                'source': '/path/to/layer2.shp',
+                'crs': 'EPSG:4326',
+                'feature_count': 5
+            }
+        ]
+        self.mock_layer_service.get_polygon_layers.return_value = test_layers
+        
+        # Call refresh method
+        self.dialog._refresh_layer_list()
+        
+        # Check that layers were added to combo box
+        combo_box = self.dialog._recording_areas_widget.combo_box
+        assert combo_box.count() == 3  # 1 placeholder + 2 layers
+        assert combo_box.itemText(1) == "Test Layer 1 (10 features)"
+        assert combo_box.itemText(2) == "Test Layer 2 (5 features)"
+        assert combo_box.itemData(1) == "layer1"
+        assert combo_box.itemData(2) == "layer2"
+
+    def test_refresh_layer_list_preserves_selection(self):
+        """Test that refresh preserves the currently selected layer."""
+        # Set up initial layers
+        initial_layers = [
+            {
+                'id': 'layer1',
+                'name': 'Test Layer 1',
+                'source': '/path/to/layer1.shp',
+                'crs': 'EPSG:4326',
+                'feature_count': 10
+            }
+        ]
+        self.mock_layer_service.get_polygon_layers.return_value = initial_layers
+        
+        # Refresh and select a layer
+        self.dialog._refresh_layer_list()
+        self.dialog._recording_areas_widget.combo_box.setCurrentIndex(1)  # Select layer1
+        
+        # Set up new layers (including the previously selected one)
+        new_layers = [
+            {
+                'id': 'layer2',
+                'name': 'Test Layer 2',
+                'source': '/path/to/layer2.shp',
+                'crs': 'EPSG:4326',
+                'feature_count': 5
+            },
+            {
+                'id': 'layer1',
+                'name': 'Test Layer 1',
+                'source': '/path/to/layer1.shp',
+                'crs': 'EPSG:4326',
+                'feature_count': 10
+            }
+        ]
+        self.mock_layer_service.get_polygon_layers.return_value = new_layers
+        
+        # Refresh again
+        self.dialog._refresh_layer_list()
+        
+        # Check that layer1 is still selected
+        combo_box = self.dialog._recording_areas_widget.combo_box
+        assert combo_box.currentData() == "layer1"
 
 
 @pytest.mark.qgis
@@ -158,11 +247,13 @@ class TestSettingsDialogIntegration:
         """Test that dialog works with real service instances."""
         settings_service = QGISSettingsManager()
         file_system_service = QGISFileSystemService()
-        configuration_validator = ArcheoSyncConfigurationValidator(file_system_service)
+        layer_service = QGISLayerService()
+        configuration_validator = ArcheoSyncConfigurationValidator(file_system_service, layer_service)
         
         dialog = SettingsDialog(
             settings_service,
             file_system_service,
+            layer_service,
             configuration_validator,
             parent=self.parent
         )
@@ -171,6 +262,7 @@ class TestSettingsDialogIntegration:
         assert dialog is not None
         assert dialog._settings_manager == settings_service
         assert dialog._file_system_service == file_system_service
+        assert dialog._layer_service == layer_service
         assert dialog._configuration_validator == configuration_validator
         
         dialog.close()
@@ -180,11 +272,13 @@ class TestSettingsDialogIntegration:
         """Test that settings persist through dialog operations."""
         settings_service = QGISSettingsManager()
         file_system_service = QGISFileSystemService()
-        configuration_validator = ArcheoSyncConfigurationValidator(file_system_service)
+        layer_service = QGISLayerService()
+        configuration_validator = ArcheoSyncConfigurationValidator(file_system_service, layer_service)
         
         dialog = SettingsDialog(
             settings_service,
             file_system_service,
+            layer_service,
             configuration_validator,
             parent=self.parent
         )
@@ -200,11 +294,13 @@ class TestSettingsDialogIntegration:
         new_dialog = SettingsDialog(
             settings_service,
             file_system_service,
+            layer_service,
             configuration_validator,
             parent=self.parent
         )
         
-        assert new_dialog._settings_manager.get_value('field_projects_folder') == test_value
+        # Verify the setting is loaded in the new dialog
+        assert new_dialog._field_projects_widget.input_field.text() == test_value
         
         dialog.close()
         dialog.deleteLater()
@@ -226,93 +322,177 @@ class TestSettingsDialogErrorHandling:
             self.app = QApplication.instance()
 
     def test_load_settings_error(self):
-        """Test handling of errors during settings loading."""
-        settings_service = Mock(spec=QGISSettingsManager)
-        file_system_service = Mock(spec=QGISFileSystemService)
-        configuration_validator = Mock(spec=ArcheoSyncConfigurationValidator)
+        """Test error handling when loading settings fails."""
+        # Create mock services
+        mock_settings = Mock()
+        mock_file_service = Mock()
+        mock_layer_service = Mock()
+        mock_validator = Mock()
         
-        # Mock settings service to raise an exception
-        settings_service.get_value.side_effect = Exception("Settings error")
+        # Make settings manager raise an exception
+        mock_settings.get_value.side_effect = Exception("Settings error")
         
-        # Mock QMessageBox to prevent actual dialog
-        with patch('PyQt5.QtWidgets.QMessageBox.critical') as mock_critical:
+        # Mock QMessageBox
+        with patch('ui.settings_dialog.QtWidgets.QMessageBox') as mock_message_box:
+            mock_message_box.critical.return_value = None
+            
+            # Create dialog - should handle the exception gracefully
             dialog = SettingsDialog(
-                settings_service,
-                file_system_service,
-                configuration_validator,
+                mock_settings,
+                mock_file_service,
+                mock_layer_service,
+                mock_validator,
                 parent=self.parent
             )
             
-            # Verify that the error was handled gracefully
-            assert settings_service.get_value.called
-            # The error should have been caught and shown via QMessageBox
-            mock_critical.assert_called()
+            # Verify error message was shown
+            mock_message_box.critical.assert_called_once()
+            call_args = mock_message_box.critical.call_args
+            assert call_args[0][1] == "Settings Error"
+            assert "Failed to load settings" in call_args[0][2]
             
             dialog.close()
             dialog.deleteLater()
 
     def test_save_settings_error(self):
-        """Test handling of errors during settings saving."""
-        settings_service = Mock(spec=QGISSettingsManager)
-        file_system_service = Mock(spec=QGISFileSystemService)
-        configuration_validator = Mock(spec=ArcheoSyncConfigurationValidator)
+        """Test error handling when saving settings fails."""
+        # Create mock services
+        mock_settings = Mock()
+        mock_file_service = Mock()
+        mock_layer_service = Mock()
+        mock_validator = Mock()
         
-        # Mock settings service to return empty values initially, then raise exception on save
-        settings_service.get_value.return_value = ''
-        settings_service.set_value.side_effect = Exception("Save error")
+        # Mock the settings manager to return empty values
+        mock_settings.get_value.return_value = ''
         
-        # Mock validation to pass
-        configuration_validator.validate_all_settings.return_value = {}
-        configuration_validator.has_validation_errors.return_value = False
+        # Mock the layer service to return empty lists
+        mock_layer_service.get_polygon_layers.return_value = []
+        mock_layer_service.get_polygon_and_multipolygon_layers.return_value = []
         
-        # Mock QMessageBox to prevent actual dialog
-        with patch('PyQt5.QtWidgets.QMessageBox.critical') as mock_critical:
+        # Mock the configuration validator to pass validation
+        mock_validator.validate_all_settings.return_value = {}
+        mock_validator.has_validation_errors.return_value = False
+        
+        # Make settings manager raise an exception when saving
+        mock_settings.set_value.side_effect = Exception("Save error")
+        
+        # Mock QMessageBox
+        with patch('ui.settings_dialog.QtWidgets.QMessageBox') as mock_message_box:
+            mock_message_box.critical.return_value = None
+            
+            # Create dialog
             dialog = SettingsDialog(
-                settings_service,
-                file_system_service,
-                configuration_validator,
+                mock_settings,
+                mock_file_service,
+                mock_layer_service,
+                mock_validator,
                 parent=self.parent
             )
             
             # Try to save settings
             dialog._save_and_accept()
             
-            # Verify that the error was handled gracefully
-            assert settings_service.set_value.called
-            # The error should have been caught and shown via QMessageBox
-            mock_critical.assert_called()
+            # Verify error message was shown (may be called multiple times due to layer refresh errors)
+            assert mock_message_box.critical.call_count >= 1
+            found = False
+            for call_args in mock_message_box.critical.call_args_list:
+                if call_args[0][1] == "Settings Error" and "Failed to save settings" in call_args[0][2]:
+                    found = True
+            assert found
             
             dialog.close()
             dialog.deleteLater()
 
     def test_validation_error(self):
-        """Test handling of errors during validation."""
-        settings_service = Mock(spec=QGISSettingsManager)
-        file_system_service = Mock(spec=QGISFileSystemService)
-        configuration_validator = Mock(spec=ArcheoSyncConfigurationValidator)
+        """Test error handling when validation fails."""
+        # Create mock services
+        mock_settings = Mock()
+        mock_file_service = Mock()
+        mock_layer_service = Mock()
+        mock_validator = Mock()
         
-        # Mock settings service to return empty values initially
-        settings_service.get_value.return_value = ''
+        # Mock the settings manager to return empty values
+        mock_settings.get_value.return_value = ''
         
-        # Mock validation to raise an exception
-        configuration_validator.validate_all_settings.side_effect = Exception("Validation error")
+        # Mock the layer service to return empty lists
+        mock_layer_service.get_polygon_layers.return_value = []
+        mock_layer_service.get_polygon_and_multipolygon_layers.return_value = []
         
-        # Mock QMessageBox to prevent actual dialog
-        with patch('PyQt5.QtWidgets.QMessageBox.critical') as mock_critical:
+        # Mock the configuration validator to fail validation
+        mock_validator.validate_all_settings.return_value = {
+            'field_projects_folder': ['Field projects folder path is required']
+        }
+        mock_validator.has_validation_errors.return_value = True
+        mock_validator.get_all_errors.return_value = ['field_projects_folder: Field projects folder path is required']
+        
+        # Mock QMessageBox
+        with patch('ui.settings_dialog.QtWidgets.QMessageBox') as mock_message_box:
+            mock_message_box.critical.return_value = None
+            
+            # Create dialog
             dialog = SettingsDialog(
-                settings_service,
-                file_system_service,
-                configuration_validator,
+                mock_settings,
+                mock_file_service,
+                mock_layer_service,
+                mock_validator,
                 parent=self.parent
             )
             
             # Try to save settings
             dialog._save_and_accept()
             
-            # Verify that the error was handled gracefully
-            assert configuration_validator.validate_all_settings.called
-            # The error should have been caught and shown via QMessageBox
-            mock_critical.assert_called()
+            # Verify validation error message was shown (may be called multiple times due to layer refresh errors)
+            assert mock_message_box.critical.call_count >= 1
+            found = False
+            for call_args in mock_message_box.critical.call_args_list:
+                if call_args[0][1] == "Validation Error" and "Please fix the following issues" in call_args[0][2]:
+                    found = True
+            assert found
+            
+            dialog.close()
+            dialog.deleteLater()
+
+    def test_refresh_layer_list_error(self):
+        """Test error handling when refreshing layer list fails."""
+        # Create mock services
+        mock_settings = Mock()
+        mock_file_service = Mock()
+        mock_layer_service = Mock()
+        mock_validator = Mock()
+        
+        # Mock the settings manager to return empty values
+        mock_settings.get_value.return_value = ''
+        
+        # Mock the layer service to raise an exception
+        mock_layer_service.get_polygon_layers.side_effect = Exception("Layer service error")
+        
+        # Mock the configuration validator to pass validation
+        mock_validator.validate_all_settings.return_value = {}
+        mock_validator.has_validation_errors.return_value = False
+        
+        # Mock QMessageBox
+        with patch('ui.settings_dialog.QtWidgets.QMessageBox') as mock_message_box:
+            mock_message_box.critical.return_value = None
+            
+            # Create dialog
+            dialog = SettingsDialog(
+                mock_settings,
+                mock_file_service,
+                mock_layer_service,
+                mock_validator,
+                parent=self.parent
+            )
+            
+            # Try to refresh layer list
+            dialog._refresh_layer_list()
+            
+            # Allow for multiple calls
+            assert mock_message_box.critical.call_count >= 1
+            found = False
+            for call_args in mock_message_box.critical.call_args_list:
+                if call_args[0][1] == "Layer Error" and "Failed to refresh layer list" in call_args[0][2]:
+                    found = True
+            assert found
             
             dialog.close()
             dialog.deleteLater()
