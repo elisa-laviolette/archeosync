@@ -20,7 +20,7 @@ from unittest.mock import Mock, patch, MagicMock
 
 # Try to import QGIS modules, skip tests if not available
 try:
-    from qgis.core import QgsProject, QgsVectorLayer
+    from qgis.core import QgsProject, QgsVectorLayer, QgsFeature, QgsFields, QgsField
     from services.settings_service import QGISSettingsManager
     from services.file_system_service import QGISFileSystemService
     from services.layer_service import QGISLayerService
@@ -657,6 +657,109 @@ class TestQGISLayerService(unittest.TestCase):
         # Verify results
         self.assertIsNotNone(fields)
         self.assertEqual(len(fields), 0)
+
+    def test_get_selected_features_count_layer_not_found(self):
+        """Test getting selected features count when layer is not found."""
+        with patch.object(self.layer_service, 'get_layer_by_id', return_value=None):
+            result = self.layer_service.get_selected_features_count('non_existent_layer_id')
+            self.assertEqual(result, 0)
+
+    def test_get_selected_features_count_no_selection(self):
+        """Test getting selected features count when no features are selected."""
+        # Mock layer with no selected features
+        mock_layer = Mock()
+        mock_layer.selectedFeatures.return_value = []
+        
+        with patch.object(self.layer_service, 'get_layer_by_id', return_value=mock_layer):
+            result = self.layer_service.get_selected_features_count('test_layer_id')
+            self.assertEqual(result, 0)
+
+    def test_get_selected_features_count_with_selection(self):
+        """Test getting selected features count when features are selected."""
+        # Mock layer with selected features
+        mock_layer = Mock()
+        mock_layer.selectedFeatures.return_value = [Mock(), Mock(), Mock()]  # 3 selected features
+        
+        with patch.object(self.layer_service, 'get_layer_by_id', return_value=mock_layer):
+            result = self.layer_service.get_selected_features_count('test_layer_id')
+            self.assertEqual(result, 3)
+
+    def test_get_selected_features_info_layer_not_found(self):
+        """Test getting selected features info when layer is not found."""
+        with patch.object(self.layer_service, 'get_layer_by_id', return_value=None):
+            result = self.layer_service.get_selected_features_info('non_existent_layer_id')
+            self.assertEqual(result, [])
+
+    def test_get_selected_features_info_no_selection(self):
+        """Test getting selected features info when no features are selected."""
+        # Mock layer with no selected features
+        mock_layer = Mock()
+        mock_layer.selectedFeatures.return_value = []
+        mock_layer.displayExpression.return_value = ''
+        
+        with patch.object(self.layer_service, 'get_layer_by_id', return_value=mock_layer):
+            result = self.layer_service.get_selected_features_info('test_layer_id')
+            self.assertEqual(result, [])
+
+    def test_get_selected_features_info_with_display_expression(self):
+        """Test getting selected features info with display expression."""
+        from qgis.core import QgsFeature, QgsFields, QgsField
+        from qgis.PyQt.QtCore import QVariant
+
+        # Create fields
+        fields = QgsFields()
+        fields.append(QgsField("name", QVariant.String))
+
+        # Create features
+        feature1 = QgsFeature(fields)
+        feature1.setAttribute("name", "Area A")
+        feature2 = QgsFeature(fields)
+        feature2.setAttribute("name", "Area B")
+
+        # Mock layer with display expression
+        mock_layer = Mock()
+        mock_layer.selectedFeatures.return_value = [feature1, feature2]
+        mock_layer.displayExpression.return_value = 'name'
+        mock_fields = Mock()
+        mock_fields.indexOf.return_value = -1
+        mock_layer.fields.return_value = mock_fields
+
+        # Patch layerScope and appendScope as before
+        with patch('qgis.core.QgsExpressionContextUtils.layerScope', return_value=Mock()):
+            with patch('qgis.core.QgsExpressionContext.appendScope', return_value=None):
+                with patch.object(self.layer_service, 'get_layer_by_id', return_value=mock_layer):
+                    result = self.layer_service.get_selected_features_info('test_layer_id')
+                    # Should be sorted alphabetically
+                    self.assertEqual(len(result), 2)
+                    self.assertEqual(result[0]['name'], "Area A")
+                    self.assertEqual(result[1]['name'], "Area B")
+
+    def test_get_selected_features_info_with_empty_display_expression(self):
+        """Test getting selected features info when display expression is empty."""
+        # Mock features
+        mock_feature1 = Mock()
+        mock_feature1.id.return_value = 1
+        mock_feature1.attribute.return_value = "Zone 1"
+        mock_feature2 = Mock()
+        mock_feature2.id.return_value = 2
+        mock_feature2.attribute.return_value = "Zone 2"
+        
+        # Mock layer with empty display expression
+        mock_layer = Mock()
+        mock_layer.selectedFeatures.return_value = [mock_feature1, mock_feature2]
+        mock_layer.displayExpression.return_value = ''
+        
+        # Mock fields with name field
+        mock_fields = Mock()
+        mock_fields.indexOf.side_effect = lambda name: 0 if name == 'name' else -1
+        mock_layer.fields.return_value = mock_fields
+        
+        with patch.object(self.layer_service, 'get_layer_by_id', return_value=mock_layer):
+            result = self.layer_service.get_selected_features_info('test_layer_id')
+            # Should fall back to name field and be sorted alphabetically
+            self.assertEqual(len(result), 2)
+            self.assertEqual(result[0]['name'], "Zone 1")
+            self.assertEqual(result[1]['name'], "Zone 2")
 
 
 class TestQGISTranslationService(unittest.TestCase):

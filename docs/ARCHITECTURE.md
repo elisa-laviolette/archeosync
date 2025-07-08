@@ -61,7 +61,8 @@ archeosync/
 │   └── configuration_validator.py
 ├── ui/                     # User interface components
 │   ├── __init__.py
-│   └── settings_dialog.py
+│   ├── settings_dialog.py
+│   └── prepare_recording_dialog.py
 ├── test/                   # Test suite
 │   ├── test_core_interfaces.py
 │   ├── test_services.py
@@ -95,6 +96,14 @@ Interface for configuration validation:
 - `validate_total_station_folder(path: str) -> List[str]`
 - `validate_all_settings(settings: dict) -> dict`
 
+### ILayerService
+Interface for QGIS layer operations:
+- `get_polygon_layers() -> List[Dict[str, Any]]`
+- `get_layer_by_id(layer_id: str) -> Optional[Any]`
+- `get_selected_features_count(layer_id: str) -> int`
+- `get_selected_features_info(layer_id: str) -> List[Dict[str, Any]]`
+- `get_layer_info(layer_id: str) -> Optional[Dict[str, Any]]`
+
 ## Service Implementations
 
 ### QGISSettingsManager
@@ -109,10 +118,16 @@ QGIS-specific implementation using QGIS translation system.
 ### ArcheoSyncConfigurationValidator
 Comprehensive validation with detailed error reporting.
 
+### QGISLayerService
+QGIS-specific implementation for layer operations including selected features counting.
+
 ## UI Components
 
 ### SettingsDialog
 Clean, testable settings dialog with dependency injection and real-time validation.
+
+### PrepareRecordingDialog
+Dialog for recording preparation showing selected entities in a table with names from layer display expressions, sorted alphabetically.
 
 ## Testing Strategy
 

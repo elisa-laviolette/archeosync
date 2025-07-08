@@ -17,7 +17,7 @@ Usage:
 """
 
 from typing import List, Optional, Dict, Any
-from qgis.core import QgsProject, QgsVectorLayer
+from qgis.core import QgsProject, QgsVectorLayer, QgsExpression, QgsExpressionContext, QgsExpressionContextUtils
 
 try:
     from ..core.interfaces import ILayerService
@@ -191,4 +191,78 @@ class QGISLayerService(ILayerService):
             }
             fields.append(field_info)
         
-        return fields 
+        return fields
+
+    def get_selected_features_count(self, layer_id: str) -> int:
+        """
+        Get the number of selected features in a layer.
+        
+        Args:
+            layer_id: The layer ID to get selected features count for
+            
+        Returns:
+            Number of selected features, 0 if layer not found or no features selected
+        """
+        layer = self.get_layer_by_id(layer_id)
+        if layer is None:
+            return 0
+        
+        # Get the number of selected features
+        return len(layer.selectedFeatures())
+
+    def get_selected_features_info(self, layer_id: str) -> List[Dict[str, Any]]:
+        """
+        Get information about selected features in a layer.
+        
+        Args:
+            layer_id: The layer ID to get selected features for
+            
+        Returns:
+            List of dictionaries containing feature information with 'name' field,
+            sorted alphabetically by name
+        """
+        layer = self.get_layer_by_id(layer_id)
+        if layer is None:
+            return []
+        
+        selected_features = layer.selectedFeatures()
+        features_info = []
+        
+        expr_str = layer.displayExpression()
+        expr = None
+        context = None
+        if expr_str:
+            expr = QgsExpression(expr_str)
+            context = QgsExpressionContext()
+            context.appendScope(QgsExpressionContextUtils.layerScope(layer))
+        for feature in selected_features:
+            # Try to get a display name from the display expression if available
+            if expr and context:
+                try:
+                    context.setFeature(feature)
+                    name = expr.evaluate(context)
+                    if name and str(name).strip():
+                        features_info.append({'name': str(name).strip()})
+                        continue
+                except Exception as ex:
+                    print(f"LayerService: Error evaluating display expression for feature {feature.id()}: {ex}")
+            # Fallback: try to get a name from common field names
+            name_fields = ['name', 'NAME', 'Name', 'title', 'TITLE', 'Title', 'label', 'LABEL', 'Label']
+            for field_name in name_fields:
+                field_idx = layer.fields().indexOf(field_name)
+                if field_idx >= 0:
+                    try:
+                        name = feature.attribute(field_idx)
+                        if name and str(name).strip():
+                            features_info.append({'name': str(name).strip()})
+                            break
+                    except Exception as ex:
+                        print(f"LayerService: Error extracting field '{field_name}' for feature {feature.id()}: {ex}")
+            else:
+                # If no name field found, use feature ID
+                features_info.append({'name': f"Feature {feature.id()}"})
+        
+        # Sort by name alphabetically
+        features_info.sort(key=lambda x: x['name'].lower())
+        
+        return features_info 

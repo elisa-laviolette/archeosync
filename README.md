@@ -5,6 +5,7 @@ A QGIS plugin for archaeologists to prepare data for field recording and import 
 ## Features
 
 - **Field Project Management**: Prepare and manage field recording projects
+- **Recording Preparation**: View selected entities in Recording areas layer for field preparation
 - **Total Station Integration**: Import CSV data from total station devices
 - **QField Integration**: Support for QField mobile data collection
 - **Template Projects**: Use template QGIS projects for consistency
@@ -44,6 +45,18 @@ A QGIS plugin for archaeologists to prepare data for field recording and import 
 5. **Configure features layer**: Optionally select a polygon/multipolygon layer for features
 6. **Validate configuration**: The plugin will validate all settings
 7. **Save settings**: Click OK to save your configuration
+
+### Recording Preparation
+
+1. **Select entities**: In your QGIS project, select entities in the configured Recording areas layer
+2. **Open Prepare Recording**: Go to Plugins → ArcheoSync → Prepare Recording
+3. **Review selection**: The dialog will show the number of selected entities and display them in a table
+4. **Prepare recording**: Click "Prepare Recording" to continue (only enabled when entities are selected)
+
+The table displays entity names sorted alphabetically. Names are extracted from:
+- Layer display expressions (from the Display tab in layer properties)
+- Common name fields (name, title, label, etc.)
+- Feature IDs (as fallback)
 
 ### Configuration Options
 

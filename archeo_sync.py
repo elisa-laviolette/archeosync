@@ -31,6 +31,7 @@ from qgis.PyQt.QtWidgets import QAction
 # Initialize Qt resources from file resources.py
 from .resources import *
 from .ui.settings_dialog import SettingsDialog
+from .ui.prepare_recording_dialog import PrepareRecordingDialog
 from .services import (
     QGISSettingsManager,
     QGISFileSystemService,
@@ -181,6 +182,14 @@ class ArcheoSyncPlugin:
             callback=self.run,
             parent=self._iface.mainWindow()
         )
+        
+        # Add Prepare Recording menu item
+        self.add_action(
+            icon_path,
+            text=self.tr(u'Prepare Recording'),
+            callback=self.run_prepare_recording,
+            parent=self._iface.mainWindow()
+        )
     
     def unload(self) -> None:
         """Remove the plugin menu item and icon from QGIS GUI."""
@@ -214,6 +223,32 @@ class ArcheoSyncPlugin:
         # This is where you would implement the actual plugin functionality
         # based on the saved settings
         pass
+    
+    def run_prepare_recording(self) -> None:
+        """Run the prepare recording dialog."""
+        # Create and show the prepare recording dialog
+        dialog = PrepareRecordingDialog(
+            layer_service=self._layer_service,
+            settings_manager=self._settings_manager,
+            parent=self._iface.mainWindow()
+        )
+        
+        result = dialog.exec_()
+        
+        # Handle dialog result
+        if result:
+            self._handle_prepare_recording_accepted()
+    
+    def _handle_prepare_recording_accepted(self) -> None:
+        """Handle the case when prepare recording dialog is accepted."""
+        # This is where you would implement the actual recording preparation functionality
+        # For now, we just show a message
+        from qgis.PyQt.QtWidgets import QMessageBox
+        QMessageBox.information(
+            self._iface.mainWindow(),
+            "Prepare Recording",
+            "Recording preparation functionality will be implemented here."
+        )
     
     @property
     def settings_manager(self):

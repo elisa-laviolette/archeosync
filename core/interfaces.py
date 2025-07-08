@@ -232,4 +232,31 @@ class ILayerService(ABC):
         Returns:
             List of field information dictionaries or None if layer not found
         """
+        pass
+
+    @abstractmethod
+    def get_selected_features_count(self, layer_id: str) -> int:
+        """
+        Get the number of selected features in a layer.
+        
+        Args:
+            layer_id: The layer ID to get selected features count for
+            
+        Returns:
+            Number of selected features, 0 if layer not found or no features selected
+        """
+        pass
+
+    @abstractmethod
+    def get_selected_features_info(self, layer_id: str) -> List[Dict[str, Any]]:
+        """
+        Get information about selected features in a layer.
+        
+        Args:
+            layer_id: The layer ID to get selected features for
+            
+        Returns:
+            List of dictionaries containing feature information with 'name' field,
+            sorted alphabetically by name
+        """
         pass 
