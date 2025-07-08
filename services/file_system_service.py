@@ -164,4 +164,38 @@ class QGISFileSystemService(IFileSystemService):
                 if extension is None or self.get_file_extension(item_path).lower() == extension.lower():
                     files.append(item_path)
         
-        return files 
+        return files
+    
+    def is_writable(self, path: str) -> bool:
+        """
+        Check if a path is writable.
+        
+        Args:
+            path: Path to check
+            
+        Returns:
+            True if path is writable, False otherwise
+        """
+        try:
+            test_file = Path(path) / ".test_write"
+            test_file.touch()
+            test_file.unlink()
+            return True
+        except (OSError, PermissionError):
+            return False
+    
+    def is_readable(self, path: str) -> bool:
+        """
+        Check if a path is readable.
+        
+        Args:
+            path: Path to check
+            
+        Returns:
+            True if path is readable, False otherwise
+        """
+        try:
+            list(Path(path).iterdir())
+            return True
+        except (OSError, PermissionError):
+            return False 

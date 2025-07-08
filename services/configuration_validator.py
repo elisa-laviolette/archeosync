@@ -98,14 +98,8 @@ class ArcheoSyncConfigurationValidator(IConfigurationValidator):
             errors.append(f"Field projects folder does not exist: {path}")
         elif not self._file_system_service.is_directory(path):
             errors.append(f"Field projects path is not a directory: {path}")
-        else:
-            # Check if directory is writable
-            try:
-                test_file = Path(path) / ".test_write"
-                test_file.touch()
-                test_file.unlink()
-            except (OSError, PermissionError):
-                errors.append(f"Field projects folder is not writable: {path}")
+        elif not self._file_system_service.is_writable(path):
+            errors.append(f"Field projects folder is not writable: {path}")
         
         return errors
     
@@ -157,12 +151,8 @@ class ArcheoSyncConfigurationValidator(IConfigurationValidator):
             errors.append(f"Completed projects folder does not exist: {path}")
         elif not self._file_system_service.is_directory(path):
             errors.append(f"Completed projects path is not a directory: {path}")
-        else:
-            # Check if directory is readable
-            try:
-                list(Path(path).iterdir())
-            except (OSError, PermissionError):
-                errors.append(f"Completed projects folder is not readable: {path}")
+        elif not self._file_system_service.is_readable(path):
+            errors.append(f"Completed projects folder is not readable: {path}")
         
         return errors
     
@@ -329,6 +319,68 @@ class ArcheoSyncConfigurationValidator(IConfigurationValidator):
         
         return ValidationResult(True, "Field validation successful")
     
+    def validate_layer_relationships(self, recording_areas_layer_id: str, objects_layer_id: str, features_layer_id: str) -> List[str]:
+        """
+        Validate that child layers have proper relationships with the recording areas layer.
+        
+        Args:
+            recording_areas_layer_id: The recording areas layer ID (parent)
+            objects_layer_id: The objects layer ID (child)
+            features_layer_id: The features layer ID (child, optional)
+            
+        Returns:
+            List of validation error messages (empty if valid)
+        """
+        errors = []
+        
+        # If no recording areas layer is set, relationships are not required
+        if not recording_areas_layer_id:
+            return errors
+        
+        # If no child layers are set, relationships are not required
+        if not objects_layer_id and not features_layer_id:
+            return errors
+        
+        if not self._layer_service:
+            errors.append("Layer service not available for relationship validation")
+            return errors
+        
+        # Validate objects layer relationship if set
+        if objects_layer_id:
+            if not self._has_valid_relationship(recording_areas_layer_id, objects_layer_id):
+                errors.append("Objects layer must have a relationship with Recording areas layer")
+        
+        # Validate features layer relationship if set
+        if features_layer_id:
+            if not self._has_valid_relationship(recording_areas_layer_id, features_layer_id):
+                errors.append("Features layer must have a relationship with Recording areas layer")
+        
+        return errors
+
+    def _has_valid_relationship(self, parent_layer_id: str, child_layer_id: str) -> bool:
+        """
+        Check if there is a valid relationship between parent and child layers.
+        
+        Args:
+            parent_layer_id: The parent layer ID (recording areas)
+            child_layer_id: The child layer ID (objects or features)
+            
+        Returns:
+            True if a valid relationship exists, False otherwise
+        """
+        # Get all relationships for the child layer
+        child_relations = self._layer_service.get_layer_relationships(child_layer_id)
+        
+        # Check if any relationship connects the child to the parent
+        for relation in child_relations:
+            # For a valid relationship, the child should be the referencing layer
+            # and the parent should be the referenced layer
+            if (relation.referencingLayerId() == child_layer_id and 
+                relation.referencedLayerId() == parent_layer_id):
+                return True
+        
+        return False
+    
     def validate_all_settings(self, settings: dict) -> dict:
         """
         Validate all plugin settings at once.
@@ -395,6 +447,20 @@ class ArcheoSyncConfigurationValidator(IConfigurationValidator):
             validation_results['features_layer'] = self.validate_features_layer(
                 settings['features_layer']
             )
+        
+        # Validate layer relationships if layers are configured
+        recording_areas_layer = settings.get('recording_areas_layer', '')
+        objects_layer = settings.get('objects_layer', '')
+        features_layer = settings.get('features_layer', '')
+        
+        if recording_areas_layer or objects_layer or features_layer:
+            relationship_errors = self.validate_layer_relationships(
+                recording_areas_layer,
+                objects_layer,
+                features_layer
+            )
+            if relationship_errors:
+                validation_results['layer_relationships'] = relationship_errors
         
         return validation_results
     

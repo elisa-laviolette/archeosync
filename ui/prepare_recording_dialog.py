@@ -137,8 +137,21 @@ class PrepareRecordingDialog(QtWidgets.QDialog):
         """Create the table for displaying selected entities."""
         # Create table widget
         self._entities_table = QtWidgets.QTableWidget()
-        self._entities_table.setColumnCount(1)
-        self._entities_table.setHorizontalHeaderLabels(["Name"])
+        
+        # Get configuration to determine which columns to show
+        objects_layer_id = self._settings_manager.get_value('objects_layer', '')
+        number_field = self._settings_manager.get_value('objects_number_field', '')
+        level_field = self._settings_manager.get_value('objects_level_field', '')
+        
+        # Set up columns
+        columns = ["Name"]
+        if objects_layer_id and number_field:
+            columns.append("Last object number")
+        if objects_layer_id and level_field:
+            columns.append("Last level")
+        
+        self._entities_table.setColumnCount(len(columns))
+        self._entities_table.setHorizontalHeaderLabels(columns)
         
         # Set table properties
         self._entities_table.setAlternatingRowColors(True)
@@ -175,14 +188,23 @@ class PrepareRecordingDialog(QtWidgets.QDialog):
             # Update layer name
             self._recording_areas_label.setText(f"Recording Areas Layer: {layer_info['name']}")
             
-            # Get selected features info
-            selected_features = self._layer_service.get_selected_features_info(recording_areas_layer_id)
+            # Get the actual layer to access selected features
+            recording_layer = self._layer_service.get_layer_by_id(recording_areas_layer_id)
+            if recording_layer is None:
+                self._recording_areas_label.setText("Recording Areas Layer: Layer not found")
+                self._selected_count_label.setText("Selected Entities: 0")
+                self._populate_entities_table([])
+                self._button_box.button(QtWidgets.QDialogButtonBox.Ok).setEnabled(False)
+                return
+            
+            # Get selected features
+            selected_features = recording_layer.selectedFeatures()
             selected_count = len(selected_features)
             
             # Update count label
             self._selected_count_label.setText(f"Selected Entities: {selected_count}")
             
-            # Populate table
+            # Populate table with actual features
             self._populate_entities_table(selected_features)
             
             # Enable/disable OK button based on selection
@@ -203,19 +225,83 @@ class PrepareRecordingDialog(QtWidgets.QDialog):
             self._populate_entities_table([])
             self._button_box.button(QtWidgets.QDialogButtonBox.Ok).setEnabled(False)
     
-    def _populate_entities_table(self, features: List[Dict[str, Any]]) -> None:
+    def _populate_entities_table(self, features) -> None:
         """Populate the entities table with feature information."""
         # Clear existing rows
         self._entities_table.setRowCount(0)
+        
+        # Get configuration
+        objects_layer_id = self._settings_manager.get_value('objects_layer', '')
+        number_field = self._settings_manager.get_value('objects_number_field', '')
+        level_field = self._settings_manager.get_value('objects_level_field', '')
+        
+        # Get the recording areas layer for display expression
+        recording_areas_layer_id = self._settings_manager.get_value('recording_areas_layer', '')
+        recording_layer = self._layer_service.get_layer_by_id(recording_areas_layer_id) if recording_areas_layer_id else None
         
         # Add features to table
         for feature in features:
             row = self._entities_table.rowCount()
             self._entities_table.insertRow(row)
             
+            # Get feature name
+            feature_name = str(feature.id())
+            
+            # Try to get name from display expression
+            if recording_layer:
+                expr_str = recording_layer.displayExpression()
+                if expr_str:
+                    from qgis.core import QgsExpression, QgsExpressionContext, QgsExpressionContextUtils
+                    expr = QgsExpression(expr_str)
+                    context = QgsExpressionContext()
+                    context.appendScope(QgsExpressionContextUtils.layerScope(recording_layer))
+                    context.setFeature(feature)
+                    try:
+                        result = expr.evaluate(context)
+                        if result and str(result) != 'NULL':
+                            feature_name = str(result)
+                    except:
+                        pass
+                
+                # Try to get name from common name fields
+                if feature_name == str(feature.id()):
+                    name_fields = ['name', 'title', 'label', 'description', 'comment']
+                    for field_name in name_fields:
+                        field_idx = recording_layer.fields().indexOf(field_name)
+                        if field_idx >= 0:
+                            value = feature.attribute(field_idx)
+                            if value and str(value) != 'NULL':
+                                feature_name = str(value)
+                                break
+            
             # Add name to the table
-            name_item = QtWidgets.QTableWidgetItem(feature['name'])
+            name_item = QtWidgets.QTableWidgetItem(feature_name)
             self._entities_table.setItem(row, 0, name_item)
+            
+            # Add related objects information if configured
+            col_index = 1
+            
+            if objects_layer_id and number_field:
+                # Get related objects info
+                related_info = self._layer_service.get_related_objects_info(
+                    feature, objects_layer_id, number_field, level_field, recording_areas_layer_id
+                )
+                
+                # Add last number
+                number_item = QtWidgets.QTableWidgetItem(related_info['last_number'])
+                self._entities_table.setItem(row, col_index, number_item)
+                col_index += 1
+            
+            if objects_layer_id and level_field:
+                # Get related objects info (if not already done)
+                if not (objects_layer_id and number_field):
+                    related_info = self._layer_service.get_related_objects_info(
+                        feature, objects_layer_id, number_field, level_field, recording_areas_layer_id
+                    )
+                
+                # Add last level
+                level_item = QtWidgets.QTableWidgetItem(related_info['last_level'])
+                self._entities_table.setItem(row, col_index, level_item)
         
         # Resize columns to content
         self._entities_table.resizeColumnsToContents()

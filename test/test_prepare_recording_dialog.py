@@ -111,8 +111,10 @@ class TestPrepareRecordingDialog(unittest.TestCase):
         }
         self.mock_layer_service.get_layer_info.return_value = layer_info
         
-        # Mock layer service to return empty selected features list
-        self.mock_layer_service.get_selected_features_info.return_value = []
+        # Mock layer with no selected features
+        mock_layer = Mock()
+        mock_layer.selectedFeatures.return_value = []
+        self.mock_layer_service.get_layer_by_id.return_value = mock_layer
         
         # Call the method
         self.dialog._update_selected_count()
@@ -131,8 +133,19 @@ class TestPrepareRecordingDialog(unittest.TestCase):
     
     def test_update_selected_count_with_selection(self):
         """Test update when layer exists and features are selected."""
-        # Mock settings to return a layer ID
-        self.mock_settings_manager.get_value.return_value = 'test_layer_id'
+        # Mock settings to return proper values for all calls
+        def mock_get_value(key, default=None):
+            if key == 'recording_areas_layer':
+                return 'test_layer_id'
+            elif key == 'objects_layer':
+                return ''
+            elif key == 'objects_number_field':
+                return ''
+            elif key == 'objects_level_field':
+                return ''
+            return default
+        
+        self.mock_settings_manager.get_value.side_effect = mock_get_value
         
         # Mock layer service to return layer info
         layer_info = {
@@ -141,13 +154,21 @@ class TestPrepareRecordingDialog(unittest.TestCase):
         }
         self.mock_layer_service.get_layer_info.return_value = layer_info
         
-        # Mock layer service to return selected features info
-        selected_features = [
-            {'name': 'Area A'},
-            {'name': 'Area B'},
-            {'name': 'Area C'}
-        ]
-        self.mock_layer_service.get_selected_features_info.return_value = selected_features
+        # Mock layer with selected features
+        mock_feature1 = Mock()
+        mock_feature1.id.return_value = 1
+        mock_feature2 = Mock()
+        mock_feature2.id.return_value = 2
+        mock_feature3 = Mock()
+        mock_feature3.id.return_value = 3
+        
+        mock_layer = Mock()
+        mock_layer.selectedFeatures.return_value = [mock_feature1, mock_feature2, mock_feature3]
+        mock_layer.displayExpression.return_value = ''  # Empty display expression
+        mock_fields = Mock()
+        mock_fields.indexOf.return_value = -1  # No name fields found
+        mock_layer.fields.return_value = mock_fields
+        self.mock_layer_service.get_layer_by_id.return_value = mock_layer
         
         # Call the method
         self.dialog._update_selected_count()
@@ -166,8 +187,31 @@ class TestPrepareRecordingDialog(unittest.TestCase):
     
     def test_update_selected_count_exception_handling(self):
         """Test update when an exception occurs."""
-        # Mock settings to raise an exception
-        self.mock_settings_manager.get_value.side_effect = Exception("Test exception")
+        # Mock settings to return proper values for all calls
+        def mock_get_value(key, default=None):
+            if key == 'recording_areas_layer':
+                return 'test_layer_id'
+            elif key == 'objects_layer':
+                return ''
+            elif key == 'objects_number_field':
+                return ''
+            elif key == 'objects_level_field':
+                return ''
+            return default
+        
+        self.mock_settings_manager.get_value.side_effect = mock_get_value
+        
+        # Mock layer service to return layer info
+        layer_info = {
+            'name': 'Test Recording Areas',
+            'id': 'test_layer_id'
+        }
+        self.mock_layer_service.get_layer_info.return_value = layer_info
+        
+        # Mock layer to raise exception when selectedFeatures is called
+        mock_layer = Mock()
+        mock_layer.selectedFeatures.side_effect = Exception("Test exception")
+        self.mock_layer_service.get_layer_by_id.return_value = mock_layer
         
         # Call the method
         self.dialog._update_selected_count()
@@ -194,23 +238,58 @@ class TestPrepareRecordingDialog(unittest.TestCase):
 
     def test_populate_entities_table(self):
         """Test populating the entities table with feature data."""
-        # Test data
-        features = [
-            {'name': 'Zone A'},
-            {'name': 'Zone B'},
-            {'name': 'Zone C'}
-        ]
+        # Mock settings
+        self.mock_settings_manager.get_value.side_effect = lambda key, default=None: {
+            'recording_areas_layer': 'recording_layer_id',
+            'objects_layer': '',
+            'objects_number_field': '',
+            'objects_level_field': ''
+        }.get(key, default)
         
-        # Call the method
-        self.dialog._populate_entities_table(features)
+        # Mock layer service
+        mock_layer = Mock()
+        mock_layer.displayExpression.return_value = 'name'
+        mock_fields = Mock()
+        mock_fields.indexOf.return_value = 0
+        mock_layer.fields.return_value = mock_fields
+        self.mock_layer_service.get_layer_by_id.return_value = mock_layer
         
-        # Verify table has correct number of rows
-        self.assertEqual(self.dialog._entities_table.rowCount(), 3)
+        # Mock features
+        mock_feature1 = Mock()
+        mock_feature1.id.return_value = 1
+        mock_feature1.attribute.return_value = 'Zone A'
         
-        # Verify table content
-        self.assertEqual(self.dialog._entities_table.item(0, 0).text(), 'Zone A')
-        self.assertEqual(self.dialog._entities_table.item(1, 0).text(), 'Zone B')
-        self.assertEqual(self.dialog._entities_table.item(2, 0).text(), 'Zone C')
+        mock_feature2 = Mock()
+        mock_feature2.id.return_value = 2
+        mock_feature2.attribute.return_value = 'Zone B'
+        
+        mock_feature3 = Mock()
+        mock_feature3.id.return_value = 3
+        mock_feature3.attribute.return_value = 'Zone C'
+        
+        features = [mock_feature1, mock_feature2, mock_feature3]
+        
+        # Mock QGIS expression evaluation
+        with patch('qgis.core.QgsExpression') as mock_expr_class:
+            with patch('qgis.core.QgsExpressionContext') as mock_context_class:
+                with patch('qgis.core.QgsExpressionContextUtils.layerScope') as mock_scope:
+                    mock_expr = Mock()
+                    mock_expr.evaluate.side_effect = ['Zone A', 'Zone B', 'Zone C']
+                    mock_expr_class.return_value = mock_expr
+                    
+                    mock_context = Mock()
+                    mock_context_class.return_value = mock_context
+                    
+                    # Call the method
+                    self.dialog._populate_entities_table(features)
+                    
+                    # Verify table has correct number of rows
+                    self.assertEqual(self.dialog._entities_table.rowCount(), 3)
+                    
+                    # Verify table content
+                    self.assertEqual(self.dialog._entities_table.item(0, 0).text(), 'Zone A')
+                    self.assertEqual(self.dialog._entities_table.item(1, 0).text(), 'Zone B')
+                    self.assertEqual(self.dialog._entities_table.item(2, 0).text(), 'Zone C')
 
     def test_populate_entities_table_empty(self):
         """Test populating the entities table with empty data."""
@@ -219,6 +298,163 @@ class TestPrepareRecordingDialog(unittest.TestCase):
         
         # Verify table has no rows
         self.assertEqual(self.dialog._entities_table.rowCount(), 0)
+
+    def test_create_entities_table_with_number_field_only(self):
+        """Test table creation when only number field is configured."""
+        # Mock settings to return objects layer and number field only
+        self.mock_settings_manager.get_value.side_effect = lambda key, default=None: {
+            'objects_layer': 'objects_layer_id',
+            'objects_number_field': 'number_field',
+            'objects_level_field': ''
+        }.get(key, default)
+        
+        # Recreate the table
+        self.dialog._create_entities_table(self.dialog._entities_table.parent().layout())
+        
+        # Verify table has correct columns
+        self.assertEqual(self.dialog._entities_table.columnCount(), 2)
+        self.assertEqual(self.dialog._entities_table.horizontalHeaderItem(0).text(), "Name")
+        self.assertEqual(self.dialog._entities_table.horizontalHeaderItem(1).text(), "Last object number")
+
+    def test_create_entities_table_with_level_field_only(self):
+        """Test table creation when only level field is configured."""
+        # Mock settings to return objects layer and level field only
+        self.mock_settings_manager.get_value.side_effect = lambda key, default=None: {
+            'objects_layer': 'objects_layer_id',
+            'objects_number_field': '',
+            'objects_level_field': 'level_field'
+        }.get(key, default)
+        
+        # Recreate the table
+        self.dialog._create_entities_table(self.dialog._entities_table.parent().layout())
+        
+        # Verify table has correct columns
+        self.assertEqual(self.dialog._entities_table.columnCount(), 2)
+        self.assertEqual(self.dialog._entities_table.horizontalHeaderItem(0).text(), "Name")
+        self.assertEqual(self.dialog._entities_table.horizontalHeaderItem(1).text(), "Last level")
+
+    def test_create_entities_table_with_both_fields(self):
+        """Test table creation when both number and level fields are configured."""
+        # Mock settings to return objects layer and both fields
+        self.mock_settings_manager.get_value.side_effect = lambda key, default=None: {
+            'objects_layer': 'objects_layer_id',
+            'objects_number_field': 'number_field',
+            'objects_level_field': 'level_field'
+        }.get(key, default)
+        
+        # Recreate the table
+        self.dialog._create_entities_table(self.dialog._entities_table.parent().layout())
+        
+        # Verify table has correct columns
+        self.assertEqual(self.dialog._entities_table.columnCount(), 3)
+        self.assertEqual(self.dialog._entities_table.horizontalHeaderItem(0).text(), "Name")
+        self.assertEqual(self.dialog._entities_table.horizontalHeaderItem(1).text(), "Last object number")
+        self.assertEqual(self.dialog._entities_table.horizontalHeaderItem(2).text(), "Last level")
+
+    def test_populate_entities_table_with_related_objects(self):
+        """Test populating table with related objects information."""
+        # Mock settings
+        self.mock_settings_manager.get_value.side_effect = lambda key, default=None: {
+            'recording_areas_layer': 'recording_layer_id',
+            'objects_layer': 'objects_layer_id',
+            'objects_number_field': 'number_field',
+            'objects_level_field': 'level_field'
+        }.get(key, default)
+        
+        # Mock layer service
+        mock_layer = Mock()
+        mock_layer.displayExpression.return_value = 'name'
+        mock_fields = Mock()
+        mock_fields.indexOf.return_value = 0
+        mock_layer.fields.return_value = mock_fields
+        self.mock_layer_service.get_layer_by_id.return_value = mock_layer
+        
+        # Mock feature
+        mock_feature = Mock()
+        mock_feature.id.return_value = 1
+        mock_feature.attribute.return_value = 'Test Area'
+        
+        # Mock related objects info
+        self.mock_layer_service.get_related_objects_info.return_value = {
+            'last_number': '15',
+            'last_level': 'Level B'
+        }
+        
+        # Mock QGIS expression evaluation
+        with patch('qgis.core.QgsExpression') as mock_expr_class:
+            with patch('qgis.core.QgsExpressionContext') as mock_context_class:
+                with patch('qgis.core.QgsExpressionContextUtils.layerScope') as mock_scope:
+                    mock_expr = Mock()
+                    mock_expr.evaluate.return_value = 'Test Area'
+                    mock_expr_class.return_value = mock_expr
+                    
+                    mock_context = Mock()
+                    mock_context_class.return_value = mock_context
+                    
+                    # Populate table
+                    self.dialog._populate_entities_table([mock_feature])
+                    
+                    # Verify table has one row
+                    self.assertEqual(self.dialog._entities_table.rowCount(), 1)
+                    
+                    # Verify related objects info was called
+                    self.mock_layer_service.get_related_objects_info.assert_called_once_with(
+                        mock_feature, 'objects_layer_id', 'number_field', 'level_field', 'recording_layer_id'
+                    )
+                    
+                    # Verify table items (basic check - actual values depend on table recreation)
+                    self.assertIsNotNone(self.dialog._entities_table.item(0, 0))
+
+    def test_populate_entities_table_no_related_objects(self):
+        """Test populating table when no related objects exist."""
+        # Mock settings
+        self.mock_settings_manager.get_value.side_effect = lambda key, default=None: {
+            'recording_areas_layer': 'recording_layer_id',
+            'objects_layer': 'objects_layer_id',
+            'objects_number_field': 'number_field',
+            'objects_level_field': 'level_field'
+        }.get(key, default)
+        
+        # Mock layer service
+        mock_layer = Mock()
+        mock_layer.displayExpression.return_value = 'name'
+        mock_fields = Mock()
+        mock_fields.indexOf.return_value = 0
+        mock_layer.fields.return_value = mock_fields
+        self.mock_layer_service.get_layer_by_id.return_value = mock_layer
+        
+        # Mock feature
+        mock_feature = Mock()
+        mock_feature.id.return_value = 1
+        mock_feature.attribute.return_value = 'Test Area'
+        
+        # Mock related objects info (empty)
+        self.mock_layer_service.get_related_objects_info.return_value = {
+            'last_number': '',
+            'last_level': ''
+        }
+        
+        # Mock QGIS expression evaluation
+        with patch('qgis.core.QgsExpression') as mock_expr_class:
+            with patch('qgis.core.QgsExpressionContext') as mock_context_class:
+                with patch('qgis.core.QgsExpressionContextUtils.layerScope') as mock_scope:
+                    mock_expr = Mock()
+                    mock_expr.evaluate.return_value = 'Test Area'
+                    mock_expr_class.return_value = mock_expr
+                    
+                    mock_context = Mock()
+                    mock_context_class.return_value = mock_context
+                    
+                    # Populate table
+                    self.dialog._populate_entities_table([mock_feature])
+                    
+                    # Verify table has one row
+                    self.assertEqual(self.dialog._entities_table.rowCount(), 1)
+                    
+                    # Verify related objects info was called
+                    self.mock_layer_service.get_related_objects_info.assert_called_once_with(
+                        mock_feature, 'objects_layer_id', 'number_field', 'level_field', 'recording_layer_id'
+                    )
 
 
 if __name__ == '__main__':

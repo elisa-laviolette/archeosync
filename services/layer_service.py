@@ -235,34 +235,164 @@ class QGISLayerService(ILayerService):
             expr = QgsExpression(expr_str)
             context = QgsExpressionContext()
             context.appendScope(QgsExpressionContextUtils.layerScope(layer))
+        
         for feature in selected_features:
-            # Try to get a display name from the display expression if available
+            feature_name = str(feature.id())
+            
+            # Try to get name from display expression
             if expr and context:
+                context.setFeature(feature)
                 try:
-                    context.setFeature(feature)
-                    name = expr.evaluate(context)
-                    if name and str(name).strip():
-                        features_info.append({'name': str(name).strip()})
-                        continue
-                except Exception as ex:
-                    print(f"LayerService: Error evaluating display expression for feature {feature.id()}: {ex}")
-            # Fallback: try to get a name from common field names
-            name_fields = ['name', 'NAME', 'Name', 'title', 'TITLE', 'Title', 'label', 'LABEL', 'Label']
-            for field_name in name_fields:
-                field_idx = layer.fields().indexOf(field_name)
-                if field_idx >= 0:
-                    try:
-                        name = feature.attribute(field_idx)
-                        if name and str(name).strip():
-                            features_info.append({'name': str(name).strip()})
+                    result = expr.evaluate(context)
+                    if result and str(result) != 'NULL':
+                        feature_name = str(result)
+                except:
+                    pass
+            
+            # Try to get name from common name fields
+            if feature_name == str(feature.id()):
+                name_fields = ['name', 'title', 'label', 'description', 'comment']
+                for field_name in name_fields:
+                    field_idx = layer.fields().indexOf(field_name)
+                    if field_idx >= 0:
+                        value = feature.attribute(field_idx)
+                        if value and str(value) != 'NULL':
+                            feature_name = str(value)
                             break
-                    except Exception as ex:
-                        print(f"LayerService: Error extracting field '{field_name}' for feature {feature.id()}: {ex}")
-            else:
-                # If no name field found, use feature ID
-                features_info.append({'name': f"Feature {feature.id()}"})
+            
+            features_info.append({'name': feature_name})
         
-        # Sort by name alphabetically
+        # Sort by name
         features_info.sort(key=lambda x: x['name'].lower())
+        return features_info
+
+    def get_layer_relationships(self, layer_id: str) -> List[Any]:
+        """
+        Get all relationships for a layer.
         
-        return features_info 
+        Args:
+            layer_id: The layer ID to get relationships for
+            
+        Returns:
+            List of relationship objects or empty list if no relationships found
+        """
+        layer = self.get_layer_by_id(layer_id)
+        if layer is None:
+            return []
+        
+        project = QgsProject.instance()
+        relation_manager = project.relationManager()
+        
+        # Get all relations where this layer is either the referencing or referenced layer
+        relations = []
+        
+        # Get relations where this layer is the referencing layer (child)
+        for relation in relation_manager.relations().values():
+            if relation.referencingLayerId() == layer_id:
+                relations.append(relation)
+        
+        # Get relations where this layer is the referenced layer (parent)
+        for relation in relation_manager.relations().values():
+            if relation.referencedLayerId() == layer_id:
+                relations.append(relation)
+        
+        return relations
+
+    def get_related_objects_info(self, recording_area_feature, objects_layer_id: str, 
+                                number_field: Optional[str], level_field: Optional[str], recording_areas_layer_id: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Get information about objects related to a recording area feature.
+        
+        Args:
+            recording_area_feature: The recording area feature to get related objects for
+            objects_layer_id: The objects layer ID
+            number_field: The number field name (optional)
+            level_field: The level field name (optional)
+            recording_areas_layer_id: The recording areas layer ID (parent layer, required for relation lookup)
+                - This is now required because QgsFeature does not provide a .layer() method.
+        
+        Returns:
+            Dictionary with 'last_number' and 'last_level' values, or empty strings if not found
+        """
+        if not objects_layer_id or not recording_areas_layer_id:
+            return {'last_number': '', 'last_level': ''}
+        
+        # Get the objects layer
+        objects_layer = self.get_layer_by_id(objects_layer_id)
+        if not objects_layer:
+            return {'last_number': '', 'last_level': ''}
+        
+        # Get relationships where objects layer is the referencing layer (child)
+        project = QgsProject.instance()
+        relation_manager = project.relationManager()
+        
+        related_objects = []
+        for relation in relation_manager.relations().values():
+            if (relation.referencingLayerId() == objects_layer_id and 
+                relation.referencedLayerId() == recording_areas_layer_id):
+                # Get related features
+                related_features = relation.getRelatedFeatures(recording_area_feature)
+                related_objects.extend(related_features)
+                break
+        
+        if not related_objects:
+            return {'last_number': '', 'last_level': ''}
+        
+        # Get field indices
+        number_field_idx = -1
+        level_field_idx = -1
+        
+        if number_field:
+            number_field_idx = objects_layer.fields().indexOf(number_field)
+        
+        if level_field:
+            level_field_idx = objects_layer.fields().indexOf(level_field)
+        
+        # Find highest number and last level
+        highest_number = None
+        level_values = []
+        
+        for obj_feature in related_objects:
+            # Get number value
+            if number_field_idx >= 0:
+                number_value = obj_feature.attribute(number_field_idx)
+                if number_value is not None and str(number_value) != 'NULL':
+                    try:
+                        number_int = int(number_value)
+                        if highest_number is None or number_int > highest_number:
+                            highest_number = number_int
+                    except (ValueError, TypeError):
+                        pass
+            
+            # Get level value
+            if level_field_idx >= 0:
+                level_value = obj_feature.attribute(level_field_idx)
+                if level_value is not None and str(level_value) != 'NULL':
+                    level_values.append(str(level_value))
+        
+        # Determine last level
+        last_level = ''
+        if level_values:
+            # Sort based on field type
+            field_info = self.get_layer_fields(objects_layer_id)
+            if field_info:
+                level_field_info = next((f for f in field_info if f['name'] == level_field), None)
+                if level_field_info and level_field_info['is_integer']:
+                    # Numeric field - sort numerically
+                    try:
+                        numeric_levels = [int(v) for v in level_values]
+                        numeric_levels.sort()
+                        last_level = str(numeric_levels[-1])
+                    except (ValueError, TypeError):
+                        # Fall back to alphabetical sorting
+                        level_values.sort()
+                        last_level = level_values[-1]
+                else:
+                    # String field - sort alphabetically
+                    level_values.sort()
+                    last_level = level_values[-1]
+        
+        return {
+            'last_number': str(highest_number) if highest_number is not None else '',
+            'last_level': last_level
+        } 

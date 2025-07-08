@@ -78,6 +78,31 @@ class IFileSystemService(ABC):
     def create_directory(self, path: str) -> bool:
         """Create a directory if it doesn't exist."""
         pass
+    
+    @abstractmethod
+    def is_directory(self, path: str) -> bool:
+        """Check if a path is a directory."""
+        pass
+    
+    @abstractmethod
+    def is_file(self, path: str) -> bool:
+        """Check if a path is a file."""
+        pass
+    
+    @abstractmethod
+    def is_writable(self, path: str) -> bool:
+        """Check if a path is writable."""
+        pass
+    
+    @abstractmethod
+    def is_readable(self, path: str) -> bool:
+        """Check if a path is readable."""
+        pass
+    
+    @abstractmethod
+    def list_files(self, directory: str, extension: Optional[str] = None) -> list:
+        """List files in a directory."""
+        pass
 
 
 class ITranslationService(ABC):
@@ -197,6 +222,21 @@ class IConfigurationValidator(ABC):
         """
         pass
 
+    @abstractmethod
+    def validate_layer_relationships(self, recording_areas_layer_id: str, objects_layer_id: str, features_layer_id: str) -> List[str]:
+        """
+        Validate that child layers have proper relationships with the recording areas layer.
+        
+        Args:
+            recording_areas_layer_id: The recording areas layer ID (parent)
+            objects_layer_id: The objects layer ID (child)
+            features_layer_id: The features layer ID (child, optional)
+            
+        Returns:
+            List of validation error messages (empty if valid)
+        """
+        pass
+
 
 class ILayerService(ABC):
     """Interface for QGIS layer operations."""
@@ -258,5 +298,35 @@ class ILayerService(ABC):
         Returns:
             List of dictionaries containing feature information with 'name' field,
             sorted alphabetically by name
+        """
+        pass
+
+    @abstractmethod
+    def get_layer_relationships(self, layer_id: str) -> List[Any]:
+        """
+        Get all relationships for a layer.
+        
+        Args:
+            layer_id: The layer ID to get relationships for
+            
+        Returns:
+            List of relationship objects or empty list if no relationships found
+        """
+        pass
+
+    @abstractmethod
+    def get_related_objects_info(self, recording_area_feature, objects_layer_id: str, 
+                                number_field: Optional[str], level_field: Optional[str]) -> Dict[str, Any]:
+        """
+        Get information about objects related to a recording area feature.
+        
+        Args:
+            recording_area_feature: The recording area feature to get related objects for
+            objects_layer_id: The objects layer ID
+            number_field: The number field name (optional)
+            level_field: The level field name (optional)
+            
+        Returns:
+            Dictionary with 'last_number' and 'last_level' values, or empty strings if not found
         """
         pass 

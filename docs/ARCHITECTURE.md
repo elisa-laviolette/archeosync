@@ -103,6 +103,13 @@ Interface for QGIS layer operations:
 - `get_selected_features_count(layer_id: str) -> int`
 - `get_selected_features_info(layer_id: str) -> List[Dict[str, Any]]`
 - `get_layer_info(layer_id: str) -> Optional[Dict[str, Any]]`
+- `get_related_objects_info(
+    recording_area_feature,
+    objects_layer_id: str,
+    number_field: Optional[str],
+    level_field: Optional[str],
+    recording_areas_layer_id: Optional[str] = None
+) -> Dict[str, Any]`
 
 ## Service Implementations
 
@@ -155,3 +162,37 @@ Test UI components with mocked services.
 - **Strategy Pattern**: Different implementations can be swapped
 - **Factory Pattern**: Service creation and management
 - **Observer Pattern**: UI updates based on state changes 
+
+## QGISLayerService.get_related_objects_info Update
+
+### New Signature
+
+```
+def get_related_objects_info(
+    recording_area_feature,
+    objects_layer_id: str,
+    number_field: Optional[str],
+    level_field: Optional[str],
+    recording_areas_layer_id: Optional[str] = None
+) -> Dict[str, Any]
+```
+
+- **recording_area_feature**: The feature in the recording areas layer.
+- **objects_layer_id**: The ID of the objects layer.
+- **number_field**: The name of the number field (optional).
+- **level_field**: The name of the level field (optional).
+- **recording_areas_layer_id**: The ID of the recording areas (parent) layer. **Required** for correct relationship lookup.
+
+### Rationale
+Previously, the method attempted to access `feature.layer()`, which is not available on QgsFeature. The new signature requires the parent layer ID to be passed explicitly, ensuring compatibility and correctness.
+
+### Usage Example
+```python
+related_info = layer_service.get_related_objects_info(
+    feature, objects_layer_id, number_field, level_field, recording_areas_layer_id
+)
+```
+
+### Impact
+- All usages in dialogs and tests must now provide the parent layer ID.
+- This change improves reliability and avoids runtime errors. 

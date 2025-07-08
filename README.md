@@ -36,21 +36,40 @@ A QGIS plugin for archaeologists to prepare data for field recording and import 
 
 ## Usage
 
-### Basic Setup
+### Setup
 
-1. **Launch the plugin**: Go to Plugins → ArcheoSync → Configuration
-2. **Configure settings**: Set up your folder paths and preferences
+1. **Open the configuration**: Go to Plugins → ArcheoSync → Configuration
+2. **Configure folders**: Set up your folder paths
 3. **Select recording areas layer**: Choose a polygon layer from your project for recording areas
 4. **Configure objects layer**: Select a mandatory polygon/multipolygon layer for objects with optional field selections
-5. **Configure features layer**: Optionally select a polygon/multipolygon layer for features
-6. **Validate configuration**: The plugin will validate all settings
-7. **Save settings**: Click OK to save your configuration
+The objects layer must have a relationship with the recording areas layer:
+   - The relationship defines which objects belong to which recording area
+   - The objects layer should be the child layer (referencing layer)
+   - The recording areas layer should be the parent layer (referenced layer)
+   - The relationship can be configured in QGIS Layer Properties → Relations
+
+5. **Configure objects layer fields**: 
+- **Number Field**: Choose an integer field to track sequential object numbers
+  - Must be an integer type field
+  - Used to determine the next available number for new objects
+  - The plugin will show the last used number for each recording area
+- **Level Field**: Choose a field to record object levels
+  - Can be any field type (text, numeric, etc.)
+  - Used to track subsequent recordings in the same area
+  - The plugin will show the last recorded level for each recording area
+
+6. **Configure features layer**: Optionally select a polygon/multipolygon layer for features
+7. **Validate configuration**: The plugin will validate all settings
+8. **Save settings**: Click OK to save your configuration
 
 ### Recording Preparation
 
 1. **Select entities**: In your QGIS project, select entities in the configured Recording areas layer
 2. **Open Prepare Recording**: Go to Plugins → ArcheoSync → Prepare Recording
-3. **Review selection**: The dialog will show the number of selected entities and display them in a table
+3. **Review selection**: The dialog will show the number of selected entities and display them in a table with:
+   - Entity name (from display expression or common fields)
+   - Last object number (if configured)
+   - Last level (if configured)
 4. **Prepare recording**: Click "Prepare Recording" to continue (only enabled when entities are selected)
 
 The table displays entity names sorted alphabetically. Names are extracted from:
