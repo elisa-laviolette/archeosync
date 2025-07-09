@@ -329,4 +329,19 @@ class ILayerService(ABC):
         Returns:
             Dictionary with 'last_number' and 'last_level' values, or empty strings if not found
         """
+        pass
+
+    @abstractmethod
+    def calculate_next_level(self, last_level: str, level_field: str, objects_layer_id: str) -> str:
+        """
+        Calculate the next level value based on the last level and field type.
+        
+        Args:
+            last_level: The last level value (can be empty string)
+            level_field: The level field name
+            objects_layer_id: The objects layer ID
+            
+        Returns:
+            The next level value as a string
+        """
         pass 

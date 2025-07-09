@@ -14,6 +14,8 @@ __copyright__ = 'Copyright 2025, Elisa Caron-Laviolette'
 
 import unittest
 from unittest.mock import Mock, patch, MagicMock
+from qgis.PyQt import QtWidgets
+from qgis.PyQt.QtCore import Qt
 
 # Try to import QGIS modules, skip tests if not available
 try:
@@ -299,40 +301,6 @@ class TestPrepareRecordingDialog(unittest.TestCase):
         # Verify table has no rows
         self.assertEqual(self.dialog._entities_table.rowCount(), 0)
 
-    def test_create_entities_table_with_number_field_only(self):
-        """Test table creation when only number field is configured."""
-        # Mock settings to return objects layer and number field only
-        self.mock_settings_manager.get_value.side_effect = lambda key, default=None: {
-            'objects_layer': 'objects_layer_id',
-            'objects_number_field': 'number_field',
-            'objects_level_field': ''
-        }.get(key, default)
-        
-        # Recreate the table
-        self.dialog._create_entities_table(self.dialog._entities_table.parent().layout())
-        
-        # Verify table has correct columns
-        self.assertEqual(self.dialog._entities_table.columnCount(), 2)
-        self.assertEqual(self.dialog._entities_table.horizontalHeaderItem(0).text(), "Name")
-        self.assertEqual(self.dialog._entities_table.horizontalHeaderItem(1).text(), "Last object number")
-
-    def test_create_entities_table_with_level_field_only(self):
-        """Test table creation when only level field is configured."""
-        # Mock settings to return objects layer and level field only
-        self.mock_settings_manager.get_value.side_effect = lambda key, default=None: {
-            'objects_layer': 'objects_layer_id',
-            'objects_number_field': '',
-            'objects_level_field': 'level_field'
-        }.get(key, default)
-        
-        # Recreate the table
-        self.dialog._create_entities_table(self.dialog._entities_table.parent().layout())
-        
-        # Verify table has correct columns
-        self.assertEqual(self.dialog._entities_table.columnCount(), 2)
-        self.assertEqual(self.dialog._entities_table.horizontalHeaderItem(0).text(), "Name")
-        self.assertEqual(self.dialog._entities_table.horizontalHeaderItem(1).text(), "Last level")
-
     def test_create_entities_table_with_both_fields(self):
         """Test table creation when both number and level fields are configured."""
         # Mock settings to return objects layer and both fields
@@ -346,13 +314,15 @@ class TestPrepareRecordingDialog(unittest.TestCase):
         self.dialog._create_entities_table(self.dialog._entities_table.parent().layout())
         
         # Verify table has correct columns
-        self.assertEqual(self.dialog._entities_table.columnCount(), 3)
+        self.assertEqual(self.dialog._entities_table.columnCount(), 5)
         self.assertEqual(self.dialog._entities_table.horizontalHeaderItem(0).text(), "Name")
         self.assertEqual(self.dialog._entities_table.horizontalHeaderItem(1).text(), "Last object number")
-        self.assertEqual(self.dialog._entities_table.horizontalHeaderItem(2).text(), "Last level")
+        self.assertEqual(self.dialog._entities_table.horizontalHeaderItem(2).text(), "Next object number")
+        self.assertEqual(self.dialog._entities_table.horizontalHeaderItem(3).text(), "Last level")
+        self.assertEqual(self.dialog._entities_table.horizontalHeaderItem(4).text(), "Next level")
 
-    def test_populate_entities_table_with_related_objects(self):
-        """Test populating table with related objects information."""
+    def test_populate_entities_table_with_next_values(self):
+        """Test populating table with next object number and next level values."""
         # Mock settings
         self.mock_settings_manager.get_value.side_effect = lambda key, default=None: {
             'recording_areas_layer': 'recording_layer_id',
@@ -380,6 +350,9 @@ class TestPrepareRecordingDialog(unittest.TestCase):
             'last_level': 'Level B'
         }
         
+        # Mock calculate_next_level
+        self.mock_layer_service.calculate_next_level.return_value = 'Level C'
+        
         # Mock QGIS expression evaluation
         with patch('qgis.core.QgsExpression') as mock_expr_class:
             with patch('qgis.core.QgsExpressionContext') as mock_context_class:
@@ -402,8 +375,267 @@ class TestPrepareRecordingDialog(unittest.TestCase):
                         mock_feature, 'objects_layer_id', 'number_field', 'level_field', 'recording_layer_id'
                     )
                     
-                    # Verify table items (basic check - actual values depend on table recreation)
-                    self.assertIsNotNone(self.dialog._entities_table.item(0, 0))
+                    # Verify calculate_next_level was called
+                    self.mock_layer_service.calculate_next_level.assert_called_once_with(
+                        'Level B', 'level_field', 'objects_layer_id'
+                    )
+
+    def test_get_next_values_for_feature(self):
+        """Test getting next values for a specific feature."""
+        # Mock settings
+        self.mock_settings_manager.get_value.side_effect = lambda key, default=None: {
+            'objects_layer': 'objects_layer_id',
+            'objects_number_field': 'number_field',
+            'objects_level_field': 'level_field'
+        }.get(key, default)
+        
+        # Mock layer service
+        mock_layer = Mock()
+        mock_layer.displayExpression.return_value = 'name'
+        mock_fields = Mock()
+        mock_fields.indexOf.return_value = 0
+        mock_layer.fields.return_value = mock_fields
+        self.mock_layer_service.get_layer_by_id.return_value = mock_layer
+        
+        # Mock feature
+        mock_feature = Mock()
+        mock_feature.id.return_value = 1
+        mock_feature.attribute.return_value = 'Test Area'
+        
+        # Mock related objects info
+        self.mock_layer_service.get_related_objects_info.return_value = {
+            'last_number': '15',
+            'last_level': 'Level B'
+        }
+        
+        # Mock calculate_next_level
+        self.mock_layer_service.calculate_next_level.return_value = 'Level C'
+        
+        # Mock QGIS expression evaluation
+        with patch('qgis.core.QgsExpression') as mock_expr_class:
+            with patch('qgis.core.QgsExpressionContext') as mock_context_class:
+                with patch('qgis.core.QgsExpressionContextUtils.layerScope') as mock_scope:
+                    mock_expr = Mock()
+                    mock_expr.evaluate.return_value = 'Test Area'
+                    mock_expr_class.return_value = mock_expr
+                    
+                    mock_context = Mock()
+                    mock_context_class.return_value = mock_context
+                    
+                    # Populate table
+                    self.dialog._populate_entities_table([mock_feature])
+                    
+                    # Test getting next values
+                    result = self.dialog.get_next_values_for_feature(0)
+                    
+                    # Verify result contains expected values
+                    self.assertEqual(result['next_number'], '16')  # 15 + 1
+                    self.assertEqual(result['next_level'], 'Level C')
+
+    def test_get_next_values_for_feature_invalid_index(self):
+        """Test getting next values for an invalid feature index."""
+        result = self.dialog.get_next_values_for_feature(999)
+        self.assertEqual(result['next_number'], '')
+        self.assertEqual(result['next_level'], '')
+
+    def test_get_all_next_values(self):
+        """Test getting next values for all features."""
+        # Mock settings
+        self.mock_settings_manager.get_value.side_effect = lambda key, default=None: {
+            'objects_layer': 'objects_layer_id',
+            'objects_number_field': 'number_field',
+            'objects_level_field': 'level_field'
+        }.get(key, default)
+        
+        # Mock layer service
+        mock_layer = Mock()
+        mock_layer.displayExpression.return_value = 'name'
+        mock_fields = Mock()
+        mock_fields.indexOf.return_value = 0
+        mock_layer.fields.return_value = mock_fields
+        self.mock_layer_service.get_layer_by_id.return_value = mock_layer
+        
+        # Mock features
+        mock_feature1 = Mock()
+        mock_feature1.id.return_value = 1
+        mock_feature1.attribute.return_value = 'Test Area 1'
+        
+        mock_feature2 = Mock()
+        mock_feature2.id.return_value = 2
+        mock_feature2.attribute.return_value = 'Test Area 2'
+        
+        # Mock related objects info
+        self.mock_layer_service.get_related_objects_info.return_value = {
+            'last_number': '15',
+            'last_level': 'Level B'
+        }
+        
+        # Mock calculate_next_level
+        self.mock_layer_service.calculate_next_level.return_value = 'Level C'
+        
+        # Mock QGIS expression evaluation
+        with patch('qgis.core.QgsExpression') as mock_expr_class:
+            with patch('qgis.core.QgsExpressionContext') as mock_context_class:
+                with patch('qgis.core.QgsExpressionContextUtils.layerScope') as mock_scope:
+                    mock_expr = Mock()
+                    mock_expr.evaluate.side_effect = ['Test Area 1', 'Test Area 2']
+                    mock_expr_class.return_value = mock_expr
+                    
+                    mock_context = Mock()
+                    mock_context_class.return_value = mock_context
+                    
+                    # Populate table
+                    self.dialog._populate_entities_table([mock_feature1, mock_feature2])
+                    
+                    # Test getting all next values
+                    results = self.dialog.get_all_next_values()
+                    
+                    # Verify results
+                    self.assertEqual(len(results), 2)
+                    self.assertEqual(results[0]['next_number'], '16')
+                    self.assertEqual(results[0]['next_level'], 'Level C')
+                    self.assertEqual(results[1]['next_number'], '16')
+                    self.assertEqual(results[1]['next_level'], 'Level C')
+
+    def test_table_editing_enabled(self):
+        """Test that table editing is enabled for next value columns."""
+        # Mock settings to return objects layer and both fields
+        self.mock_settings_manager.get_value.side_effect = lambda key, default=None: {
+            'objects_layer': 'objects_layer_id',
+            'objects_number_field': 'number_field',
+            'objects_level_field': 'level_field'
+        }.get(key, default)
+        
+        # Recreate the table
+        self.dialog._create_entities_table(self.dialog._entities_table.parent().layout())
+        
+        # Verify editing is enabled
+        edit_triggers = self.dialog._entities_table.editTriggers()
+        expected_triggers = QtWidgets.QAbstractItemView.DoubleClicked | QtWidgets.QAbstractItemView.EditKeyPressed
+        self.assertEqual(edit_triggers, expected_triggers)
+
+    def test_populate_entities_table_with_number_field_only(self):
+        """Test populating table when only number field is configured."""
+        # Mock settings to return objects layer and number field only
+        def mock_get_value(key, default=None):
+            if key == 'recording_areas_layer':
+                return 'recording_layer_id'
+            elif key == 'objects_layer':
+                return 'objects_layer_id'
+            elif key == 'objects_number_field':
+                return 'number_field'
+            elif key == 'objects_level_field':
+                return ''
+            return default
+        
+        self.mock_settings_manager.get_value.side_effect = mock_get_value
+        
+        # Recreate the table with the new configuration
+        self.dialog._create_entities_table(self.dialog._entities_table.parent().layout())
+        
+        # Mock layer service
+        mock_layer = Mock()
+        mock_layer.displayExpression.return_value = 'name'
+        mock_fields = Mock()
+        mock_fields.indexOf.return_value = 0
+        mock_layer.fields.return_value = mock_fields
+        self.mock_layer_service.get_layer_by_id.return_value = mock_layer
+        
+        # Mock feature
+        mock_feature = Mock()
+        mock_feature.id.return_value = 1
+        mock_feature.attribute.return_value = 'Test Area'
+        
+        # Mock related objects info
+        self.mock_layer_service.get_related_objects_info.return_value = {
+            'last_number': '10',
+            'last_level': ''
+        }
+        
+        # Mock QGIS expression evaluation
+        with patch('qgis.core.QgsExpression') as mock_expr_class:
+            with patch('qgis.core.QgsExpressionContext') as mock_context_class:
+                with patch('qgis.core.QgsExpressionContextUtils.layerScope') as mock_scope:
+                    mock_expr = Mock()
+                    mock_expr.evaluate.return_value = 'Test Area'
+                    mock_expr_class.return_value = mock_expr
+                    
+                    mock_context = Mock()
+                    mock_context_class.return_value = mock_context
+                    
+                    # Populate table
+                    self.dialog._populate_entities_table([mock_feature])
+                    
+                    # Verify table has correct number of columns
+                    self.assertEqual(self.dialog._entities_table.columnCount(), 3)  # Name, Last number, Next number
+                    
+                    # Verify next number is calculated correctly
+                    result = self.dialog.get_next_values_for_feature(0)
+                    self.assertEqual(result['next_number'], '11')  # 10 + 1
+                    self.assertEqual(result['next_level'], '')  # No level field configured
+
+    def test_populate_entities_table_with_level_field_only(self):
+        """Test populating table when only level field is configured."""
+        # Mock settings to return objects layer and level field only
+        def mock_get_value(key, default=None):
+            if key == 'recording_areas_layer':
+                return 'recording_layer_id'
+            elif key == 'objects_layer':
+                return 'objects_layer_id'
+            elif key == 'objects_number_field':
+                return ''
+            elif key == 'objects_level_field':
+                return 'level_field'
+            return default
+        
+        self.mock_settings_manager.get_value.side_effect = mock_get_value
+        
+        # Recreate the table with the new configuration
+        self.dialog._create_entities_table(self.dialog._entities_table.parent().layout())
+        
+        # Mock layer service
+        mock_layer = Mock()
+        mock_layer.displayExpression.return_value = 'name'
+        mock_fields = Mock()
+        mock_fields.indexOf.return_value = 0
+        mock_layer.fields.return_value = mock_fields
+        self.mock_layer_service.get_layer_by_id.return_value = mock_layer
+        
+        # Mock feature
+        mock_feature = Mock()
+        mock_feature.id.return_value = 1
+        mock_feature.attribute.return_value = 'Test Area'
+        
+        # Mock related objects info
+        self.mock_layer_service.get_related_objects_info.return_value = {
+            'last_number': '',
+            'last_level': 'Level A'
+        }
+        
+        # Mock calculate_next_level
+        self.mock_layer_service.calculate_next_level.return_value = 'Level B'
+        
+        # Mock QGIS expression evaluation
+        with patch('qgis.core.QgsExpression') as mock_expr_class:
+            with patch('qgis.core.QgsExpressionContext') as mock_context_class:
+                with patch('qgis.core.QgsExpressionContextUtils.layerScope') as mock_scope:
+                    mock_expr = Mock()
+                    mock_expr.evaluate.return_value = 'Test Area'
+                    mock_expr_class.return_value = mock_expr
+                    
+                    mock_context = Mock()
+                    mock_context_class.return_value = mock_context
+                    
+                    # Populate table
+                    self.dialog._populate_entities_table([mock_feature])
+                    
+                    # Verify table has correct number of columns
+                    self.assertEqual(self.dialog._entities_table.columnCount(), 3)  # Name, Last level, Next level
+                    
+                    # Verify next level is calculated correctly
+                    result = self.dialog.get_next_values_for_feature(0)
+                    self.assertEqual(result['next_number'], '')  # No number field configured
+                    self.assertEqual(result['next_level'], 'Level B')
 
     def test_populate_entities_table_no_related_objects(self):
         """Test populating table when no related objects exist."""
@@ -434,6 +666,9 @@ class TestPrepareRecordingDialog(unittest.TestCase):
             'last_level': ''
         }
         
+        # Mock calculate_next_level
+        self.mock_layer_service.calculate_next_level.return_value = 'a'
+        
         # Mock QGIS expression evaluation
         with patch('qgis.core.QgsExpression') as mock_expr_class:
             with patch('qgis.core.QgsExpressionContext') as mock_context_class:
@@ -448,13 +683,136 @@ class TestPrepareRecordingDialog(unittest.TestCase):
                     # Populate table
                     self.dialog._populate_entities_table([mock_feature])
                     
-                    # Verify table has one row
-                    self.assertEqual(self.dialog._entities_table.rowCount(), 1)
+                    # Verify next values are set to defaults
+                    result = self.dialog.get_next_values_for_feature(0)
+                    self.assertEqual(result['next_number'], '1')  # Default when no last number
+                    self.assertEqual(result['next_level'], 'a')  # Default when no last level
+
+    def test_read_only_columns_not_editable(self):
+        """Test that last number and last level columns are read-only."""
+        # Mock settings
+        self.mock_settings_manager.get_value.side_effect = lambda key, default=None: {
+            'recording_areas_layer': 'recording_layer_id',
+            'objects_layer': 'objects_layer_id',
+            'objects_number_field': 'number_field',
+            'objects_level_field': 'level_field'
+        }.get(key, default)
+        
+        # Mock layer service
+        mock_layer = Mock()
+        mock_layer.displayExpression.return_value = 'name'
+        mock_fields = Mock()
+        mock_fields.indexOf.return_value = 0
+        mock_layer.fields.return_value = mock_fields
+        self.mock_layer_service.get_layer_by_id.return_value = mock_layer
+        
+        # Mock feature
+        mock_feature = Mock()
+        mock_feature.id.return_value = 1
+        mock_feature.attribute.return_value = 'Test Area'
+        
+        # Mock related objects info
+        self.mock_layer_service.get_related_objects_info.return_value = {
+            'last_number': '15',
+            'last_level': 'Level B'
+        }
+        
+        # Mock calculate_next_level
+        self.mock_layer_service.calculate_next_level.return_value = 'Level C'
+        
+        # Mock QGIS expression evaluation
+        with patch('qgis.core.QgsExpression') as mock_expr_class:
+            with patch('qgis.core.QgsExpressionContext') as mock_context_class:
+                with patch('qgis.core.QgsExpressionContextUtils.layerScope') as mock_scope:
+                    mock_expr = Mock()
+                    mock_expr.evaluate.return_value = 'Test Area'
+                    mock_expr_class.return_value = mock_expr
                     
-                    # Verify related objects info was called
-                    self.mock_layer_service.get_related_objects_info.assert_called_once_with(
-                        mock_feature, 'objects_layer_id', 'number_field', 'level_field', 'recording_layer_id'
+                    mock_context = Mock()
+                    mock_context_class.return_value = mock_context
+                    
+                    # Populate table
+                    self.dialog._populate_entities_table([mock_feature])
+                    
+                    # Verify last number column is read-only
+                    last_number_item = self.dialog._entities_table.item(0, 1)  # Last number column
+                    self.assertFalse(last_number_item.flags() & Qt.ItemIsEditable)
+                    
+                    # Verify last level column is read-only
+                    last_level_item = self.dialog._entities_table.item(0, 3)  # Last level column
+                    self.assertFalse(last_level_item.flags() & Qt.ItemIsEditable)
+                    
+                    # Verify next number column is editable
+                    next_number_item = self.dialog._entities_table.item(0, 2)  # Next number column
+                    self.assertTrue(next_number_item.flags() & Qt.ItemIsEditable)
+                    
+                    # Verify next level column is editable
+                    next_level_item = self.dialog._entities_table.item(0, 4)  # Next level column
+                    self.assertTrue(next_level_item.flags() & Qt.ItemIsEditable)
+
+    def test_case_preservation_in_next_level_calculation(self):
+        """Test that case is preserved when calculating next levels."""
+        # Mock settings
+        def mock_get_value(key, default=None):
+            if key == 'recording_areas_layer':
+                return 'recording_layer_id'
+            elif key == 'objects_layer':
+                return 'objects_layer_id'
+            elif key == 'objects_number_field':
+                return 'number_field'
+            elif key == 'objects_level_field':
+                return 'level_field'
+            return default
+        
+        self.mock_settings_manager.get_value.side_effect = mock_get_value
+        
+        # Recreate the table with the new configuration
+        self.dialog._create_entities_table(self.dialog._entities_table.parent().layout())
+        
+        # Mock layer service
+        mock_layer = Mock()
+        mock_layer.displayExpression.return_value = 'name'
+        mock_fields = Mock()
+        mock_fields.indexOf.return_value = 0
+        mock_layer.fields.return_value = mock_fields
+        self.mock_layer_service.get_layer_by_id.return_value = mock_layer
+        
+        # Mock feature
+        mock_feature = Mock()
+        mock_feature.id.return_value = 1
+        mock_feature.attribute.return_value = 'Test Area'
+        
+        # Mock related objects info with uppercase level
+        self.mock_layer_service.get_related_objects_info.return_value = {
+            'last_number': '15',
+            'last_level': 'LEVEL A'
+        }
+        
+        # Mock calculate_next_level to preserve case
+        self.mock_layer_service.calculate_next_level.return_value = 'LEVEL B'
+        
+        # Mock QGIS expression evaluation
+        with patch('qgis.core.QgsExpression') as mock_expr_class:
+            with patch('qgis.core.QgsExpressionContext') as mock_context_class:
+                with patch('qgis.core.QgsExpressionContextUtils.layerScope') as mock_scope:
+                    mock_expr = Mock()
+                    mock_expr.evaluate.return_value = 'Test Area'
+                    mock_expr_class.return_value = mock_expr
+                    
+                    mock_context = Mock()
+                    mock_context_class.return_value = mock_context
+                    
+                    # Populate table
+                    self.dialog._populate_entities_table([mock_feature])
+                    
+                    # Verify calculate_next_level was called with the correct parameters
+                    self.mock_layer_service.calculate_next_level.assert_called_once_with(
+                        'LEVEL A', 'level_field', 'objects_layer_id'
                     )
+                    
+                    # Verify the result preserves case
+                    result = self.dialog.get_next_values_for_feature(0)
+                    self.assertEqual(result['next_level'], 'LEVEL B')  # Should preserve uppercase
 
 
 if __name__ == '__main__':

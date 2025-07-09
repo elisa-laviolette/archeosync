@@ -12,6 +12,10 @@ All notable changes to the ArcheoSync QGIS plugin will be documented in this fil
 - **Number Field Selection**: Optional integer field selection for object numbering with smart filtering
 - **Level Field Selection**: Optional field selection for object level information
 - **Enhanced UI**: Added field selection widgets that appear when objects layer is selected
+- **Next Values Columns**: Added "Next object number" and "Next level" columns to the recording preparation table
+  - Next object number is editable and defaults to last object number + 1
+  - Next level is editable and automatically increments based on field type and case preservation
+  - Columns only appear when corresponding fields are configured in settings
 
 ### Bug Fixes
 
@@ -25,10 +29,12 @@ All notable changes to the ArcheoSync QGIS plugin will be documented in this fil
 - **Configuration Validation**: Extended validation to include objects layer requirements and field validation
 - **UI Components**: Added comprehensive field selection widgets with proper visibility management
 - **Test Coverage**: Added 36 new tests covering objects/features layer functionality and field validation
+- **Level Calculation Logic**: Added intelligent level increment logic with case preservation
+- **Table Editing**: Enhanced table with editable next value columns and read-only last value columns
 
 ### Test Results
 
-- **169 tests passing** (increased from 133)
+- **225 tests passing** (increased from 169)
 - **1 test skipped** (QGIS-specific translation test)
 - **0 failures**
 

@@ -110,6 +110,11 @@ Interface for QGIS layer operations:
     level_field: Optional[str],
     recording_areas_layer_id: Optional[str] = None
 ) -> Dict[str, Any]`
+- `calculate_next_level(
+    last_level: str,
+    level_field: str,
+    objects_layer_id: str
+) -> str`
 
 ## Service Implementations
 
@@ -126,7 +131,7 @@ QGIS-specific implementation using QGIS translation system.
 Comprehensive validation with detailed error reporting.
 
 ### QGISLayerService
-QGIS-specific implementation for layer operations including selected features counting.
+QGIS-specific implementation for layer operations including selected features counting and intelligent level calculation with case preservation.
 
 ## UI Components
 
@@ -134,7 +139,7 @@ QGIS-specific implementation for layer operations including selected features co
 Clean, testable settings dialog with dependency injection and real-time validation.
 
 ### PrepareRecordingDialog
-Dialog for recording preparation showing selected entities in a table with names from layer display expressions, sorted alphabetically.
+Dialog for recording preparation showing selected entities in a table with names from layer display expressions, sorted alphabetically. Features editable "Next object number" and "Next level" columns that automatically calculate appropriate values based on existing data and field types.
 
 ## Testing Strategy
 
@@ -154,6 +159,7 @@ Test UI components with mocked services.
 3. **Extensibility**: Easy to add new features through interfaces
 4. **Reliability**: Comprehensive validation and error handling
 5. **Performance**: Optimized operations and caching
+6. **User Experience**: Intelligent default values and case preservation for better usability
 
 ## Design Patterns
 
@@ -195,4 +201,40 @@ related_info = layer_service.get_related_objects_info(
 
 ### Impact
 - All usages in dialogs and tests must now provide the parent layer ID.
-- This change improves reliability and avoids runtime errors. 
+- This change improves reliability and avoids runtime errors.
+
+## QGISLayerService.calculate_next_level Method
+
+### New Method
+
+```
+def calculate_next_level(
+    last_level: str,
+    level_field: str,
+    objects_layer_id: str
+) -> str
+```
+
+- **last_level**: The last level value (can be empty string).
+- **level_field**: The level field name.
+- **objects_layer_id**: The objects layer ID.
+
+### Features
+- **Intelligent Increment**: Automatically determines increment logic based on field type
+- **Case Preservation**: Maintains original case (uppercase/lowercase) when incrementing
+- **Type-Aware**: Handles integer and string fields differently
+- **Fallback Logic**: Provides sensible defaults for edge cases
+
+### Increment Logic
+- **Integer Fields**: Numeric increment (1 → 2, 10 → 11)
+- **String Fields**: 
+  - Single character: alphabetical increment (a → b, A → B, z → aa, Z → AA)
+  - Multi-character: append "1" as fallback
+- **Empty Values**: Start with "1" for integers, "a" for strings
+
+### Usage Example
+```python
+next_level = layer_service.calculate_next_level(
+    last_level, level_field, objects_layer_id
+)
+``` 

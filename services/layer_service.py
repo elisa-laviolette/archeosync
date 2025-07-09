@@ -395,4 +395,66 @@ class QGISLayerService(ILayerService):
         return {
             'last_number': str(highest_number) if highest_number is not None else '',
             'last_level': last_level
-        } 
+        }
+
+    def calculate_next_level(self, last_level: str, level_field: str, objects_layer_id: str) -> str:
+        """
+        Calculate the next level value based on the last level and field type.
+        
+        Args:
+            last_level: The last level value (can be empty string)
+            level_field: The level field name
+            objects_layer_id: The objects layer ID
+            
+        Returns:
+            The next level value as a string
+        """
+        if not last_level:
+            # If no last level, start with appropriate default
+            field_info = self.get_layer_fields(objects_layer_id)
+            if field_info:
+                level_field_info = next((f for f in field_info if f['name'] == level_field), None)
+                if level_field_info and level_field_info['is_integer']:
+                    return '1'  # Start with 1 for numeric fields
+                else:
+                    return 'a'  # Start with 'a' for string fields
+            return 'a'  # Default to 'a' if field info not available
+        
+        # Get field type to determine increment logic
+        field_info = self.get_layer_fields(objects_layer_id)
+        if field_info:
+            level_field_info = next((f for f in field_info if f['name'] == level_field), None)
+            if level_field_info and level_field_info['is_integer']:
+                # Numeric field - increment by 1
+                try:
+                    current_value = int(last_level)
+                    return str(current_value + 1)
+                except (ValueError, TypeError):
+                    # Fall back to string increment if conversion fails
+                    pass
+        
+        # String field - increment alphabetically
+        # Handle single character levels (a, b, c, ...)
+        if len(last_level) == 1 and last_level.isalpha():
+            if last_level.lower() == 'z':
+                # Preserve case: if original was uppercase, use 'AA', otherwise 'aa'
+                return 'AA' if last_level.isupper() else 'aa'
+            else:
+                # Preserve case when incrementing
+                if last_level.isupper():
+                    return chr(ord(last_level) + 1)
+                else:
+                    return chr(ord(last_level) + 1)
+        
+        # Handle multi-character levels or mixed content
+        # For simplicity, append a number or increment the last character
+        if last_level.isdigit():
+            # If it's a number, increment it
+            try:
+                current_value = int(last_level)
+                return str(current_value + 1)
+            except (ValueError, TypeError):
+                pass
+        
+        # For other cases, append a number
+        return f"{last_level}1" 

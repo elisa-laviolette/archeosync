@@ -1008,6 +1008,131 @@ class TestQGISLayerService(unittest.TestCase):
                 self.assertEqual(result['last_number'], '')
                 self.assertEqual(result['last_level'], '10')  # Numerically highest
 
+    def test_calculate_next_level_empty_last_level(self):
+        """Test calculating next level when last level is empty."""
+        # Mock field info for string field
+        field_info = [{'name': 'level_field', 'is_integer': False}]
+        
+        with patch.object(self.layer_service, 'get_layer_fields', return_value=field_info):
+            result = self.layer_service.calculate_next_level('', 'level_field', 'objects_layer_id')
+            self.assertEqual(result, 'a')  # Should start with 'a' for string fields
+        
+        # Mock field info for integer field
+        field_info = [{'name': 'level_field', 'is_integer': True}]
+        
+        with patch.object(self.layer_service, 'get_layer_fields', return_value=field_info):
+            result = self.layer_service.calculate_next_level('', 'level_field', 'objects_layer_id')
+            self.assertEqual(result, '1')  # Should start with '1' for integer fields
+
+    def test_calculate_next_level_string_field_single_char(self):
+        """Test calculating next level for string field with single character levels."""
+        # Mock field info for string field
+        field_info = [{'name': 'level_field', 'is_integer': False}]
+        
+        with patch.object(self.layer_service, 'get_layer_fields', return_value=field_info):
+            # Test basic alphabetical increment
+            result = self.layer_service.calculate_next_level('a', 'level_field', 'objects_layer_id')
+            self.assertEqual(result, 'b')
+            
+            result = self.layer_service.calculate_next_level('b', 'level_field', 'objects_layer_id')
+            self.assertEqual(result, 'c')
+            
+            # Test wrap-around from 'z' to 'aa'
+            result = self.layer_service.calculate_next_level('z', 'level_field', 'objects_layer_id')
+            self.assertEqual(result, 'aa')
+
+    def test_calculate_next_level_integer_field(self):
+        """Test calculating next level for integer field."""
+        # Mock field info for integer field
+        field_info = [{'name': 'level_field', 'is_integer': True}]
+        
+        with patch.object(self.layer_service, 'get_layer_fields', return_value=field_info):
+            # Test basic numeric increment
+            result = self.layer_service.calculate_next_level('1', 'level_field', 'objects_layer_id')
+            self.assertEqual(result, '2')
+            
+            result = self.layer_service.calculate_next_level('10', 'level_field', 'objects_layer_id')
+            self.assertEqual(result, '11')
+            
+            result = self.layer_service.calculate_next_level('99', 'level_field', 'objects_layer_id')
+            self.assertEqual(result, '100')
+
+    def test_calculate_next_level_mixed_content(self):
+        """Test calculating next level for mixed content levels."""
+        # Mock field info for string field
+        field_info = [{'name': 'level_field', 'is_integer': False}]
+        
+        with patch.object(self.layer_service, 'get_layer_fields', return_value=field_info):
+            # Test numeric string
+            result = self.layer_service.calculate_next_level('5', 'level_field', 'objects_layer_id')
+            self.assertEqual(result, '6')
+            
+            # Test mixed content
+            result = self.layer_service.calculate_next_level('Level A', 'level_field', 'objects_layer_id')
+            self.assertEqual(result, 'Level A1')
+
+    def test_calculate_next_level_field_info_not_available(self):
+        """Test calculating next level when field info is not available."""
+        with patch.object(self.layer_service, 'get_layer_fields', return_value=None):
+            result = self.layer_service.calculate_next_level('', 'level_field', 'objects_layer_id')
+            self.assertEqual(result, 'a')  # Default to 'a'
+            
+            result = self.layer_service.calculate_next_level('a', 'level_field', 'objects_layer_id')
+            self.assertEqual(result, 'b')
+
+    def test_calculate_next_level_field_not_found(self):
+        """Test calculating next level when field is not found in field info."""
+        # Mock field info without the target field
+        field_info = [{'name': 'other_field', 'is_integer': True}]
+        
+        with patch.object(self.layer_service, 'get_layer_fields', return_value=field_info):
+            result = self.layer_service.calculate_next_level('a', 'level_field', 'objects_layer_id')
+            self.assertEqual(result, 'b')  # Should fall back to string increment
+
+    def test_calculate_next_level_invalid_number_conversion(self):
+        """Test calculating next level when number conversion fails."""
+        # Mock field info for integer field
+        field_info = [{'name': 'level_field', 'is_integer': True}]
+        
+        with patch.object(self.layer_service, 'get_layer_fields', return_value=field_info):
+            # Test with non-numeric string that can't be converted to int
+            result = self.layer_service.calculate_next_level('abc', 'level_field', 'objects_layer_id')
+            self.assertEqual(result, 'abc1')  # Should append '1' as fallback
+
+    def test_calculate_next_level_case_sensitivity(self):
+        """Test calculating next level with case sensitivity."""
+        # Mock field info for string field
+        field_info = [{'name': 'level_field', 'is_integer': False}]
+        
+        with patch.object(self.layer_service, 'get_layer_fields', return_value=field_info):
+            # Test uppercase letters - should preserve case
+            result = self.layer_service.calculate_next_level('A', 'level_field', 'objects_layer_id')
+            self.assertEqual(result, 'B')  # Should preserve uppercase and increment
+            
+            result = self.layer_service.calculate_next_level('Z', 'level_field', 'objects_layer_id')
+            self.assertEqual(result, 'AA')  # Should wrap around to 'AA' for uppercase
+            
+            # Test lowercase letters - should preserve case
+            result = self.layer_service.calculate_next_level('a', 'level_field', 'objects_layer_id')
+            self.assertEqual(result, 'b')  # Should preserve lowercase and increment
+            
+            result = self.layer_service.calculate_next_level('z', 'level_field', 'objects_layer_id')
+            self.assertEqual(result, 'aa')  # Should wrap around to 'aa' for lowercase
+
+    def test_calculate_next_level_complex_strings(self):
+        """Test calculating next level with complex string values."""
+        # Mock field info for string field
+        field_info = [{'name': 'level_field', 'is_integer': False}]
+        
+        with patch.object(self.layer_service, 'get_layer_fields', return_value=field_info):
+            # Test with spaces and special characters
+            result = self.layer_service.calculate_next_level('Level 1', 'level_field', 'objects_layer_id')
+            self.assertEqual(result, 'Level 11')  # Should append '1'
+            
+            # Test with mixed content
+            result = self.layer_service.calculate_next_level('A1', 'level_field', 'objects_layer_id')
+            self.assertEqual(result, 'A11')  # Should append '1'
+
 
 class TestQGISTranslationService(unittest.TestCase):
     """Test cases for QGISTranslationService."""

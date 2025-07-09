@@ -147,8 +147,10 @@ class PrepareRecordingDialog(QtWidgets.QDialog):
         columns = ["Name"]
         if objects_layer_id and number_field:
             columns.append("Last object number")
+            columns.append("Next object number")
         if objects_layer_id and level_field:
             columns.append("Last level")
+            columns.append("Next level")
         
         self._entities_table.setColumnCount(len(columns))
         self._entities_table.setHorizontalHeaderLabels(columns)
@@ -156,7 +158,8 @@ class PrepareRecordingDialog(QtWidgets.QDialog):
         # Set table properties
         self._entities_table.setAlternatingRowColors(True)
         self._entities_table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
-        self._entities_table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
+        # Allow editing for next number and next level columns
+        self._entities_table.setEditTriggers(QtWidgets.QAbstractItemView.DoubleClicked | QtWidgets.QAbstractItemView.EditKeyPressed)
         self._entities_table.horizontalHeader().setStretchLastSection(True)
         self._entities_table.setMaximumHeight(200)
         
@@ -289,7 +292,21 @@ class PrepareRecordingDialog(QtWidgets.QDialog):
                 
                 # Add last number
                 number_item = QtWidgets.QTableWidgetItem(related_info['last_number'])
+                number_item.setFlags(number_item.flags() & ~Qt.ItemIsEditable)  # Make read-only
                 self._entities_table.setItem(row, col_index, number_item)
+                col_index += 1
+                
+                # Add next number (editable)
+                next_number = '1'  # Default value
+                if related_info['last_number']:
+                    try:
+                        last_num = int(related_info['last_number'])
+                        next_number = str(last_num + 1)
+                    except (ValueError, TypeError):
+                        next_number = '1'
+                
+                next_number_item = QtWidgets.QTableWidgetItem(next_number)
+                self._entities_table.setItem(row, col_index, next_number_item)
                 col_index += 1
             
             if objects_layer_id and level_field:
@@ -301,10 +318,77 @@ class PrepareRecordingDialog(QtWidgets.QDialog):
                 
                 # Add last level
                 level_item = QtWidgets.QTableWidgetItem(related_info['last_level'])
+                level_item.setFlags(level_item.flags() & ~Qt.ItemIsEditable)  # Make read-only
                 self._entities_table.setItem(row, col_index, level_item)
+                col_index += 1
+                
+                # Add next level (editable)
+                next_level = self._layer_service.calculate_next_level(
+                    related_info['last_level'], level_field, objects_layer_id
+                )
+                next_level_item = QtWidgets.QTableWidgetItem(next_level)
+                self._entities_table.setItem(row, col_index, next_level_item)
         
         # Resize columns to content
         self._entities_table.resizeColumnsToContents()
+    
+    def get_next_values_for_feature(self, feature_index: int) -> Dict[str, str]:
+        """
+        Get the next object number and next level values for a specific feature.
+        
+        Args:
+            feature_index: The index of the feature in the features list
+            
+        Returns:
+            Dictionary with 'next_number' and 'next_level' values
+        """
+        if feature_index >= self._entities_table.rowCount():
+            return {'next_number': '', 'next_level': ''}
+        
+        # Get configuration
+        objects_layer_id = self._settings_manager.get_value('objects_layer', '')
+        number_field = self._settings_manager.get_value('objects_number_field', '')
+        level_field = self._settings_manager.get_value('objects_level_field', '')
+        
+        result = {'next_number': '', 'next_level': ''}
+        
+        # Get next number if configured
+        if objects_layer_id and number_field:
+            # Find the next number column (should be column 2 if both number and level are configured)
+            col_index = 1  # Start after Name column
+            if objects_layer_id and number_field:
+                col_index += 1  # Skip last number column
+                if col_index < self._entities_table.columnCount():
+                    item = self._entities_table.item(feature_index, col_index)
+                    if item:
+                        result['next_number'] = item.text()
+        
+        # Get next level if configured
+        if objects_layer_id and level_field:
+            # Find the next level column
+            col_index = 1  # Start after Name column
+            if objects_layer_id and number_field:
+                col_index += 2  # Skip last number and next number columns
+            if objects_layer_id and level_field:
+                col_index += 1  # Skip last level column
+                if col_index < self._entities_table.columnCount():
+                    item = self._entities_table.item(feature_index, col_index)
+                    if item:
+                        result['next_level'] = item.text()
+        
+        return result
+    
+    def get_all_next_values(self) -> List[Dict[str, str]]:
+        """
+        Get the next object number and next level values for all features.
+        
+        Returns:
+            List of dictionaries with 'next_number' and 'next_level' values for each feature
+        """
+        results = []
+        for row in range(self._entities_table.rowCount()):
+            results.append(self.get_next_values_for_feature(row))
+        return results
     
     def showEvent(self, event) -> None:
         """Override show event to update the display when dialog is shown."""

@@ -69,13 +69,23 @@ The objects layer must have a relationship with the recording areas layer:
 3. **Review selection**: The dialog will show the number of selected entities and display them in a table with:
    - Entity name (from display expression or common fields)
    - Last object number (if configured)
+   - Next object number (editable, defaults to last number + 1)
    - Last level (if configured)
+   - Next level (editable, defaults to incremented last level)
 4. **Prepare recording**: Click "Prepare Recording" to continue (only enabled when entities are selected)
 
 The table displays entity names sorted alphabetically. Names are extracted from:
 - Layer display expressions (from the Display tab in layer properties)
 - Common name fields (name, title, label, etc.)
 - Feature IDs (as fallback)
+
+**Next Values Calculation:**
+- **Next object number**: Automatically calculated as the last object number + 1 (or 1 if no previous objects exist)
+- **Next level**: Automatically calculated based on the level field type:
+  - For integer fields: increments numerically (1 → 2, 10 → 11)
+  - For string fields: increments alphabetically (a → b, A → B, z → aa, Z → AA)
+  - Case is preserved (uppercase stays uppercase, lowercase stays lowercase)
+  - For complex strings: appends "1" as fallback
 
 ### Configuration Options
 
