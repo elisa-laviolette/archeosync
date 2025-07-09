@@ -247,6 +247,30 @@ class ILayerService(ABC):
         pass
     
     @abstractmethod
+    def get_polygon_and_multipolygon_layers(self) -> List[Dict[str, Any]]:
+        """Get all polygon and multipolygon layers from the current QGIS project."""
+        pass
+    
+    @abstractmethod
+    def get_raster_layers(self) -> List[Dict[str, Any]]:
+        """Get all raster layers from the current QGIS project."""
+        pass
+    
+    @abstractmethod
+    def get_raster_layers_overlapping_feature(self, feature, recording_areas_layer_id: str) -> List[Dict[str, Any]]:
+        """
+        Get raster layers that overlap with a specific polygon feature.
+        
+        Args:
+            feature: The polygon feature to check overlap with
+            recording_areas_layer_id: The recording areas layer ID (for CRS transformation if needed)
+            
+        Returns:
+            List of dictionaries containing overlapping raster layer information
+        """
+        pass
+    
+    @abstractmethod
     def get_layer_by_id(self, layer_id: str) -> Optional[Any]:
         """Get a layer by its ID."""
         pass
@@ -254,6 +278,11 @@ class ILayerService(ABC):
     @abstractmethod
     def is_valid_polygon_layer(self, layer_id: str) -> bool:
         """Check if a layer is a valid polygon layer."""
+        pass
+    
+    @abstractmethod
+    def is_valid_polygon_or_multipolygon_layer(self, layer_id: str) -> bool:
+        """Check if a layer is a valid polygon or multipolygon layer."""
         pass
     
     @abstractmethod

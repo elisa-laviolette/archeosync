@@ -6,18 +6,21 @@ polygon layers from the current QGIS project.
 
 Key Features:
 - Get all polygon layers from current QGIS project
+- Get all raster layers from current QGIS project
 - Validate layer geometry types
 - Provide layer selection functionality
 - Layer metadata access
+- Spatial relationship checking between raster and polygon layers
 
 Usage:
     layer_service = QGISLayerService()
     polygon_layers = layer_service.get_polygon_layers()
+    raster_layers = layer_service.get_raster_layers()
     selected_layer = layer_service.get_layer_by_id(layer_id)
 """
 
 from typing import List, Optional, Dict, Any
-from qgis.core import QgsProject, QgsVectorLayer, QgsExpression, QgsExpressionContext, QgsExpressionContextUtils
+from qgis.core import QgsProject, QgsVectorLayer, QgsRasterLayer, QgsExpression, QgsExpressionContext, QgsExpressionContextUtils
 
 try:
     from ..core.interfaces import ILayerService
@@ -62,6 +65,78 @@ class QGISLayerService(ILayerService):
         
         return polygon_layers
     
+    def get_raster_layers(self) -> List[Dict[str, Any]]:
+        """
+        Get all raster layers from the current QGIS project.
+        
+        Returns:
+            List of dictionaries containing raster layer information
+        """
+        raster_layers = []
+        project = QgsProject.instance()
+        
+        for layer in project.mapLayers().values():
+            if isinstance(layer, QgsRasterLayer):
+                layer_info = {
+                    'id': layer.id(),
+                    'name': layer.name(),
+                    'source': layer.source(),
+                    'crs': layer.crs().authid() if layer.crs() else 'Unknown',
+                    'width': layer.width(),
+                    'height': layer.height(),
+                    'extent': layer.extent()
+                }
+                raster_layers.append(layer_info)
+        
+        return raster_layers
+    
+    def get_raster_layers_overlapping_feature(self, feature, recording_areas_layer_id: str) -> List[Dict[str, Any]]:
+        """
+        Get raster layers that overlap with a specific polygon feature.
+        
+        Args:
+            feature: The polygon feature to check overlap with
+            recording_areas_layer_id: The recording areas layer ID (for CRS transformation if needed)
+            
+        Returns:
+            List of dictionaries containing overlapping raster layer information
+        """
+        overlapping_raster_layers = []
+        project = QgsProject.instance()
+        
+        # Get the recording areas layer for CRS information
+        recording_layer = self.get_layer_by_id(recording_areas_layer_id)
+        if not recording_layer:
+            return overlapping_raster_layers
+        
+        # Get feature geometry
+        feature_geometry = feature.geometry()
+        if not feature_geometry:
+            return overlapping_raster_layers
+        
+        # Get feature extent
+        feature_extent = feature_geometry.boundingBox()
+        
+        for layer in project.mapLayers().values():
+            if isinstance(layer, QgsRasterLayer):
+                # Get raster extent
+                raster_extent = layer.extent()
+                
+                # Check if extents overlap
+                if feature_extent.intersects(raster_extent):
+                    layer_info = {
+                        'id': layer.id(),
+                        'name': layer.name(),
+                        'source': layer.source(),
+                        'crs': layer.crs().authid() if layer.crs() else 'Unknown',
+                        'width': layer.width(),
+                        'height': layer.height(),
+                        'extent': raster_extent
+                    }
+                    overlapping_raster_layers.append(layer_info)
+        
+        return overlapping_raster_layers
+    
     def get_polygon_and_multipolygon_layers(self) -> List[Dict[str, Any]]:
         """
         Get all polygon and multipolygon layers from the current QGIS project.
@@ -102,7 +177,7 @@ class QGISLayerService(ILayerService):
         project = QgsProject.instance()
         layer = project.mapLayer(layer_id)
         
-        if isinstance(layer, QgsVectorLayer):
+        if isinstance(layer, (QgsVectorLayer, QgsRasterLayer)):
             return layer
         return None
     

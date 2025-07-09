@@ -19,7 +19,7 @@ from unittest.mock import Mock, patch, MagicMock
 
 # Try to import QGIS modules, skip tests if not available
 try:
-    from qgis.core import QgsProject, QgsVectorLayer
+    from qgis.core import QgsProject, QgsVectorLayer, QgsRasterLayer
     from services.layer_service import QGISLayerService
     QGIS_AVAILABLE = True
 except ImportError:
@@ -258,6 +258,205 @@ class TestLayerService:
             
             assert layer_info is not None
             assert layer_info['is_valid'] is False
+
+    def test_get_raster_layers_empty_project(self):
+        """Test getting raster layers from empty project."""
+        # Clear the project
+        project = QgsProject.instance()
+        project.removeAllMapLayers()
+        
+        raster_layers = self.layer_service.get_raster_layers()
+        assert isinstance(raster_layers, list)
+        assert len(raster_layers) == 0
+
+    def test_get_raster_layers_with_mock_layers(self):
+        """Test getting raster layers with mock layers."""
+        # Create mock raster layer
+        mock_layer = Mock(spec=QgsRasterLayer)
+        mock_layer.id.return_value = "test_raster_id"
+        mock_layer.name.return_value = "Test Raster Layer"
+        mock_layer.source.return_value = "/path/to/test.tif"
+        mock_layer.crs.return_value.authid.return_value = "EPSG:4326"
+        mock_layer.width.return_value = 100
+        mock_layer.height.return_value = 200
+        mock_layer.extent.return_value = Mock()
+        
+        # Mock QgsProject - patch the import in the service module
+        with patch('services.layer_service.QgsProject') as mock_project:
+            mock_instance = Mock()
+            mock_instance.mapLayers.return_value = {"test_raster_id": mock_layer}
+            mock_project.instance.return_value = mock_instance
+            
+            raster_layers = self.layer_service.get_raster_layers()
+            
+            assert len(raster_layers) == 1
+            layer_info = raster_layers[0]
+            assert layer_info['id'] == "test_raster_id"
+            assert layer_info['name'] == "Test Raster Layer"
+            assert layer_info['source'] == "/path/to/test.tif"
+            assert layer_info['crs'] == "EPSG:4326"
+            assert layer_info['width'] == 100
+            assert layer_info['height'] == 200
+
+    def test_get_raster_layers_filters_non_raster(self):
+        """Test that only raster layers are returned."""
+        # Create mock non-raster layer
+        mock_vector_layer = Mock(spec=QgsVectorLayer)
+        mock_vector_layer.geometryType.return_value = 3  # PolygonGeometry
+        
+        # Create mock raster layer
+        mock_raster_layer = Mock(spec=QgsRasterLayer)
+        mock_raster_layer.id.return_value = "raster_layer_id"
+        mock_raster_layer.name.return_value = "Raster Layer"
+        mock_raster_layer.source.return_value = "/path/to/raster.tif"
+        mock_raster_layer.crs.return_value.authid.return_value = "EPSG:4326"
+        mock_raster_layer.width.return_value = 50
+        mock_raster_layer.height.return_value = 100
+        mock_raster_layer.extent.return_value = Mock()
+        
+        # Mock QgsProject - patch the import in the service module
+        with patch('services.layer_service.QgsProject') as mock_project:
+            mock_instance = Mock()
+            mock_instance.mapLayers.return_value = {
+                "vector_layer_id": mock_vector_layer,
+                "raster_layer_id": mock_raster_layer
+            }
+            mock_project.instance.return_value = mock_instance
+            
+            raster_layers = self.layer_service.get_raster_layers()
+            
+            assert len(raster_layers) == 1
+            assert raster_layers[0]['id'] == "raster_layer_id"
+
+    def test_get_layer_by_id_with_raster_layer(self):
+        """Test getting raster layer by ID."""
+        # Create mock raster layer
+        mock_raster_layer = Mock(spec=QgsRasterLayer)
+        mock_raster_layer.id.return_value = "test_raster_id"
+        
+        # Mock QgsProject - patch the import in the service module
+        with patch('services.layer_service.QgsProject') as mock_project:
+            mock_instance = Mock()
+            mock_instance.mapLayer.return_value = mock_raster_layer
+            mock_project.instance.return_value = mock_instance
+            
+            layer = self.layer_service.get_layer_by_id("test_raster_id")
+            assert layer == mock_raster_layer
+
+    def test_get_raster_layers_overlapping_feature(self):
+        """Test getting raster layers that overlap with a feature."""
+        # Create mock feature with geometry
+        mock_feature = Mock()
+        mock_geometry = Mock()
+        mock_feature.geometry.return_value = mock_geometry
+        
+        mock_extent = Mock()
+        mock_geometry.boundingBox.return_value = mock_extent
+        
+        # Create mock raster layer
+        mock_raster_layer = Mock(spec=QgsRasterLayer)
+        mock_raster_layer.id.return_value = "overlapping_raster_id"
+        mock_raster_layer.name.return_value = "Overlapping Raster"
+        mock_raster_layer.source.return_value = "/path/to/overlapping.tif"
+        mock_raster_layer.crs.return_value.authid.return_value = "EPSG:4326"
+        mock_raster_layer.width.return_value = 100
+        mock_raster_layer.height.return_value = 100
+        mock_raster_layer.extent.return_value = Mock()
+        
+        # Mock intersection
+        mock_extent.intersects.return_value = True
+        
+        # Create mock recording layer
+        mock_recording_layer = Mock(spec=QgsVectorLayer)
+        
+        # Mock QgsProject - patch the import in the service module
+        with patch('services.layer_service.QgsProject') as mock_project:
+            mock_instance = Mock()
+            mock_instance.mapLayers.return_value = {"overlapping_raster_id": mock_raster_layer}
+            mock_project.instance.return_value = mock_instance
+            
+            with patch.object(self.layer_service, 'get_layer_by_id', return_value=mock_recording_layer):
+                overlapping_layers = self.layer_service.get_raster_layers_overlapping_feature(
+                    mock_feature, "recording_layer_id"
+                )
+                
+                assert len(overlapping_layers) == 1
+                layer_info = overlapping_layers[0]
+                assert layer_info['id'] == "overlapping_raster_id"
+                assert layer_info['name'] == "Overlapping Raster"
+
+    def test_get_raster_layers_overlapping_feature_no_overlap(self):
+        """Test getting raster layers when there's no overlap."""
+        # Create mock feature with geometry
+        mock_feature = Mock()
+        mock_geometry = Mock()
+        mock_feature.geometry.return_value = mock_geometry
+        
+        mock_extent = Mock()
+        mock_geometry.boundingBox.return_value = mock_extent
+        
+        # Create mock raster layer
+        mock_raster_layer = Mock(spec=QgsRasterLayer)
+        mock_raster_layer.extent.return_value = Mock()
+        
+        # Mock no intersection
+        mock_extent.intersects.return_value = False
+        
+        # Create mock recording layer
+        mock_recording_layer = Mock(spec=QgsVectorLayer)
+        
+        # Mock QgsProject - patch the import in the service module
+        with patch('services.layer_service.QgsProject') as mock_project:
+            mock_instance = Mock()
+            mock_instance.mapLayers.return_value = {"raster_id": mock_raster_layer}
+            mock_project.instance.return_value = mock_instance
+            
+            with patch.object(self.layer_service, 'get_layer_by_id', return_value=mock_recording_layer):
+                overlapping_layers = self.layer_service.get_raster_layers_overlapping_feature(
+                    mock_feature, "recording_layer_id"
+                )
+                
+                assert len(overlapping_layers) == 0
+
+    def test_get_raster_layers_overlapping_feature_no_recording_layer(self):
+        """Test getting raster layers when recording layer is not found."""
+        # Create mock feature
+        mock_feature = Mock()
+        
+        # Mock QgsProject - patch the import in the service module
+        with patch('services.layer_service.QgsProject') as mock_project:
+            mock_instance = Mock()
+            mock_instance.mapLayers.return_value = {}
+            mock_project.instance.return_value = mock_instance
+            
+            with patch.object(self.layer_service, 'get_layer_by_id', return_value=None):
+                overlapping_layers = self.layer_service.get_raster_layers_overlapping_feature(
+                    mock_feature, "non_existent_layer_id"
+                )
+                
+                assert len(overlapping_layers) == 0
+
+    def test_get_raster_layers_overlapping_feature_no_geometry(self):
+        """Test getting raster layers when feature has no geometry."""
+        # Create mock feature without geometry
+        mock_feature = Mock()
+        mock_feature.geometry.return_value = None
+        
+        # Create mock recording layer
+        mock_recording_layer = Mock(spec=QgsVectorLayer)
+        
+        # Mock QgsProject - patch the import in the service module
+        with patch('services.layer_service.QgsProject') as mock_project:
+            mock_instance = Mock()
+            mock_instance.mapLayers.return_value = {}
+            mock_project.instance.return_value = mock_instance
+            
+            with patch.object(self.layer_service, 'get_layer_by_id', return_value=mock_recording_layer):
+                overlapping_layers = self.layer_service.get_raster_layers_overlapping_feature(
+                    mock_feature, "recording_layer_id"
+                )
+                
+                assert len(overlapping_layers) == 0 
 
 
 @pytest.mark.qgis

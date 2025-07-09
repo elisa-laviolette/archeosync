@@ -99,6 +99,8 @@ Interface for configuration validation:
 ### ILayerService
 Interface for QGIS layer operations:
 - `get_polygon_layers() -> List[Dict[str, Any]]`
+- `get_polygon_and_multipolygon_layers() -> List[Dict[str, Any]]`
+- `get_raster_layers() -> List[Dict[str, Any]]`
 - `get_layer_by_id(layer_id: str) -> Optional[Any]`
 - `get_selected_features_count(layer_id: str) -> int`
 - `get_selected_features_info(layer_id: str) -> List[Dict[str, Any]]`
@@ -115,6 +117,10 @@ Interface for QGIS layer operations:
     level_field: str,
     objects_layer_id: str
 ) -> str`
+- `get_raster_layers_overlapping_feature(
+    feature,
+    recording_areas_layer_id: str
+) -> List[Dict[str, Any]]`
 
 ## Service Implementations
 
@@ -131,7 +137,7 @@ QGIS-specific implementation using QGIS translation system.
 Comprehensive validation with detailed error reporting.
 
 ### QGISLayerService
-QGIS-specific implementation for layer operations including selected features counting and intelligent level calculation with case preservation.
+QGIS-specific implementation for layer operations including selected features counting, intelligent level calculation with case preservation, and raster layer spatial analysis for background image selection.
 
 ## UI Components
 
@@ -139,7 +145,7 @@ QGIS-specific implementation for layer operations including selected features co
 Clean, testable settings dialog with dependency injection and real-time validation.
 
 ### PrepareRecordingDialog
-Dialog for recording preparation showing selected entities in a table with names from layer display expressions, sorted alphabetically. Features editable "Next object number" and "Next level" columns that automatically calculate appropriate values based on existing data and field types.
+Dialog for recording preparation showing selected entities in a table with names from layer display expressions, sorted alphabetically. Features editable "Next object number" and "Next level" columns that automatically calculate appropriate values based on existing data and field types. Includes a "Background image" column with dropdown selection of overlapping raster layers for each recording area.
 
 ## Testing Strategy
 

@@ -14,6 +14,7 @@ A QGIS plugin for archaeologists to prepare data for field recording and import 
 - **Configuration Validation**: Comprehensive validation of all settings with conditional requirements
 - **Internationalization**: Multi-language support
 - **Layer Service**: Intelligent detection of polygon layers (supports both simple polygons and multipolygons)
+- **Background Image Selection**: Automatic detection of raster layers overlapping recording areas for background image selection
 
 ## Installation
 
@@ -72,12 +73,20 @@ The objects layer must have a relationship with the recording areas layer:
    - Next object number (editable, defaults to last number + 1)
    - Last level (if configured)
    - Next level (editable, defaults to incremented last level)
+   - Background image (dropdown with overlapping raster layers)
 4. **Prepare recording**: Click "Prepare Recording" to continue (only enabled when entities are selected)
 
 The table displays entity names sorted alphabetically. Names are extracted from:
 - Layer display expressions (from the Display tab in layer properties)
 - Common name fields (name, title, label, etc.)
 - Feature IDs (as fallback)
+
+**Background Image Selection:**
+- Each recording area shows a dropdown with available raster layers
+- Only raster layers that spatially overlap with the recording area are shown
+- Users can select "No image" or any overlapping raster layer
+- Raster layer names include dimensions (width x height) for easy identification
+- The selection is preserved when getting next values for field preparation
 
 **Next Values Calculation:**
 - **Next object number**: Automatically calculated as the last object number + 1 (or 1 if no previous objects exist)
@@ -86,6 +95,7 @@ The table displays entity names sorted alphabetically. Names are extracted from:
   - For string fields: increments alphabetically (a → b, A → B, z → aa, Z → AA)
   - Case is preserved (uppercase stays uppercase, lowercase stays lowercase)
   - For complex strings: appends "1" as fallback
+- **Background image**: Selected raster layer ID or empty string for "No image"
 
 ### Configuration Options
 

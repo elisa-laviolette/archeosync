@@ -2,6 +2,30 @@
 
 All notable changes to the ArcheoSync QGIS plugin will be documented in this file.
 
+## [0.4.0] - 2025-07-09
+
+### New Features
+
+- **Background Image Selection**: Added "Background image" column to the recording areas table
+  - Dropdown menu allows users to select raster layers that overlap with each recording area
+  - Only shows raster layers that spatially intersect with the recording area geometry
+  - Includes "No image" option for areas without background imagery
+  - Raster layer names display with dimensions (width x height) for easy identification
+  - Selection is preserved when getting next values for field preparation
+- **Raster Layer Support**: Extended layer service to support raster layer operations
+  - Added `get_raster_layers()` method to retrieve all raster layers from QGIS project
+  - Added `get_raster_layers_overlapping_feature()` method for spatial relationship checking
+  - Updated `get_layer_by_id()` to support both vector and raster layers
+  - Enhanced spatial intersection detection using QGIS geometry operations
+
+### Technical Improvements
+
+- **Extended Interfaces**: Added raster layer methods to ILayerService interface
+- **Spatial Analysis**: Implemented efficient spatial intersection checking between polygon features and raster extents
+- **UI Enhancement**: Added custom dropdown widgets for background image selection in table cells
+- **Test Coverage**: Added comprehensive tests for raster layer functionality and background image selection
+- **Documentation**: Updated README and user documentation for background image feature
+
 ## [0.3.0] - 2025-07-08
 
 ### New Features

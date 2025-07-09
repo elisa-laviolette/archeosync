@@ -151,6 +151,8 @@ class PrepareRecordingDialog(QtWidgets.QDialog):
         if objects_layer_id and level_field:
             columns.append("Last level")
             columns.append("Next level")
+        # Always add Background image column
+        columns.append("Background image")
         
         self._entities_table.setColumnCount(len(columns))
         self._entities_table.setHorizontalHeaderLabels(columns)
@@ -279,6 +281,7 @@ class PrepareRecordingDialog(QtWidgets.QDialog):
             
             # Add name to the table
             name_item = QtWidgets.QTableWidgetItem(feature_name)
+            name_item.setFlags(name_item.flags() & ~Qt.ItemIsEditable)  # Make read-only
             self._entities_table.setItem(row, 0, name_item)
             
             # Add related objects information if configured
@@ -328,29 +331,63 @@ class PrepareRecordingDialog(QtWidgets.QDialog):
                 )
                 next_level_item = QtWidgets.QTableWidgetItem(next_level)
                 self._entities_table.setItem(row, col_index, next_level_item)
+                col_index += 1
+            
+            # Add background image dropdown
+            self._add_background_image_dropdown(row, col_index, feature, recording_areas_layer_id)
         
         # Resize columns to content
         self._entities_table.resizeColumnsToContents()
     
+    def _add_background_image_dropdown(self, row: int, col: int, feature, recording_areas_layer_id: str) -> None:
+        """
+        Add a background image dropdown widget to the specified table cell.
+        
+        Args:
+            row: Table row index
+            col: Table column index
+            feature: The feature to get overlapping raster layers for
+            recording_areas_layer_id: The recording areas layer ID
+        """
+        # Create combo box widget
+        combo_box = QtWidgets.QComboBox()
+        
+        # Add "No image" option
+        combo_box.addItem("No image", "")
+        
+        # Get overlapping raster layers
+        if recording_areas_layer_id:
+            overlapping_raster_layers = self._layer_service.get_raster_layers_overlapping_feature(
+                feature, recording_areas_layer_id
+            )
+            
+            # Add raster layers to dropdown
+            for raster_layer in overlapping_raster_layers:
+                display_text = f"{raster_layer['name']} ({raster_layer['width']}x{raster_layer['height']})"
+                combo_box.addItem(display_text, raster_layer['id'])
+        
+        # Set the combo box as the cell widget
+        self._entities_table.setCellWidget(row, col, combo_box)
+    
     def get_next_values_for_feature(self, feature_index: int) -> Dict[str, str]:
         """
-        Get the next object number and next level values for a specific feature.
+        Get the next object number, next level, and background image values for a specific feature.
         
         Args:
             feature_index: The index of the feature in the features list
             
         Returns:
-            Dictionary with 'next_number' and 'next_level' values
+            Dictionary with 'next_number', 'next_level', and 'background_image' values
         """
         if feature_index >= self._entities_table.rowCount():
-            return {'next_number': '', 'next_level': ''}
+            return {'next_number': '', 'next_level': '', 'background_image': ''}
         
         # Get configuration
         objects_layer_id = self._settings_manager.get_value('objects_layer', '')
         number_field = self._settings_manager.get_value('objects_number_field', '')
         level_field = self._settings_manager.get_value('objects_level_field', '')
         
-        result = {'next_number': '', 'next_level': ''}
+        result = {'next_number': '', 'next_level': '', 'background_image': ''}
         
         # Get next number if configured
         if objects_layer_id and number_field:
@@ -376,14 +413,22 @@ class PrepareRecordingDialog(QtWidgets.QDialog):
                     if item:
                         result['next_level'] = item.text()
         
+        # Get background image (always the last column)
+        background_col = self._entities_table.columnCount() - 1
+        if background_col >= 0:
+            widget = self._entities_table.cellWidget(feature_index, background_col)
+            if isinstance(widget, QtWidgets.QComboBox):
+                background_data = widget.currentData()
+                result['background_image'] = background_data if background_data is not None else ''
+        
         return result
     
     def get_all_next_values(self) -> List[Dict[str, str]]:
         """
-        Get the next object number and next level values for all features.
+        Get the next object number, next level, and background image values for all features.
         
         Returns:
-            List of dictionaries with 'next_number' and 'next_level' values for each feature
+            List of dictionaries with 'next_number', 'next_level', and 'background_image' values for each feature
         """
         results = []
         for row in range(self._entities_table.rowCount()):
