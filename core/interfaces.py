@@ -373,4 +373,126 @@ class ILayerService(ABC):
         Returns:
             The next level value as a string
         """
+        pass
+    
+    @abstractmethod
+    def create_empty_layer_copy(self, source_layer_id: str, new_layer_name: str) -> Optional[str]:
+        """
+        Create an empty layer with the same structure (fields, geometry type, CRS) as the source layer.
+        
+        Args:
+            source_layer_id: The ID of the source layer to copy structure from
+            new_layer_name: The name for the new empty layer
+            
+        Returns:
+            The ID of the newly created layer, or None if creation failed
+        """
+        pass
+    
+    @abstractmethod
+    def remove_layer_from_project(self, layer_id: str) -> bool:
+        """
+        Remove a layer from the current QGIS project.
+        
+        Args:
+            layer_id: The ID of the layer to remove
+            
+        Returns:
+            True if the layer was successfully removed, False otherwise
+        """
+        pass
+
+
+class IQFieldService(ABC):
+    """Interface for QField operations."""
+    
+    @abstractmethod
+    def is_qfield_enabled(self) -> bool:
+        """Check if QField integration is enabled in settings."""
+        pass
+    
+    @abstractmethod
+    def package_for_qfield(self, 
+                          recording_area_feature: Any,
+                          recording_areas_layer_id: str,
+                          objects_layer_id: str,
+                          features_layer_id: Optional[str],
+                          background_layer_id: Optional[str],
+                          destination_folder: str,
+                          project_name: str) -> bool:
+        """
+        Package a QField project for a specific recording area.
+        
+        Args:
+            recording_area_feature: The feature representing the recording area
+            recording_areas_layer_id: ID of the recording areas layer
+            objects_layer_id: ID of the objects layer
+            features_layer_id: ID of the features layer (optional)
+            background_layer_id: ID of the background image layer (optional)
+            destination_folder: Folder where to save the QField project
+            project_name: Name for the QField project
+            
+        Returns:
+            True if packaging was successful, False otherwise
+        """
+        pass
+    
+    @abstractmethod
+    def package_for_qfield_with_data(self, 
+                                   feature_data: Dict[str, Any],
+                                   recording_areas_layer_id: str,
+                                   objects_layer_id: str,
+                                   features_layer_id: Optional[str],
+                                   background_layer_id: Optional[str],
+                                   destination_folder: str,
+                                   project_name: str) -> bool:
+        """
+        Package a QField project for a specific recording area using extracted feature data.
+        
+        Args:
+            feature_data: Dictionary containing feature data (id, geometry_wkt, attributes)
+            recording_areas_layer_id: ID of the recording areas layer
+            objects_layer_id: ID of the objects layer
+            features_layer_id: ID of the features layer (optional)
+            background_layer_id: ID of the background image layer (optional)
+            destination_folder: Folder where to save the QField project
+            project_name: Name for the QField project
+            
+        Returns:
+            True if packaging was successful, False otherwise
+        """
+        pass
+    
+    @abstractmethod
+    def package_for_qfield_with_data_and_variables(self, 
+                                                 feature_data: Dict[str, Any],
+                                                 recording_areas_layer_id: str,
+                                                 objects_layer_id: str,
+                                                 features_layer_id: Optional[str],
+                                                 background_layer_id: Optional[str],
+                                                 destination_folder: str,
+                                                 project_name: str,
+                                                 next_values: Dict[str, str]) -> bool:
+        """
+        Package a QField project for a specific recording area using extracted feature data
+        and add project variables for recording area, level, and first number.
+        
+        Args:
+            feature_data: Dictionary containing feature data (id, geometry_wkt, attributes)
+            recording_areas_layer_id: ID of the recording areas layer
+            objects_layer_id: ID of the objects layer
+            features_layer_id: ID of the features layer (optional)
+            background_layer_id: ID of the background image layer (optional)
+            destination_folder: Folder where to save the QField project
+            project_name: Name for the QField project
+            next_values: Dictionary containing next_number, next_level, and background_image values
+            
+        Returns:
+            True if packaging was successful, False otherwise
+        """
+        pass
+    
+    @abstractmethod
+    def get_qfieldsync_plugin(self) -> Optional[Any]:
+        """Get the QFieldSync plugin instance if available."""
         pass 

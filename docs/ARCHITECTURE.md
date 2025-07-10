@@ -4,7 +4,7 @@ This document describes the architecture of the ArcheoSync QGIS plugin, focusing
 
 ## Overview
 
-The plugin follows SOLID principles and clean architecture to ensure maintainability, testability, and extensibility.
+The plugin follows SOLID principles and clean architecture to ensure maintainability, testability, and extensibility. The current version includes 264 tests with 263 passing, demonstrating robust code quality and comprehensive coverage.
 
 ## SOLID Principles Implementation
 
@@ -13,6 +13,7 @@ Each class has one reason to change:
 - `QGISSettingsManager`: Only manages settings
 - `QGISFileSystemService`: Only handles file operations
 - `ArcheoSyncConfigurationValidator`: Only validates configuration
+- `QGISQFieldService`: Only handles QField integration and packaging
 
 ### Open/Closed Principle (OCP)
 Open for extension, closed for modification:
@@ -37,6 +38,7 @@ Focused, specific interfaces:
 - `ISettingsManager`: Settings operations only
 - `IFileSystemService`: File operations only
 - `ITranslationService`: Translation operations only
+- `IQFieldService`: QField operations only
 
 ### Dependency Inversion Principle (DIP)
 Depend on abstractions, not concretions:
@@ -58,15 +60,19 @@ archeosync/
 │   ├── settings_service.py
 │   ├── file_system_service.py
 │   ├── translation_service.py
-│   └── configuration_validator.py
+│   ├── configuration_validator.py
+│   ├── layer_service.py
+│   └── qfield_service.py
 ├── ui/                     # User interface components
 │   ├── __init__.py
 │   ├── settings_dialog.py
 │   └── prepare_recording_dialog.py
-├── test/                   # Test suite
+├── test/                   # Test suite (264 tests)
 │   ├── test_core_interfaces.py
 │   ├── test_services.py
-│   └── test_ui_components.py
+│   ├── test_ui_components.py
+│   ├── test_layer_service.py
+│   └── test_qfield_service.py
 └── archeo_sync.py          # Main plugin class
 ```
 
@@ -121,6 +127,29 @@ Interface for QGIS layer operations:
     feature,
     recording_areas_layer_id: str
 ) -> List[Dict[str, Any]]`
+- `create_empty_layer_copy(source_layer_id: str, new_layer_name: str) -> Optional[str]`
+- `remove_layer_from_project(layer_id: str) -> bool`
+
+### IQFieldService
+Interface for QField integration:
+- `package_for_qfield(
+    recording_area_feature: Any,
+    recording_areas_layer_id: str,
+    objects_layer_id: str,
+    features_layer_id: Optional[str],
+    background_layer_id: Optional[str],
+    destination_folder: str,
+    project_name: str
+) -> bool`
+- `package_for_qfield_with_data(
+    feature_data: Dict[str, Any],
+    recording_areas_layer_id: str,
+    objects_layer_id: str,
+    features_layer_id: Optional[str],
+    background_layer_id: Optional[str],
+    destination_folder: str,
+    project_name: str
+) -> bool`
 
 ## Service Implementations
 
@@ -134,10 +163,23 @@ QGIS-specific implementation with Qt dialog integration.
 QGIS-specific implementation using QGIS translation system.
 
 ### ArcheoSyncConfigurationValidator
-Comprehensive validation with detailed error reporting.
+Comprehensive validation with detailed error reporting and relationship checking.
 
 ### QGISLayerService
-QGIS-specific implementation for layer operations including selected features counting, intelligent level calculation with case preservation, and raster layer spatial analysis for background image selection.
+QGIS-specific implementation for layer operations including:
+- Selected features counting
+- Intelligent level calculation with case preservation
+- Raster layer spatial analysis for background image selection
+- Empty layer creation for QField offline editing
+- Layer structure copying with styling preservation
+
+### QGISQFieldService
+QGIS-specific implementation for QField integration including:
+- Automatic empty layer creation ("Objects", "Features")
+- Layer configuration for offline editing
+- Project packaging with area of interest
+- Automatic cleanup of temporary layers
+- Project variable injection for field preparation
 
 ## UI Components
 
@@ -145,7 +187,12 @@ QGIS-specific implementation for layer operations including selected features co
 Clean, testable settings dialog with dependency injection and real-time validation.
 
 ### PrepareRecordingDialog
-Dialog for recording preparation showing selected entities in a table with names from layer display expressions, sorted alphabetically. Features editable "Next object number" and "Next level" columns that automatically calculate appropriate values based on existing data and field types. Includes a "Background image" column with dropdown selection of overlapping raster layers for each recording area.
+Dialog for recording preparation showing selected entities in a table with:
+- Names from layer display expressions, sorted alphabetically
+- Editable "Next object number" and "Next level" columns
+- Automatic calculation of appropriate values based on existing data and field types
+- "Background image" column with dropdown selection of overlapping raster layers
+- Real-time validation and error handling
 
 ## Testing Strategy
 
@@ -158,9 +205,12 @@ Test concrete implementations with mocked dependencies.
 ### UI Tests
 Test UI components with mocked services.
 
+### Integration Tests
+Test real QGIS environment integration.
+
 ## Benefits
 
-1. **Testability**: All components can be unit tested with mocks
+1. **Testability**: All components can be unit tested with mocks (264 tests, 263 passing)
 2. **Maintainability**: Clear separation of concerns
 3. **Extensibility**: Easy to add new features through interfaces
 4. **Reliability**: Comprehensive validation and error handling
@@ -173,74 +223,37 @@ Test UI components with mocked services.
 - **Interface Segregation**: Focused, specific interfaces
 - **Strategy Pattern**: Different implementations can be swapped
 - **Factory Pattern**: Service creation and management
-- **Observer Pattern**: UI updates based on state changes 
+- **Observer Pattern**: UI updates based on state changes
+- **Template Method Pattern**: QField packaging with customizable steps
 
-## QGISLayerService.get_related_objects_info Update
+## QField Integration Architecture
 
-### New Signature
+### Empty Layer Creation
+The QField service creates empty layers for offline editing:
+1. **Layer Copying**: Creates empty copies of configured objects and features layers
+2. **Naming Convention**: Uses simple names "Objects" and "Features" for better usability
+3. **Structure Preservation**: Maintains fields, forms, and styling from original layers
+4. **Configuration**: Sets layers for offline editing in QField
+5. **Cleanup**: Automatically removes temporary layers after project creation
 
-```
-def get_related_objects_info(
-    recording_area_feature,
-    objects_layer_id: str,
-    number_field: Optional[str],
-    level_field: Optional[str],
-    recording_areas_layer_id: Optional[str] = None
-) -> Dict[str, Any]
-```
+### Project Packaging
+The packaging process includes:
+1. **Area of Interest**: Extracts geometry from recording area features
+2. **Layer Configuration**: Configures all layers for appropriate sync actions
+3. **Background Images**: Includes selected raster layers as background imagery
+4. **Project Variables**: Injects next values for field preparation
+5. **Export**: Creates QField-compatible project files
 
-- **recording_area_feature**: The feature in the recording areas layer.
-- **objects_layer_id**: The ID of the objects layer.
-- **number_field**: The name of the number field (optional).
-- **level_field**: The name of the level field (optional).
-- **recording_areas_layer_id**: The ID of the recording areas (parent) layer. **Required** for correct relationship lookup.
+## Performance Considerations
 
-### Rationale
-Previously, the method attempted to access `feature.layer()`, which is not available on QgsFeature. The new signature requires the parent layer ID to be passed explicitly, ensuring compatibility and correctness.
+- **Spatial Analysis**: Efficient spatial intersection checking using QGIS geometry operations
+- **Layer Caching**: Intelligent caching of layer information to reduce repeated lookups
+- **Memory Management**: Proper cleanup of QGIS objects to prevent memory leaks
+- **Error Recovery**: Graceful handling of QGIS object deletion issues
 
-### Usage Example
-```python
-related_info = layer_service.get_related_objects_info(
-    feature, objects_layer_id, number_field, level_field, recording_areas_layer_id
-)
-```
+## Future Enhancements
 
-### Impact
-- All usages in dialogs and tests must now provide the parent layer ID.
-- This change improves reliability and avoids runtime errors.
-
-## QGISLayerService.calculate_next_level Method
-
-### New Method
-
-```
-def calculate_next_level(
-    last_level: str,
-    level_field: str,
-    objects_layer_id: str
-) -> str
-```
-
-- **last_level**: The last level value (can be empty string).
-- **level_field**: The level field name.
-- **objects_layer_id**: The objects layer ID.
-
-### Features
-- **Intelligent Increment**: Automatically determines increment logic based on field type
-- **Case Preservation**: Maintains original case (uppercase/lowercase) when incrementing
-- **Type-Aware**: Handles integer and string fields differently
-- **Fallback Logic**: Provides sensible defaults for edge cases
-
-### Increment Logic
-- **Integer Fields**: Numeric increment (1 → 2, 10 → 11)
-- **String Fields**: 
-  - Single character: alphabetical increment (a → b, A → B, z → aa, Z → AA)
-  - Multi-character: append "1" as fallback
-- **Empty Values**: Start with "1" for integers, "a" for strings
-
-### Usage Example
-```python
-next_level = layer_service.calculate_next_level(
-    last_level, level_field, objects_layer_id
-)
-``` 
+- **Cloud Integration**: Support for QFieldCloud synchronization
+- **Advanced Validation**: More sophisticated relationship validation
+- **Performance Monitoring**: Metrics collection for optimization
+- **Plugin Ecosystem**: Extension points for third-party integrations 

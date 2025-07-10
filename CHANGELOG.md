@@ -2,6 +2,23 @@
 
 All notable changes to the ArcheoSync QGIS plugin will be documented in this file.
 
+## [0.5.0] - 2025-07-10
+
+### New Features
+- **Prepare Recording with QField Support**: Implemented prepare recording functionality with QField integration
+  - Automatically creates QField project folder structure
+  - Packages selected layers and background images for offline use
+  - Configures QField project settings for optimal mobile usage
+  - Handles empty layer creation and cleanup seamlessly
+  - Preserves layer styling, forms, and field configurations
+
+### Technical Improvements
+
+- **Documentation Updates**: Comprehensive updates to README.md reflecting current project state
+- **Enhanced Test Coverage**: Expanded test suite to 264 tests with 263 passing
+- **Code Quality**: Continued improvements to code quality and maintainability
+- **User Experience**: Enhanced usability with better error messages and validation feedback
+
 ## [0.4.0] - 2025-07-09
 
 ### New Features
@@ -25,6 +42,8 @@ All notable changes to the ArcheoSync QGIS plugin will be documented in this fil
 - **UI Enhancement**: Added custom dropdown widgets for background image selection in table cells
 - **Test Coverage**: Added comprehensive tests for raster layer functionality and background image selection
 - **Documentation**: Updated README and user documentation for background image feature
+- **Layer Service Enhancement**: Added `create_empty_layer_copy()` and `remove_layer_from_project()` methods
+- **QField Service**: Implemented comprehensive QField packaging with empty layer creation and cleanup
 
 ## [0.3.0] - 2025-07-08
 

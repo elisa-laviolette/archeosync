@@ -458,6 +458,188 @@ class TestLayerService:
                 
                 assert len(overlapping_layers) == 0 
 
+    def test_calculate_next_level_string_increment(self):
+        """Test string level increment logic."""
+        # Mock field info for string field
+        mock_field_info = [
+            {'name': 'level', 'is_integer': False}
+        ]
+        
+        with patch.object(self.layer_service, 'get_layer_fields', return_value=mock_field_info):
+            # Test alphabetical increment
+            result = self.layer_service.calculate_next_level('a', 'level', 'test_layer')
+            assert result == 'b'
+            
+            result = self.layer_service.calculate_next_level('z', 'level', 'test_layer')
+            assert result == 'aa'
+            
+            result = self.layer_service.calculate_next_level('A', 'level', 'test_layer')
+            assert result == 'B'
+            
+            result = self.layer_service.calculate_next_level('Z', 'level', 'test_layer')
+            assert result == 'AA'
+    
+    def test_create_empty_layer_copy_success(self):
+        """Test successful creation of empty layer copy."""
+        # Create mock source layer
+        mock_source_layer = Mock(spec=QgsVectorLayer)
+        mock_source_layer.id.return_value = "source_layer_id"
+        mock_source_layer.name.return_value = "Source Layer"
+        mock_source_layer.crs.return_value.authid.return_value = "EPSG:4326"
+        mock_source_layer.isValid.return_value = True
+        mock_source_layer.geometryType.return_value = 3  # Polygon
+        mock_source_layer.fields.return_value = []
+        
+        # Mock memory layer creation
+        mock_memory_layer = Mock(spec=QgsVectorLayer)
+        mock_memory_layer.id.return_value = "new_layer_id"
+        mock_memory_layer.isValid.return_value = True
+        
+        # Mock project
+        mock_project = Mock()
+        mock_project.addMapLayer.return_value = True
+        
+        with patch.object(self.layer_service, 'get_layer_by_id', return_value=mock_source_layer), \
+             patch('qgis.core.QgsVectorLayer', return_value=mock_memory_layer), \
+             patch('qgis.core.QgsProject.instance', return_value=mock_project), \
+             patch.object(self.layer_service, '_copy_layer_properties', return_value=True), \
+             patch.object(self.layer_service, '_copy_qml_style', return_value=True):
+            
+            result = self.layer_service.create_empty_layer_copy("source_layer_id", "New Layer")
+            
+            # Check that a layer ID was returned (not None)
+            assert result is not None
+            assert isinstance(result, str)
+            # Check that addMapLayer was called (but don't check the specific object)
+            assert mock_project.addMapLayer.called
+    
+    def test_create_empty_layer_copy_invalid_source(self):
+        """Test empty layer creation with invalid source layer."""
+        with patch.object(self.layer_service, 'get_layer_by_id', return_value=None):
+            result = self.layer_service.create_empty_layer_copy("invalid_id", "New Layer")
+            assert result is None
+    
+    def test_create_empty_layer_copy_exception_handling(self):
+        """Test empty layer creation when an exception occurs."""
+        # Create mock source layer
+        mock_source_layer = Mock(spec=QgsVectorLayer)
+        mock_source_layer.id.return_value = "source_layer_id"
+        mock_source_layer.crs.return_value.authid.return_value = "EPSG:4326"
+        mock_source_layer.isValid.return_value = True
+        mock_source_layer.geometryType.return_value = 3  # Polygon
+        mock_source_layer.fields.return_value = []
+        
+        # Mock the method to raise an exception
+        with patch.object(self.layer_service, 'get_layer_by_id', return_value=mock_source_layer), \
+             patch.object(self.layer_service, '_copy_layer_properties', side_effect=Exception("Test exception")):
+            
+            result = self.layer_service.create_empty_layer_copy("source_layer_id", "New Layer")
+            assert result is None
+    
+    def test_remove_layer_from_project_success(self):
+        """Test successful removal of layer from project."""
+        # Mock layer and project
+        mock_layer = Mock()
+        mock_project = Mock()
+        mock_project.mapLayer.return_value = mock_layer
+        mock_project.removeMapLayer.return_value = True
+        
+        with patch('qgis.core.QgsProject.instance', return_value=mock_project):
+            result = self.layer_service.remove_layer_from_project("layer_id")
+            
+            assert result is True
+            mock_project.mapLayer.assert_called_once_with("layer_id")
+            mock_project.removeMapLayer.assert_called_once_with(mock_layer)
+    
+    def test_remove_layer_from_project_layer_not_found(self):
+        """Test layer removal when layer is not found."""
+        # Mock project with no layer
+        mock_project = Mock()
+        mock_project.mapLayer.return_value = None
+        
+        with patch('qgis.core.QgsProject.instance', return_value=mock_project):
+            result = self.layer_service.remove_layer_from_project("nonexistent_id")
+            
+            assert result is False
+            mock_project.mapLayer.assert_called_once_with("nonexistent_id")
+            mock_project.removeMapLayer.assert_not_called()
+    
+    def test_remove_layer_from_project_exception(self):
+        """Test layer removal when an exception occurs."""
+        # Mock project that raises an exception
+        mock_project = Mock()
+        mock_project.mapLayer.side_effect = Exception("Test exception")
+        
+        with patch('qgis.core.QgsProject.instance', return_value=mock_project):
+            result = self.layer_service.remove_layer_from_project("layer_id")
+            
+            assert result is False 
+
+    def test_copy_qml_style_with_style_uri(self):
+        """Test copying QML style when source layer has a style URI."""
+        # Create mock source and target layers
+        mock_source_layer = Mock(spec=QgsVectorLayer)
+        mock_source_layer.styleURI.return_value = "/path/to/style.qml"
+        mock_source_layer.name.return_value = "Source Layer"
+        
+        mock_target_layer = Mock(spec=QgsVectorLayer)
+        mock_target_layer.name.return_value = "Target Layer"
+        
+        # Mock the loadNamedStyle method to return success
+        mock_source_layer.loadNamedStyle.return_value = (True, "")
+        mock_target_layer.loadNamedStyle.return_value = (True, "")
+        
+        # Call the method directly
+        self.layer_service._copy_qml_style(mock_source_layer, mock_target_layer)
+        
+        # Verify that loadNamedStyle was called on both layers
+        mock_source_layer.loadNamedStyle.assert_called_once_with("/path/to/style.qml")
+        mock_target_layer.loadNamedStyle.assert_called_once_with("/path/to/style.qml")
+
+    def test_copy_qml_style_without_style_uri(self):
+        """Test copying QML style when source layer has no style URI."""
+        # Create mock source and target layers
+        mock_source_layer = Mock(spec=QgsVectorLayer)
+        mock_source_layer.styleURI.return_value = None
+        mock_source_layer.name.return_value = "Source Layer"
+        
+        mock_target_layer = Mock(spec=QgsVectorLayer)
+        mock_target_layer.name.return_value = "Target Layer"
+        
+        # Mock the saveNamedStyle and loadNamedStyle methods
+        mock_source_layer.saveNamedStyle.return_value = (True, "")
+        mock_target_layer.loadNamedStyle.return_value = (True, "")
+        
+        with patch('tempfile.NamedTemporaryFile') as mock_temp_file, \
+             patch('os.unlink') as mock_unlink:
+            # Mock temporary file
+            mock_temp_file.return_value.__enter__.return_value.name = "/tmp/temp.qml"
+            mock_temp_file.return_value.__exit__.return_value = None
+            
+            # Call the method directly
+            self.layer_service._copy_qml_style(mock_source_layer, mock_target_layer)
+            
+            # Verify that saveNamedStyle and loadNamedStyle were called
+            mock_source_layer.saveNamedStyle.assert_called_once()
+            mock_target_layer.loadNamedStyle.assert_called_once()
+            mock_unlink.assert_called_once_with("/tmp/temp.qml")
+
+    def test_copy_qml_style_exception_handling(self):
+        """Test that QML style copying handles exceptions gracefully."""
+        # Create mock source and target layers
+        mock_source_layer = Mock(spec=QgsVectorLayer)
+        mock_source_layer.styleURI.side_effect = Exception("Test exception")
+        mock_source_layer.name.return_value = "Source Layer"
+        
+        mock_target_layer = Mock(spec=QgsVectorLayer)
+        mock_target_layer.name.return_value = "Target Layer"
+        
+        # Call the method - it should not raise an exception
+        try:
+            self.layer_service._copy_qml_style(mock_source_layer, mock_target_layer)
+        except Exception:
+            pytest.fail("_copy_qml_style should handle exceptions gracefully")
+
 
 @pytest.mark.qgis
 @pytest.mark.skipif(not QGIS_AVAILABLE, reason="QGIS not available")

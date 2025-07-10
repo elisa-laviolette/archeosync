@@ -15,6 +15,7 @@ A QGIS plugin for archaeologists to prepare data for field recording and import 
 - **Internationalization**: Multi-language support
 - **Layer Service**: Intelligent detection of polygon layers (supports both simple polygons and multipolygons)
 - **Background Image Selection**: Automatic detection of raster layers overlapping recording areas for background image selection
+- **Empty Layer Creation**: Automatic creation of empty objects and features layers for QField offline editing
 
 ## Installation
 
@@ -137,6 +138,13 @@ When QField is enabled:
 - Template project folder becomes optional
 - Plugin optimizes settings for mobile data collection
 - Validation rules are adjusted accordingly
+- **Empty Layers for Offline Editing**: The plugin automatically creates empty objects and features layers in QField projects:
+  - **Objects Layer**: Creates an empty layer named "Objects" with the same structure as the configured objects layer
+  - **Features Layer**: Creates an empty layer named "Features" with the same structure as the configured features layer (if configured)
+  - **Offline Editing**: Both empty layers are configured for offline editing in QField
+  - **Same Structure**: Empty layers maintain the same fields, forms, and styling as the original layers
+  - **No Data**: Empty layers contain no features, allowing field workers to add new data
+  - **Automatic Cleanup**: Empty layers are automatically removed from the main QGIS project after QField project creation
 
 When QField is disabled:
 - Template project folder is required
@@ -147,8 +155,11 @@ When QField is disabled:
 ### Running Tests
 
 ```bash
-# Run all tests
-python -m pytest test/
+# Run all tests (unit tests + QGIS-dependent tests)
+make test-all
+
+# Run unit tests only (no QGIS dependencies)
+make test
 
 # Run specific test categories
 python -m pytest test/test_core_interfaces.py
@@ -162,7 +173,8 @@ python -m pytest --cov=services --cov=ui --cov=core test/
 
 ### Test Results
 
-- **169 tests passing**
+- **264 tests total**
+- **263 tests passing**
 - **1 test skipped** (QGIS-specific translation test)
 - **0 failures**
 
@@ -177,6 +189,7 @@ The plugin follows SOLID principles and clean architecture:
   - `layer_service.py`: QGIS layer operations and polygon detection
   - `configuration_validator.py`: Settings validation with conditional logic
   - `translation_service.py`: Internationalization support
+  - `qfield_service.py`: QField integration with empty layer creation
 - **UI Components** (`ui/`): User interface components with dependency injection
 - **Comprehensive Testing** (`test/`): Full test suite with mocking
 
@@ -191,54 +204,21 @@ The plugin follows SOLID principles and clean architecture:
 
 ### Recent Improvements
 
-- **Objects and Features Layers**: Added support for additional polygon/multipolygon layers
-- **Field Validation**: Intelligent field type detection and validation
-- **Enhanced Layer Detection**: Improved polygon layer detection supporting multiple geometry types
-- **Conditional Validation**: Template project folder validation based on QField setting
-- **Better Error Messages**: More descriptive error messages for configuration issues
-- **Robust Testing**: Comprehensive test coverage for all new features
-- **Code Quality**: Clean, maintainable code following best practices
+- **Background Image Selection**: Added spatial analysis for raster layer selection
+- **Empty Layer Creation**: Simplified naming convention ("Objects", "Features") for better usability
+- **Enhanced Layer Service**: Added raster layer support and spatial intersection detection
+- **Improved Validation**: Comprehensive configuration validation with relationship checking
+- **Better Error Handling**: More robust error handling throughout the application
+- **Performance Optimization**: Optimized operations and caching for better performance
 
-## Requirements
+## Contributing
 
-- QGIS 3.0 or later
-- Python 3.7 or later
-
-## Troubleshooting
-
-### Common Issues
-
-**No polygon layers found in dropdown:**
-- Ensure you have polygon layers loaded in your QGIS project
-- Check that layers are valid and not broken
-- Try refreshing the layer list using the refresh button
-
-**Objects layer validation error:**
-- Objects layer is mandatory and must be selected
-- Ensure the selected layer has polygon or multipolygon geometry
-- If selecting a number field, ensure it is an integer type
-
-**Number field shows Real/float fields:**
-- Only integer fields should appear in the number field dropdown
-- If you see Real/float fields, this indicates a bug that has been fixed in the latest version
-
-**Template project folder validation error:**
-- When using QField, the template project folder is not required
-- Uncheck the QField option if you want to use a template project
-
-**Layer service errors:**
-- Verify that your polygon layers are valid
-- Check the QGIS layer panel for any layer loading errors
-- Ensure layers have proper coordinate reference systems
-
-## Author
-
-Elisa Caron-Laviolette  
-Email: elisa.laviolette@gmail.com
+1. Fork the repository
+2. Create a feature branch
+3. Write tests for new functionality
+4. Ensure all tests pass
+5. Submit a pull request
 
 ## License
 
-This program is free software; you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation; either version 2 of the License, or
-(at your option) any later version. 
+This project is licensed under the MIT License - see the LICENSE file for details. 

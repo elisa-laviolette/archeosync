@@ -37,7 +37,8 @@ from .services import (
     QGISFileSystemService,
     QGISTranslationService,
     ArcheoSyncConfigurationValidator,
-    QGISLayerService
+    QGISLayerService,
+    QGISQFieldService
 )
 
 
@@ -105,6 +106,9 @@ class ArcheoSyncPlugin:
         
         # Initialize layer service
         self._layer_service = QGISLayerService()
+
+        # Initialize QField service
+        self._qfield_service = QGISQFieldService(self._settings_manager, self._layer_service)
         
         # Initialize configuration validator
         self._configuration_validator = ArcheoSyncConfigurationValidator(
@@ -230,6 +234,7 @@ class ArcheoSyncPlugin:
         dialog = PrepareRecordingDialog(
             layer_service=self._layer_service,
             settings_manager=self._settings_manager,
+            qfield_service=self._qfield_service,
             parent=self._iface.mainWindow()
         )
         
@@ -237,18 +242,179 @@ class ArcheoSyncPlugin:
         
         # Handle dialog result
         if result:
-            self._handle_prepare_recording_accepted()
+            self._handle_prepare_recording_accepted(dialog)
     
-    def _handle_prepare_recording_accepted(self) -> None:
+    def _handle_prepare_recording_accepted(self, dialog) -> None:
         """Handle the case when prepare recording dialog is accepted."""
-        # This is where you would implement the actual recording preparation functionality
-        # For now, we just show a message
-        from qgis.PyQt.QtWidgets import QMessageBox
-        QMessageBox.information(
-            self._iface.mainWindow(),
-            "Prepare Recording",
-            "Recording preparation functionality will be implemented here."
-        )
+        try:
+            # Check if QField is enabled
+            if not self._qfield_service.is_qfield_enabled():
+                from qgis.PyQt.QtWidgets import QMessageBox
+                QMessageBox.warning(
+                    self._iface.mainWindow(),
+                    "QField Not Enabled",
+                    "QField integration is not enabled. Please enable it in the configuration."
+                )
+                return
+            
+            # Get configuration
+            recording_areas_layer_id = self._settings_manager.get_value('recording_areas_layer', '')
+            objects_layer_id = self._settings_manager.get_value('objects_layer', '')
+            features_layer_id = self._settings_manager.get_value('features_layer', '')
+            destination_folder = self._settings_manager.get_value('field_projects_folder', '')
+            
+            if not recording_areas_layer_id or not objects_layer_id or not destination_folder:
+                from qgis.PyQt.QtWidgets import QMessageBox
+                QMessageBox.warning(
+                    self._iface.mainWindow(),
+                    "Configuration Error",
+                    "Required configuration is missing. Please check your settings."
+                )
+                return
+            
+            # Get selected features and extract their data early to avoid QGIS object deletion issues
+            recording_layer = self._layer_service.get_layer_by_id(recording_areas_layer_id)
+            if not recording_layer:
+                from qgis.PyQt.QtWidgets import QMessageBox
+                QMessageBox.warning(
+                    self._iface.mainWindow(),
+                    "Layer Error",
+                    "Recording areas layer not found."
+                )
+                return
+            
+            selected_features = recording_layer.selectedFeatures()
+            if not selected_features:
+                from qgis.PyQt.QtWidgets import QMessageBox
+                QMessageBox.warning(
+                    self._iface.mainWindow(),
+                    "No Selection",
+                    "No recording areas are selected."
+                )
+                return
+            
+            # Extract feature data early to avoid issues with QGIS object deletion
+            feature_data = []
+            layer_display_expression = recording_layer.displayExpression()
+            
+            for feature in selected_features:
+                # Extract geometry as WKT
+                geometry_wkt = None
+                if hasattr(feature, 'geometry') and feature.geometry():
+                    geom = feature.geometry()
+                    if geom and not geom.isNull():
+                        geometry_wkt = geom.asWkt()
+                
+                # Extract attributes as a list to preserve order
+                attributes = []
+                if hasattr(feature, 'attributes'):
+                    attributes = list(feature.attributes())
+                
+                # Extract feature ID
+                feature_id = feature.id() if hasattr(feature, 'id') else None
+                
+                # Get display name using QGIS expression evaluation
+                display_name = str(feature_id)  # Default to feature ID
+                if layer_display_expression and layer_display_expression.strip():
+                    try:
+                        from qgis.core import QgsExpression, QgsExpressionContext, QgsExpressionContextUtils
+                        expr = QgsExpression(layer_display_expression)
+                        if not expr.hasParserError():
+                            context = QgsExpressionContext()
+                            context.appendScope(QgsExpressionContextUtils.layerScope(recording_layer))
+                            context.setFeature(feature)
+                            result = expr.evaluate(context)
+                            if result and str(result) != 'NULL' and str(result).strip():
+                                display_name = str(result).strip()
+                                print(f"Using display expression for feature {feature_id}: '{display_name}'")
+                    except Exception as e:
+                        print(f"Display expression evaluation failed for feature {feature_id}: {str(e)}")
+                        # Fall back to common name fields
+                        name_fields = ['name', 'title', 'label', 'description', 'comment']
+                        for field_name in name_fields:
+                            field_idx = recording_layer.fields().indexOf(field_name)
+                            if field_idx >= 0 and field_idx < len(attributes):
+                                value = attributes[field_idx]
+                                if value and str(value) != 'NULL':
+                                    display_name = str(value)
+                                    print(f"Using common name field '{field_name}' for feature {feature_id}: '{display_name}'")
+                                    break
+                
+                feature_data.append({
+                    'id': feature_id,
+                    'geometry_wkt': geometry_wkt,
+                    'attributes': attributes,
+                    'display_name': display_name
+                })
+            
+            # Get next values for all features
+            next_values = dialog.get_all_next_values()
+            
+            # Display expression information for debugging
+            if layer_display_expression and layer_display_expression.strip():
+                print(f"Display expression: '{layer_display_expression}'")
+            
+            # Process each selected recording area
+            success_count = 0
+            error_count = 0
+            
+            for i, feature_info in enumerate(feature_data):
+                try:
+                    # Use the pre-extracted display name
+                    feature_name = feature_info['display_name']
+                    
+                    # Clean project name for file system
+                    import re
+                    project_name = re.sub(r'[^\w\-_\.]', '_', feature_name)
+                    
+                    # Get background image from next values
+                    background_layer_id = next_values[i]['background_image'] if i < len(next_values) else ''
+                    
+                    # Package for QField using extracted feature data to avoid QGIS object deletion issues
+                    # Use the new method that adds project variables
+                    success = self._qfield_service.package_for_qfield_with_data_and_variables(
+                        feature_data=feature_info,
+                        recording_areas_layer_id=recording_areas_layer_id,
+                        objects_layer_id=objects_layer_id,
+                        features_layer_id=features_layer_id if features_layer_id else None,
+                        background_layer_id=background_layer_id if background_layer_id else None,
+                        destination_folder=destination_folder,
+                        project_name=project_name,
+                        next_values=next_values[i] if i < len(next_values) else {}
+                    )
+                    
+                    if success:
+                        success_count += 1
+                    else:
+                        error_count += 1
+                        
+                except Exception as e:
+                    feature_id = feature_info.get('id', 'unknown')
+                    print(f"Error processing recording area {feature_id}: {str(e)}")
+                    error_count += 1
+            
+            # Show results
+            from qgis.PyQt.QtWidgets import QMessageBox
+            if error_count == 0:
+                QMessageBox.information(
+                    self._iface.mainWindow(),
+                    "QField Preparation Complete",
+                    f"Successfully prepared {success_count} QField project(s) in:\n{destination_folder}"
+                )
+            else:
+                QMessageBox.warning(
+                    self._iface.mainWindow(),
+                    "QField Preparation Results",
+                    f"Prepared {success_count} QField project(s) successfully.\n{error_count} project(s) failed.\n\nCheck the console for error details."
+                )
+                
+        except Exception as e:
+            from qgis.PyQt.QtWidgets import QMessageBox
+            QMessageBox.critical(
+                self._iface.mainWindow(),
+                "Error",
+                f"An error occurred during QField preparation:\n{str(e)}"
+            )
     
     @property
     def settings_manager(self):
@@ -263,4 +429,9 @@ class ArcheoSyncPlugin:
     @property
     def layer_service(self):
         """Get the layer service instance."""
-        return self._layer_service 
+        return self._layer_service
+    
+    @property
+    def qfield_service(self):
+        """Get the QField service instance."""
+        return self._qfield_service 

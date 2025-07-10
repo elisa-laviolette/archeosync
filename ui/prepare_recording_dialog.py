@@ -35,9 +35,9 @@ from qgis.PyQt import QtWidgets
 from qgis.PyQt.QtCore import Qt
 
 try:
-    from ..core.interfaces import ILayerService, ISettingsManager
+    from ..core.interfaces import ILayerService, ISettingsManager, IQFieldService
 except ImportError:
-    from core.interfaces import ILayerService, ISettingsManager
+    from core.interfaces import ILayerService, ISettingsManager, IQFieldService
 
 
 class PrepareRecordingDialog(QtWidgets.QDialog):
@@ -51,6 +51,7 @@ class PrepareRecordingDialog(QtWidgets.QDialog):
     def __init__(self, 
                  layer_service: ILayerService,
                  settings_manager: ISettingsManager,
+                 qfield_service: IQFieldService,
                  parent=None):
         """
         Initialize the prepare recording dialog.
@@ -65,6 +66,7 @@ class PrepareRecordingDialog(QtWidgets.QDialog):
         # Store injected dependencies
         self._layer_service = layer_service
         self._settings_manager = settings_manager
+        self._qfield_service = qfield_service
         
         # Initialize UI
         self._setup_ui()
@@ -131,6 +133,9 @@ class PrepareRecordingDialog(QtWidgets.QDialog):
         self._button_box.accepted.connect(self.accept)
         self._button_box.rejected.connect(self.reject)
         
+        # Initially hide the OK button - it will be shown only if QField is enabled
+        self._button_box.button(QtWidgets.QDialogButtonBox.Ok).setVisible(False)
+        
         parent_layout.addWidget(self._button_box)
     
     def _create_entities_table(self, parent_layout: QtWidgets.QVBoxLayout) -> None:
@@ -178,7 +183,7 @@ class PrepareRecordingDialog(QtWidgets.QDialog):
                 self._recording_areas_label.setText("Recording Areas Layer: Not configured")
                 self._selected_count_label.setText("Selected Entities: 0")
                 self._populate_entities_table([])
-                self._button_box.button(QtWidgets.QDialogButtonBox.Ok).setEnabled(False)
+                self._button_box.button(QtWidgets.QDialogButtonBox.Ok).setVisible(False)
                 return
             
             # Get layer info
@@ -187,7 +192,7 @@ class PrepareRecordingDialog(QtWidgets.QDialog):
                 self._recording_areas_label.setText("Recording Areas Layer: Layer not found")
                 self._selected_count_label.setText("Selected Entities: 0")
                 self._populate_entities_table([])
-                self._button_box.button(QtWidgets.QDialogButtonBox.Ok).setEnabled(False)
+                self._button_box.button(QtWidgets.QDialogButtonBox.Ok).setVisible(False)
                 return
             
             # Update layer name
@@ -199,7 +204,7 @@ class PrepareRecordingDialog(QtWidgets.QDialog):
                 self._recording_areas_label.setText("Recording Areas Layer: Layer not found")
                 self._selected_count_label.setText("Selected Entities: 0")
                 self._populate_entities_table([])
-                self._button_box.button(QtWidgets.QDialogButtonBox.Ok).setEnabled(False)
+                self._button_box.button(QtWidgets.QDialogButtonBox.Ok).setVisible(False)
                 return
             
             # Get selected features
@@ -212,23 +217,27 @@ class PrepareRecordingDialog(QtWidgets.QDialog):
             # Populate table with actual features
             self._populate_entities_table(selected_features)
             
-            # Enable/disable OK button based on selection
-            has_selection = selected_count > 0
-            self._button_box.button(QtWidgets.QDialogButtonBox.Ok).setEnabled(has_selection)
+            # Check if QField is enabled
+            qfield_enabled = self._qfield_service.is_qfield_enabled()
             
-            # Update button text based on selection
+            # Show/hide and enable/disable OK button based on QField and selection
+            has_selection = selected_count > 0
             ok_button = self._button_box.button(QtWidgets.QDialogButtonBox.Ok)
-            if has_selection:
+            
+            if qfield_enabled and has_selection:
+                ok_button.setVisible(True)
+                ok_button.setEnabled(True)
                 ok_button.setText("Prepare Recording")
             else:
-                ok_button.setText("No Selection")
+                ok_button.setVisible(False)
+                ok_button.setEnabled(False)
                 
         except Exception as e:
             print("PrepareRecordingDialog error:", e)
             self._recording_areas_label.setText("Recording Areas Layer: Error")
             self._selected_count_label.setText("Selected Entities: Error")
             self._populate_entities_table([])
-            self._button_box.button(QtWidgets.QDialogButtonBox.Ok).setEnabled(False)
+            self._button_box.button(QtWidgets.QDialogButtonBox.Ok).setVisible(False)
     
     def _populate_entities_table(self, features) -> None:
         """Populate the entities table with feature information."""

@@ -11,16 +11,18 @@ Key Features:
 - Provide layer selection functionality
 - Layer metadata access
 - Spatial relationship checking between raster and polygon layers
+- Create empty layers with same structure as existing layers
 
 Usage:
     layer_service = QGISLayerService()
     polygon_layers = layer_service.get_polygon_layers()
     raster_layers = layer_service.get_raster_layers()
     selected_layer = layer_service.get_layer_by_id(layer_id)
+    empty_layer = layer_service.create_empty_layer_copy(source_layer_id, "Empty Layer")
 """
 
 from typing import List, Optional, Dict, Any
-from qgis.core import QgsProject, QgsVectorLayer, QgsRasterLayer, QgsExpression, QgsExpressionContext, QgsExpressionContextUtils
+from qgis.core import QgsProject, QgsVectorLayer, QgsRasterLayer, QgsExpression, QgsExpressionContext, QgsExpressionContextUtils, QgsFields, QgsField, QgsFeature, QgsGeometry
 
 try:
     from ..core.interfaces import ILayerService
@@ -533,3 +535,231 @@ class QGISLayerService(ILayerService):
         
         # For other cases, append a number
         return f"{last_level}1" 
+
+    def create_empty_layer_copy(self, source_layer_id: str, new_layer_name: str) -> Optional[str]:
+        """
+        Create an empty layer with the same structure (fields, geometry type, CRS) as the source layer.
+        
+        Args:
+            source_layer_id: The ID of the source layer to copy structure from
+            new_layer_name: The name for the new empty layer
+            
+        Returns:
+            The ID of the newly created layer, or None if creation failed
+        """
+        source_layer = self.get_layer_by_id(source_layer_id)
+        if source_layer is None or not isinstance(source_layer, QgsVectorLayer):
+            return None
+        
+        try:
+            # Create a memory layer with the same structure
+            memory_layer = QgsVectorLayer(f"Polygon?crs={source_layer.crs().authid()}", new_layer_name, "memory")
+            
+            if not memory_layer.isValid():
+                return None
+            
+            # Copy fields from source layer
+            source_fields = source_layer.fields()
+            memory_provider = memory_layer.dataProvider()
+            
+            # Add fields to the memory layer
+            field_list = []
+            for field in source_fields:
+                new_field = QgsField(field.name(), field.type(), field.typeName(), field.length(), field.precision(), field.comment())
+                field_list.append(new_field)
+            
+            memory_provider.addAttributes(field_list)
+            memory_layer.updateFields()
+            
+            # Copy layer properties (symbology, forms, etc.)
+            self._copy_layer_properties(source_layer, memory_layer)
+            
+            # Try to copy QML style file if it exists
+            self._copy_qml_style(source_layer, memory_layer)
+            
+            # Add the layer to the project
+            project = QgsProject.instance()
+            project.addMapLayer(memory_layer)
+            
+            return memory_layer.id()
+            
+        except Exception as e:
+            print(f"Error creating empty layer copy: {str(e)}")
+            return None
+    
+    def _copy_layer_properties(self, source_layer: QgsVectorLayer, target_layer: QgsVectorLayer) -> None:
+        """
+        Copy layer properties from source to target layer.
+        
+        Args:
+            source_layer: The source layer to copy properties from
+            target_layer: The target layer to copy properties to
+        """
+        try:
+            # Copy form configuration
+            if hasattr(source_layer, 'editFormConfig'):
+                target_layer.setEditFormConfig(source_layer.editFormConfig())
+            
+            # Copy field configuration
+            source_fields = source_layer.fields()
+            target_fields = target_layer.fields()
+            
+            for i, source_field in enumerate(source_fields):
+                if i < len(target_fields):
+                    target_field = target_fields[i]
+                    if target_field.name() == source_field.name():
+                        # Copy field configuration
+                        target_layer.setFieldAlias(i, source_layer.fieldAlias(i))
+                        
+                        # Copy field constraints if available
+                        if hasattr(source_layer, 'fieldConstraints'):
+                            target_layer.setFieldConstraints(i, source_layer.fieldConstraints(i))
+            
+            # Copy layer styling (symbology) - Enhanced version
+            if hasattr(source_layer, 'renderer') and source_layer.renderer():
+                # Clone the renderer to ensure we get a deep copy
+                cloned_renderer = source_layer.renderer().clone()
+                if cloned_renderer:
+                    target_layer.setRenderer(cloned_renderer)
+                    print(f"Copied renderer from {source_layer.name()} to {target_layer.name()}")
+            
+            # Copy layer opacity
+            target_layer.setOpacity(source_layer.opacity())
+            
+            # Copy layer transparency
+            if hasattr(source_layer, 'setLayerTransparency'):
+                target_layer.setLayerTransparency(source_layer.layerTransparency())
+            
+            # Copy layer blend mode
+            if hasattr(source_layer, 'blendMode'):
+                target_layer.setBlendMode(source_layer.blendMode())
+            
+            # Copy layer scale visibility
+            if hasattr(source_layer, 'minimumScale'):
+                target_layer.setMinimumScale(source_layer.minimumScale())
+            if hasattr(source_layer, 'maximumScale'):
+                target_layer.setMaximumScale(source_layer.maximumScale())
+            
+            # Copy layer scale visibility settings
+            if hasattr(source_layer, 'hasScaleBasedVisibility'):
+                target_layer.setScaleBasedVisibility(source_layer.hasScaleBasedVisibility())
+            
+            # Copy layer labeling settings
+            if hasattr(source_layer, 'labeling'):
+                source_labeling = source_layer.labeling()
+                if source_labeling:
+                    cloned_labeling = source_labeling.clone()
+                    if cloned_labeling:
+                        target_layer.setLabeling(cloned_labeling)
+                        print(f"Copied labeling from {source_layer.name()} to {target_layer.name()}")
+            
+            # Copy layer actions
+            if hasattr(source_layer, 'actions'):
+                target_layer.setActions(source_layer.actions())
+            
+            # Copy layer metadata
+            if hasattr(source_layer, 'metadata'):
+                target_layer.setMetadata(source_layer.metadata())
+            
+            # Copy layer custom properties
+            if hasattr(source_layer, 'customProperties'):
+                for key in source_layer.customProperties():
+                    value = source_layer.customProperty(key)
+                    target_layer.setCustomProperty(key, value)
+            
+            # Copy layer flags
+            if hasattr(source_layer, 'flags'):
+                target_layer.setFlags(source_layer.flags())
+            
+            # Copy layer expression fields
+            if hasattr(source_layer, 'expressionFields'):
+                for field in source_layer.expressionFields():
+                    target_layer.addExpressionField(field.expression(), field.name())
+            
+            # Copy layer constraints
+            if hasattr(source_layer, 'constraints'):
+                target_layer.setConstraints(source_layer.constraints())
+            
+            # Force a refresh of the layer to apply the styling
+            target_layer.triggerRepaint()
+            
+            print(f"Successfully copied styling properties from {source_layer.name()} to {target_layer.name()}")
+            
+        except Exception as e:
+            print(f"Warning: Could not copy all layer properties: {str(e)}")
+            import traceback
+            traceback.print_exc()
+    
+    def _copy_qml_style(self, source_layer: QgsVectorLayer, target_layer: QgsVectorLayer) -> None:
+        """
+        Copy QML style file from source layer to target layer if it exists.
+        
+        Args:
+            source_layer: The source layer to copy style from
+            target_layer: The target layer to copy style to
+        """
+        try:
+            # Get the source layer's style file path
+            source_style_path = source_layer.styleURI()
+            
+            if source_style_path and source_style_path.endswith('.qml'):
+                # Try to load the QML style file
+                if source_layer.loadNamedStyle(source_style_path)[0]:
+                    # If successful, apply the same style to the target layer
+                    target_layer.loadNamedStyle(source_style_path)
+                    print(f"Copied QML style from {source_style_path} to {target_layer.name()}")
+                else:
+                    print(f"Could not load QML style from {source_style_path}")
+            else:
+                # Try to export current style to QML and then import it
+                import tempfile
+                import os
+                
+                # Create a temporary QML file
+                with tempfile.NamedTemporaryFile(suffix='.qml', delete=False) as temp_file:
+                    temp_qml_path = temp_file.name
+                
+                try:
+                    # Export source layer style to temporary QML file
+                    if source_layer.saveNamedStyle(temp_qml_path)[0]:
+                        # Import the style to target layer
+                        if target_layer.loadNamedStyle(temp_qml_path)[0]:
+                            print(f"Exported and imported style from {source_layer.name()} to {target_layer.name()}")
+                        else:
+                            print(f"Could not import style to {target_layer.name()}")
+                    else:
+                        print(f"Could not export style from {source_layer.name()}")
+                finally:
+                    # Clean up temporary file
+                    try:
+                        os.unlink(temp_qml_path)
+                    except:
+                        pass
+                        
+        except Exception as e:
+            print(f"Warning: Could not copy QML style: {str(e)}")
+    
+    def remove_layer_from_project(self, layer_id: str) -> bool:
+        """
+        Remove a layer from the current QGIS project.
+        
+        Args:
+            layer_id: The ID of the layer to remove
+            
+        Returns:
+            True if the layer was successfully removed, False otherwise
+        """
+        try:
+            project = QgsProject.instance()
+            layer = project.mapLayer(layer_id)
+            
+            if layer is None:
+                return False
+            
+            # Remove the layer from the project
+            project.removeMapLayer(layer)
+            return True
+            
+        except Exception as e:
+            print(f"Error removing layer {layer_id}: {str(e)}")
+            return False 

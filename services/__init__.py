@@ -10,11 +10,13 @@ from .file_system_service import QGISFileSystemService
 from .translation_service import QGISTranslationService
 from .configuration_validator import ArcheoSyncConfigurationValidator
 from .layer_service import QGISLayerService
+from .qfield_service import QGISQFieldService
 
 __all__ = [
     'QGISSettingsManager',
     'QGISFileSystemService',
     'QGISTranslationService',
     'ArcheoSyncConfigurationValidator',
-    'QGISLayerService'
+    'QGISLayerService',
+    'QGISQFieldService'
 ] 
