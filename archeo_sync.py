@@ -378,9 +378,18 @@ class ArcheoSyncPlugin:
                     # Use the pre-extracted display name
                     feature_name = feature_info['display_name']
                     
+                    # Get next level from next values
+                    next_level = next_values[i].get('next_level', '') if i < len(next_values) else ''
+                    
+                    # Create project name: display name + '_' + next level (if level is defined)
+                    if next_level:
+                        project_name = f"{feature_name}_{next_level}"
+                    else:
+                        project_name = feature_name
+                    
                     # Clean project name for file system
                     import re
-                    project_name = re.sub(r'[^\w\-_\.]', '_', feature_name)
+                    project_name = re.sub(r'[^\w\-_\.]', '_', project_name)
                     
                     # Get background image from next values
                     background_layer_id = next_values[i]['background_image'] if i < len(next_values) else ''

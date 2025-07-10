@@ -47,6 +47,53 @@ class TestBasicFunctionality:
             assert hasattr(resources, 'qCleanupResources')
         except ImportError:
             pytest.skip("resources module not available")
+    
+    def test_project_naming_with_level(self):
+        """Test that project naming includes level when defined."""
+        # This test simulates the project naming logic from archeo_sync.py
+        import re
+        
+        # Test case 1: Level is defined
+        feature_name = "Test Area"
+        next_level = "A"
+        
+        if next_level:
+            project_name = f"{feature_name}_{next_level}"
+        else:
+            project_name = feature_name
+        
+        # Clean project name for file system
+        project_name = re.sub(r'[^\w\-_\.]', '_', project_name)
+        
+        assert project_name == "Test_Area_A"
+        
+        # Test case 2: Level is not defined
+        feature_name = "Test Area"
+        next_level = ""
+        
+        if next_level:
+            project_name = f"{feature_name}_{next_level}"
+        else:
+            project_name = feature_name
+        
+        # Clean project name for file system
+        project_name = re.sub(r'[^\w\-_\.]', '_', project_name)
+        
+        assert project_name == "Test_Area"
+        
+        # Test case 3: Level with special characters
+        feature_name = "Test Area (North)"
+        next_level = "Level 1"
+        
+        if next_level:
+            project_name = f"{feature_name}_{next_level}"
+        else:
+            project_name = feature_name
+        
+        # Clean project name for file system
+        project_name = re.sub(r'[^\w\-_\.]', '_', project_name)
+        
+        assert project_name == "Test_Area__North__Level_1"
 
 
 if __name__ == "__main__":

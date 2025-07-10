@@ -18,6 +18,12 @@ All notable changes to the ArcheoSync QGIS plugin will be documented in this fil
   - Feature collection and validation from completed field recordings
   - Support for multiple project import in a single operation
 
+- **Enhanced Project Naming**: QField project names now include level information when available
+  - When a level is defined, project names follow the pattern: "Recording Area Name_Level"
+  - Examples: "Test Area_A", "Excavation Site_Level 1", "Trench 1_B"
+  - If no level is defined, only the recording area name is used
+  - Project names are automatically cleaned for file system compatibility
+
 ### Technical Improvements
 - **Enhanced Test Coverage**: Expanded test suite to 324 tests with comprehensive coverage
 - **Service Architecture**: Added CSVImportService with clean interface implementation

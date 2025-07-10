@@ -48,6 +48,8 @@ A QGIS plugin for archaeologists to prepare data for field work and import it ba
 4. Configure the next values for objects and features
 5. Click OK to create QField projects for each selected recording area
 
+**Project Naming**: When a level is defined, QField project names will be the display name of the recording area followed by '_' and the content of the Next level column. For example: "Test Area_A" or "Excavation Site_Level 1". If no level is defined, only the recording area name is used.
+
 ### Import Data
 
 1. Go to **Plugins > ArcheoSync > Import Data**
