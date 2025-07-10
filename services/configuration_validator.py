@@ -16,7 +16,7 @@ Key Features:
 
 Validation Rules:
 - Field Projects Folder: Must exist, be writable, and be a directory
-- Total Station Folder: Must exist, be readable, and contain CSV files
+- Total Station Folder: Must exist and be a directory (CSV files are optional)
 - Completed Projects Folder: Must exist, be readable, and be a directory
 - Template Project Folder: Must exist, be readable, and contain QGIS project files
 - Recording Areas Layer: Must be a valid polygon layer in the current project
@@ -123,11 +123,7 @@ class ArcheoSyncConfigurationValidator(IConfigurationValidator):
             errors.append(f"Total station folder does not exist: {path}")
         elif not self._file_system_service.is_directory(path):
             errors.append(f"Total station path is not a directory: {path}")
-        else:
-            # Check if directory contains CSV files
-            csv_files = self._file_system_service.list_files(path, '.csv')
-            if not csv_files:
-                errors.append(f"No CSV files found in total station folder: {path}")
+        # Note: CSV files are not required - the folder just needs to exist
         
         return errors
     

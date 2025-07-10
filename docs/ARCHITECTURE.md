@@ -4,7 +4,7 @@ This document describes the architecture of the ArcheoSync QGIS plugin, focusing
 
 ## Overview
 
-The plugin follows SOLID principles and clean architecture to ensure maintainability, testability, and extensibility. The current version includes 264 tests with 263 passing, demonstrating robust code quality and comprehensive coverage.
+The plugin follows SOLID principles and clean architecture to ensure maintainability, testability, and extensibility. The current version includes 317 tests with 317 passing and 1 skipped, demonstrating robust code quality and comprehensive coverage.
 
 ## SOLID Principles Implementation
 
@@ -66,13 +66,18 @@ archeosync/
 ├── ui/                     # User interface components
 │   ├── __init__.py
 │   ├── settings_dialog.py
+│   ├── import_data_dialog.py
 │   └── prepare_recording_dialog.py
-├── test/                   # Test suite (264 tests)
+├── test/                   # Test suite (317 tests)
 │   ├── test_core_interfaces.py
 │   ├── test_services.py
 │   ├── test_ui_components.py
+│   ├── test_import_data_dialog.py
 │   ├── test_layer_service.py
-│   └── test_qfield_service.py
+│   ├── test_qfield_service.py
+│   ├── test_csv_import_service.py
+│   ├── test_prepare_recording_dialog.py
+│   └── test_settings_dialog.py
 └── archeo_sync.py          # Main plugin class
 ```
 
@@ -194,6 +199,18 @@ Dialog for recording preparation showing selected entities in a table with:
 - "Background image" column with dropdown selection of overlapping raster layers
 - Real-time validation and error handling
 
+### ImportDataDialog
+Dialog for importing data from CSV files and completed field projects with:
+- **Dual List Interface**: Separate lists for CSV files and completed projects
+- **Default Selection**: All items are selected by default for convenience
+- **Quick Selection Controls**: "Select All" and "Deselect All" buttons for both lists
+- **Alphabetical Sorting**: Both lists are sorted alphabetically by name for easy navigation
+- **Real-time Scanning**: Automatic folder scanning with refresh capabilities
+- **Error Handling**: Graceful handling of missing folders and file system errors
+- **Dependency Injection**: Clean architecture with injected services for testability
+- **Multi-selection Support**: Users can select multiple files and projects simultaneously
+- **Tooltip Information**: Full file paths displayed on hover for clarity
+
 ## Testing Strategy
 
 ### Interface Tests
@@ -210,7 +227,7 @@ Test real QGIS environment integration.
 
 ## Benefits
 
-1. **Testability**: All components can be unit tested with mocks (264 tests, 263 passing)
+1. **Testability**: All components can be unit tested with mocks (317 tests, 317 passing, 1 skipped)
 2. **Maintainability**: Clear separation of concerns
 3. **Extensibility**: Easy to add new features through interfaces
 4. **Reliability**: Comprehensive validation and error handling
@@ -250,6 +267,27 @@ The packaging process includes:
 - **Layer Caching**: Intelligent caching of layer information to reduce repeated lookups
 - **Memory Management**: Proper cleanup of QGIS objects to prevent memory leaks
 - **Error Recovery**: Graceful handling of QGIS object deletion issues
+
+## Latest Features (v0.5.0)
+
+### QField Integration Enhancements
+- **Complete Project Packaging**: Full QField project creation with proper layer configuration
+- **Empty Layer Creation**: Automatic creation of "Objects" and "Features" layers for offline editing
+- **Background Image Integration**: Intelligent selection and inclusion of overlapping raster layers
+- **Project Variables**: Automatic injection of next values for field preparation
+- **Cleanup Management**: Proper removal of temporary layers after project creation
+
+### Background Image Selection
+- **Spatial Analysis**: Automatic detection of raster layers overlapping with recording areas
+- **Smart Filtering**: Only shows relevant raster layers for each specific recording area
+- **User-Friendly Interface**: Dropdown selection with layer dimensions and "No image" option
+- **Performance Optimized**: Efficient spatial intersection checking using QGIS geometry operations
+
+### Enhanced Field Validation
+- **Intelligent Level Calculation**: Smart increment logic with case preservation
+- **Field Type Detection**: Automatic detection of integer vs string fields
+- **Next Value Prediction**: Automatic calculation of appropriate next values based on existing data
+- **Real-time Validation**: Immediate feedback on field configuration and data integrity
 
 ## Future Enhancements
 

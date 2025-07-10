@@ -1281,8 +1281,7 @@ class TestArcheoSyncConfigurationValidator(unittest.TestCase):
         self.file_system_service.list_files.return_value = []
         
         errors = self.validator.validate_total_station_folder('/path/to/folder')
-        self.assertEqual(len(errors), 1)
-        self.assertIn('No CSV files found in total station folder', errors[0])
+        self.assertEqual(len(errors), 0)  # No CSV files required, folder just needs to exist
     
     def test_validate_template_project_folder_no_qgis_files(self):
         """Test validation of template project folder with no QGIS files."""

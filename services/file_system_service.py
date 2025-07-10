@@ -166,6 +166,27 @@ class QGISFileSystemService(IFileSystemService):
         
         return files
     
+    def list_directories(self, directory: str) -> list:
+        """
+        List directories in a directory.
+        
+        Args:
+            directory: Directory to list subdirectories from
+            
+        Returns:
+            List of directory paths
+        """
+        if not self.path_exists(directory) or not self.is_directory(directory):
+            return []
+        
+        directories = []
+        for item in os.listdir(directory):
+            item_path = os.path.join(directory, item)
+            if self.is_directory(item_path):
+                directories.append(item_path)
+        
+        return directories
+    
     def is_writable(self, path: str) -> bool:
         """
         Check if a path is writable.
@@ -198,4 +219,23 @@ class QGISFileSystemService(IFileSystemService):
             list(Path(path).iterdir())
             return True
         except (OSError, PermissionError):
-            return False 
+            return False
+    
+    def contains_qgs_file(self, directory: str) -> bool:
+        """
+        Check if a directory contains a .qgs file.
+        
+        Args:
+            directory: Directory to check
+            
+        Returns:
+            True if directory contains a .qgs file, False otherwise
+        """
+        if not self.path_exists(directory) or not self.is_directory(directory):
+            return False
+        
+        for item in os.listdir(directory):
+            if self.is_file(os.path.join(directory, item)) and self.get_file_extension(item).lower() == '.qgs':
+                return True
+        
+        return False 

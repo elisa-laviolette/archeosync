@@ -32,13 +32,16 @@ from qgis.PyQt.QtWidgets import QAction
 from .resources import *
 from .ui.settings_dialog import SettingsDialog
 from .ui.prepare_recording_dialog import PrepareRecordingDialog
+from .ui.import_data_dialog import ImportDataDialog
+from .ui.column_mapping_dialog import ColumnMappingDialog
 from .services import (
     QGISSettingsManager,
     QGISFileSystemService,
     QGISTranslationService,
     ArcheoSyncConfigurationValidator,
     QGISLayerService,
-    QGISQFieldService
+    QGISQFieldService,
+    CSVImportService
 )
 
 
@@ -89,6 +92,7 @@ class ArcheoSyncPlugin:
         self._actions: List[QAction] = []
         self._first_start = True
         self._settings_dialog: Optional[SettingsDialog] = None
+        self._import_data_dialog: Optional[ImportDataDialog] = None
     
     def _initialize_services(self) -> None:
         """Initialize all required services."""
@@ -109,6 +113,9 @@ class ArcheoSyncPlugin:
 
         # Initialize QField service
         self._qfield_service = QGISQFieldService(self._settings_manager, self._layer_service)
+        
+        # Initialize CSV import service
+        self._csv_import_service = CSVImportService(self._iface)
         
         # Initialize configuration validator
         self._configuration_validator = ArcheoSyncConfigurationValidator(
@@ -192,6 +199,14 @@ class ArcheoSyncPlugin:
             icon_path,
             text=self.tr(u'Prepare Recording'),
             callback=self.run_prepare_recording,
+            parent=self._iface.mainWindow()
+        )
+        
+        # Add Import Data menu item
+        self.add_action(
+            icon_path,
+            text=self.tr(u'Import Data'),
+            callback=self.run_import_data,
             parent=self._iface.mainWindow()
         )
     
@@ -416,6 +431,111 @@ class ArcheoSyncPlugin:
                 f"An error occurred during QField preparation:\n{str(e)}"
             )
     
+    def run_import_data(self) -> None:
+        """Run the import data dialog."""
+        # Create and show the import data dialog
+        dialog = ImportDataDialog(
+            settings_manager=self._settings_manager,
+            file_system_service=self._file_system_service,
+            parent=self._iface.mainWindow()
+        )
+        
+        result = dialog.exec_()
+        
+        # Handle dialog result
+        if result:
+            self._handle_import_data_accepted(dialog)
+    
+    def _handle_import_data_accepted(self, dialog) -> None:
+        """Handle the case when import data dialog is accepted."""
+        try:
+            # Get selected items
+            selected_csv_files = dialog.get_selected_csv_files()
+            selected_completed_projects = dialog.get_selected_completed_projects()
+            
+            from qgis.PyQt.QtWidgets import QMessageBox
+            
+            # Process CSV files if any are selected
+            if selected_csv_files:
+                self._process_csv_files(selected_csv_files)
+            
+            # Process completed projects if any are selected
+            if selected_completed_projects:
+                # TODO: Implement completed project import
+                message = f"Completed Projects ({len(selected_completed_projects)}):\n"
+                for project_dir in selected_completed_projects:
+                    dirname = project_dir.split('/')[-1] if '/' in project_dir else project_dir.split('\\')[-1]
+                    message += f"  - {dirname}\n"
+                
+                QMessageBox.information(
+                    self._iface.mainWindow(),
+                    "Import Data",
+                    f"Completed project import not yet implemented.\n\n{message}"
+                )
+            
+        except Exception as e:
+            from qgis.PyQt.QtWidgets import QMessageBox
+            QMessageBox.critical(
+                self._iface.mainWindow(),
+                "Error",
+                f"An error occurred during import data processing:\n{str(e)}"
+            )
+    
+    def _process_csv_files(self, csv_files: List[str]) -> None:
+        """Process CSV files for import."""
+        from qgis.PyQt.QtWidgets import QMessageBox
+        
+        # Validate CSV files
+        validation_result = self._csv_import_service.validate_csv_files(csv_files)
+        if not validation_result.is_valid:
+            QMessageBox.critical(
+                self._iface.mainWindow(),
+                "CSV Validation Error",
+                validation_result.message
+            )
+            return
+        
+        # Get column mapping and all headers
+        column_mapping, file_columns = self._csv_import_service.get_column_mapping_and_headers(csv_files)
+        
+        # Check if columns differ across files
+        columns_differ = False
+        for column_name, column_list in column_mapping.items():
+            if len(set(column_list)) > 1:  # More than one unique column name
+                columns_differ = True
+                break
+        
+        # If columns differ, show column mapping dialog
+        if columns_differ:
+            mapping_dialog = ColumnMappingDialog(
+                column_mapping=column_mapping,
+                csv_files=csv_files,
+                file_columns=file_columns,
+                parent=self._iface.mainWindow()
+            )
+            
+            if mapping_dialog.exec_() != mapping_dialog.Accepted:
+                return  # User cancelled
+            
+            # Get final mapping from dialog
+            column_mapping = mapping_dialog.get_final_mapping()
+        
+        # Import CSV files
+        import_result = self._csv_import_service.import_csv_files(csv_files, column_mapping)
+        
+        if import_result.is_valid:
+            QMessageBox.information(
+                self._iface.mainWindow(),
+                "CSV Import Complete",
+                import_result.message
+            )
+        else:
+            QMessageBox.critical(
+                self._iface.mainWindow(),
+                "CSV Import Error",
+                import_result.message
+            )
+    
     @property
     def settings_manager(self):
         """Get the settings manager instance."""
@@ -434,4 +554,9 @@ class ArcheoSyncPlugin:
     @property
     def qfield_service(self):
         """Get the QField service instance."""
-        return self._qfield_service 
+        return self._qfield_service
+    
+    @property
+    def csv_import_service(self):
+        """Get the CSV import service instance."""
+        return self._csv_import_service 

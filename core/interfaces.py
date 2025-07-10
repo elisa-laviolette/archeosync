@@ -103,6 +103,16 @@ class IFileSystemService(ABC):
     def list_files(self, directory: str, extension: Optional[str] = None) -> list:
         """List files in a directory."""
         pass
+    
+    @abstractmethod
+    def list_directories(self, directory: str) -> list:
+        """List directories in a directory."""
+        pass
+    
+    @abstractmethod
+    def contains_qgs_file(self, directory: str) -> bool:
+        """Check if a directory contains a .qgs file."""
+        pass
 
 
 class ITranslationService(ABC):
@@ -495,4 +505,48 @@ class IQFieldService(ABC):
     @abstractmethod
     def get_qfieldsync_plugin(self) -> Optional[Any]:
         """Get the QFieldSync plugin instance if available."""
+        pass
+
+
+class ICSVImportService(ABC):
+    """Interface for CSV import operations."""
+    
+    @abstractmethod
+    def validate_csv_files(self, csv_files: List[str]) -> ValidationResult:
+        """
+        Validate that all CSV files have required X, Y, Z columns.
+        
+        Args:
+            csv_files: List of CSV file paths to validate
+            
+        Returns:
+            ValidationResult indicating if files are valid and any error messages
+        """
+        pass
+    
+    @abstractmethod
+    def get_column_mapping(self, csv_files: List[str]) -> Dict[str, List[Optional[str]]]:
+        """
+        Get column mapping across multiple CSV files.
+        
+        Args:
+            csv_files: List of CSV file paths to analyze
+            
+        Returns:
+            Dictionary mapping unified column names to lists of column names from each file
+        """
+        pass
+    
+    @abstractmethod
+    def import_csv_files(self, csv_files: List[str], column_mapping: Optional[Dict[str, List[Optional[str]]]] = None) -> ValidationResult:
+        """
+        Import CSV files into a PointZ vector layer and add to QGIS project.
+        
+        Args:
+            csv_files: List of CSV file paths to import
+            column_mapping: Optional column mapping (if None, will be generated automatically)
+            
+        Returns:
+            ValidationResult indicating if import was successful and any error messages
+        """
         pass 
