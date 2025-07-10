@@ -2,6 +2,29 @@
 
 All notable changes to the ArcheoSync QGIS plugin will be documented in this file.
 
+## [0.6.0] - 2025-07-10
+
+### New Features
+- **CSV Import System**: Implemented comprehensive CSV import functionality
+  - Automatic validation of CSV files for required X, Y, Z columns (case-insensitive)
+  - Intelligent column mapping across multiple CSV files with different structures
+  - Interactive column mapping dialog for manual column matching
+  - PointZ vector layer creation with all CSV attributes preserved
+
+- **QField Project Import**: Added import functionality for completed QField projects
+  - Automatic processing of data.gpkg files from QField project directories
+  - Merging of Objects and Features layers from multiple projects
+  - Creation of new "New Objects" and "New Features" layers in the project
+  - Feature collection and validation from completed field recordings
+  - Support for multiple project import in a single operation
+
+### Technical Improvements
+- **Enhanced Test Coverage**: Expanded test suite to 324 tests with comprehensive coverage
+- **Service Architecture**: Added CSVImportService with clean interface implementation
+- **UI Components**: New ColumnMappingDialog with dependency injection
+- **Error Handling**: Comprehensive validation and error reporting throughout import process
+- **Documentation**: Updated README and architecture documentation for import features
+
 ## [0.5.0] - 2025-07-10
 
 ### New Features
@@ -15,7 +38,7 @@ All notable changes to the ArcheoSync QGIS plugin will be documented in this fil
 ### Technical Improvements
 
 - **Documentation Updates**: Comprehensive updates to README.md reflecting current project state
-- **Enhanced Test Coverage**: Expanded test suite to 264 tests with 263 passing
+- **Enhanced Test Coverage**: Expanded test suite to 324 tests with 324 passing
 - **Code Quality**: Continued improvements to code quality and maintainability
 - **User Experience**: Enhanced usability with better error messages and validation feedback
 

@@ -4,7 +4,7 @@ This document describes the architecture of the ArcheoSync QGIS plugin, focusing
 
 ## Overview
 
-The plugin follows SOLID principles and clean architecture to ensure maintainability, testability, and extensibility. The current version includes 317 tests with 317 passing and 1 skipped, demonstrating robust code quality and comprehensive coverage.
+The plugin follows SOLID principles and clean architecture to ensure maintainability, testability, and extensibility. The current version includes 324 tests with 324 passing and 1 skipped, demonstrating robust code quality and comprehensive coverage.
 
 ## SOLID Principles Implementation
 
@@ -68,7 +68,7 @@ archeosync/
 │   ├── settings_dialog.py
 │   ├── import_data_dialog.py
 │   └── prepare_recording_dialog.py
-├── test/                   # Test suite (317 tests)
+├── test/                   # Test suite (324 tests)
 │   ├── test_core_interfaces.py
 │   ├── test_services.py
 │   ├── test_ui_components.py
@@ -185,6 +185,17 @@ QGIS-specific implementation for QField integration including:
 - Project packaging with area of interest
 - Automatic cleanup of temporary layers
 - Project variable injection for field preparation
+- QField project import with data.gpkg processing
+- Layer merging from multiple completed projects
+
+### CSVImportService
+QGIS-specific implementation for CSV import operations including:
+- CSV file validation for required X, Y, Z columns (case-insensitive)
+- Column mapping across multiple CSV files with different structures
+- PointZ vector layer creation with attribute preservation
+- Automatic project integration
+- Comprehensive error handling and validation
+- Interactive column mapping dialog integration
 
 ## UI Components
 
@@ -211,6 +222,15 @@ Dialog for importing data from CSV files and completed field projects with:
 - **Multi-selection Support**: Users can select multiple files and projects simultaneously
 - **Tooltip Information**: Full file paths displayed on hover for clarity
 
+### ColumnMappingDialog
+Dialog for mapping columns across multiple CSV files with:
+- **Visual Table Interface**: Clear table showing column mapping across files
+- **Dropdown Selection**: Interactive dropdowns for column matching
+- **Include/Exclude Options**: Checkboxes to include or exclude columns
+- **Real-time Validation**: Validation of required columns (X, Y, Z)
+- **User-friendly Error Messages**: Clear guidance for column mapping
+- **Flexible Mapping**: Support for different column structures across files
+
 ## Testing Strategy
 
 ### Interface Tests
@@ -227,7 +247,7 @@ Test real QGIS environment integration.
 
 ## Benefits
 
-1. **Testability**: All components can be unit tested with mocks (317 tests, 317 passing, 1 skipped)
+1. **Testability**: All components can be unit tested with mocks (324 tests, 324 passing, 1 skipped)
 2. **Maintainability**: Clear separation of concerns
 3. **Extensibility**: Easy to add new features through interfaces
 4. **Reliability**: Comprehensive validation and error handling
@@ -268,7 +288,27 @@ The packaging process includes:
 - **Memory Management**: Proper cleanup of QGIS objects to prevent memory leaks
 - **Error Recovery**: Graceful handling of QGIS object deletion issues
 
-## Latest Features (v0.5.0)
+## Latest Features (v0.6.0)
+
+### Complete Import System
+- **CSV Import Service**: Comprehensive CSV import with validation and column mapping
+  - Automatic validation of required X, Y, Z columns (case-insensitive)
+  - Intelligent column mapping across multiple CSV files
+  - Interactive column mapping dialog for manual matching
+  - PointZ vector layer creation with attribute preservation
+  - Automatic project integration and error handling
+
+- **QField Project Import**: Import completed QField projects
+  - Automatic processing of data.gpkg files from project directories
+  - Merging of Objects and Features layers from multiple projects
+  - Creation of new layers for imported data
+  - Feature collection and validation from field recordings
+
+- **Column Mapping Dialog**: Interactive UI for CSV column mapping
+  - Visual table interface for mapping columns across files
+  - Dropdown selection with validation
+  - Include/exclude options for each column
+  - Real-time validation of required columns
 
 ### QField Integration Enhancements
 - **Complete Project Packaging**: Full QField project creation with proper layer configuration

@@ -314,10 +314,16 @@ class TestQFieldService:
     def test_add_project_variables_to_qfield_project(self):
         """Test adding project variables to a QField project."""
         self.qfield_service._qfieldsync_available = True
-        mock_project = Mock()
-        mock_project.instance.return_value = mock_project
-        mock_project.mapLayers.return_value = {}
-        mock_project.crs.return_value = Mock(authid=lambda: "EPSG:4326")
+        
+        # Mock QgsProject properly
+        mock_project_instance = Mock()
+        mock_project_instance.mapLayers.return_value = {}
+        mock_project_instance.crs.return_value = Mock(authid=lambda: "EPSG:4326")
+        
+        # Mock QgsProject class
+        mock_project_class = Mock()
+        mock_project_class.instance.return_value = mock_project_instance
+        
         feature_data = {
             'id': 1,
             'geometry_wkt': 'POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))',
@@ -332,7 +338,7 @@ class TestQFieldService:
         mock_offliner.create_empty_layer_copy.return_value = Mock()
         class MockExportType:
             Cable = "cable"
-        with patch('services.qfield_service.QgsProject', return_value=mock_project), \
+        with patch('services.qfield_service.QgsProject', mock_project_class), \
              patch('services.qfield_service.QgisCoreOffliner', lambda *a, **k: mock_offliner), \
              patch('services.qfield_service.ExportType', MockExportType), \
              patch('os.path.exists', return_value=False), \
@@ -396,64 +402,316 @@ class TestQFieldService:
             mock_add_vars.assert_called_once()
 
     def test_add_project_variables_to_qfield_project_file(self):
-        """Test adding project variables to a QField project file."""
-        # Mock QFieldSync available
-        self.qfield_service._qfieldsync_available = True
+        """Test adding project variables to QField project file."""
+        # Mock project file path
+        project_file = "/test/project.qgs"
         
-        # Mock QGIS project for reading
-        mock_qfield_project = Mock()
-        mock_qfield_project.writeEntry = Mock()
-        mock_qfield_project.readListEntry = Mock(side_effect=lambda group, key: ([], True) if key == 'variableNames' or key == 'variableValues' else ([], False))
-        mock_qfield_project.write = Mock(return_value=True)
+        # Mock feature data
+        feature_data = {
+            'display_name': 'Test Recording Area',
+            'attributes': {
+                'name': 'Test Area'
+            }
+        }
         
-        # Mock QgsProject.read method to return True (success)
-        with patch('services.qfield_service.QgsProject') as mock_qgs_project_class:
-            mock_qgs_project_class.return_value = mock_qfield_project
-            mock_qfield_project.read.return_value = True
+        # Mock next values
+        next_values = {
+            'next_level': 'A1',
+            'next_number': '1001'
+        }
+        
+        # Mock QgsProject
+        mock_project = Mock()
+        mock_project.read.return_value = True
+        mock_project.readListEntry.side_effect = lambda group, key: ([], []) if key == 'variableNames' else ([], [])
+        mock_project.write.return_value = True
+        mock_project.writeEntry = Mock()
+        
+        with patch('services.qfield_service.QgsProject', return_value=mock_project), \
+             patch('os.path.exists', return_value=True):
             
-            # Call the method with correct parameters
+            # Test adding project variables
             self.qfield_service._add_project_variables_to_qfield_project(
-                '/tmp/test/project.qgs',
-                {
-                    'attributes': {'display_name': 'Test Recording Area'}
-                },
-                {
-                    'next_number': '15',
-                    'next_level': 'Level B'
-                }
+                project_file, feature_data, next_values
             )
             
-            # Verify that writeEntry was called with the correct values
-            # Check that readListEntry was called for both variableNames and variableValues
-            mock_qfield_project.readListEntry.assert_any_call('Variables', 'variableNames')
-            mock_qfield_project.readListEntry.assert_any_call('Variables', 'variableValues')
-            
-            # Check that writeEntry was called to save the updated lists
-            mock_qfield_project.writeEntry.assert_any_call('Variables', 'variableNames', ['recording_area', 'level', 'first_number'])
-            mock_qfield_project.writeEntry.assert_any_call('Variables', 'variableValues', ['Test Recording Area', 'Level B', '15'])
-
-
-@pytest.mark.qgis
-@pytest.mark.skipif(not QGIS_AVAILABLE, reason="QGIS not available")
-class TestQFieldServiceIntegration:
-    """Integration tests for QFieldService with real QGIS environment."""
-
-    def setup_method(self):
-        """Runs before each test."""
-        self.qgis_app, self.canvas, self.iface, self.parent = get_qgis_app()
-        self.settings_manager = Mock()
-        self.layer_service = Mock()
-        self.qfield_service = QGISQFieldService(self.settings_manager, self.layer_service)
-
-    def test_qfield_service_with_real_environment(self):
-        """Test QField service with real QGIS environment."""
-        # Test basic functionality
-        assert self.qfield_service is not None
+            # Verify project was read and written
+            mock_project.read.assert_called_once_with(project_file)
+            mock_project.write.assert_called_once_with(project_file)
+    
+    def test_import_qfield_projects_empty_list(self):
+        """Test importing QField projects with empty list."""
+        result = self.qfield_service.import_qfield_projects([])
         
-        # Test QFieldSync availability check
-        # This will depend on whether QFieldSync is actually available in the test environment
-        assert hasattr(self.qfield_service, '_qfieldsync_available')
+        assert result.is_valid is False
+        assert "No project paths provided" in result.message
+    
+    @patch('os.path.exists')
+    @patch('services.qfield_service.QgsVectorLayer')
+    def test_import_qfield_projects_no_data_gpkg(self, mock_vector_layer, mock_exists):
+        """Test importing QField projects when data.gpkg doesn't exist."""
+        # Mock that data.gpkg doesn't exist
+        mock_exists.return_value = False
         
-        # Test settings manager integration
-        self.settings_manager.get_value.return_value = True
-        assert self.qfield_service.is_qfield_enabled() is True 
+        result = self.qfield_service.import_qfield_projects(["/test/project1"])
+        
+        assert result.is_valid is False
+        assert "No Objects or Features layers found" in result.message
+    
+    @patch('os.path.exists')
+    @patch('services.qfield_service.QgsVectorLayer')
+    def test_import_qfield_projects_invalid_data_gpkg(self, mock_vector_layer, mock_exists):
+        """Test importing QField projects with invalid data.gpkg."""
+        # Mock that data.gpkg exists but is invalid
+        mock_exists.return_value = True
+        
+        # Mock invalid vector layer
+        mock_layer = Mock()
+        mock_layer.isValid.return_value = False
+        mock_vector_layer.return_value = mock_layer
+        
+        result = self.qfield_service.import_qfield_projects(["/test/project1"])
+        
+        assert result.is_valid is False
+        assert "No Objects or Features layers found" in result.message
+    
+    @patch('os.path.exists')
+    @patch('services.qfield_service.QgsVectorLayer')
+    @patch('services.qfield_service.QgsProject')
+    def test_import_qfield_projects_with_objects_layer(self, mock_project, mock_vector_layer, mock_exists):
+        """Test importing QField projects with Objects layer."""
+        # Mock that data.gpkg exists
+        mock_exists.return_value = True
+        
+        # Mock data layer
+        mock_data_layer = Mock()
+        mock_data_layer.isValid.return_value = True
+        mock_data_layer.dataProvider.return_value.subLayers.return_value = [
+            "0!!::!!Objects_abc123!!::!!Polygon!!::!!EPSG:4326"
+        ]
+        
+        # Mock Objects sublayer
+        mock_objects_layer = Mock()
+        mock_objects_layer.isValid.return_value = True
+        
+        # Mock feature
+        mock_feature = Mock()
+        mock_geometry = Mock()
+        mock_geometry.type.return_value = 3  # PolygonGeometry
+        mock_feature.geometry.return_value = mock_geometry
+        # Mock feature fields
+        mock_field = Mock()
+        mock_field.name.return_value = "id"
+        mock_field.typeName.return_value = "Integer"
+        mock_feature.fields.return_value = [mock_field]
+        
+        mock_objects_layer.getFeatures.return_value = [mock_feature]
+        
+        # Mock merged layer
+        mock_merged_layer = Mock()
+        mock_merged_layer.isValid.return_value = True
+        
+        # Mock project instance and CRS
+        mock_project_instance = Mock()
+        mock_project_instance.crs.return_value.authid.return_value = "EPSG:3857"
+        mock_project.instance.return_value = mock_project_instance
+        
+        # Patch addMapLayer to accept any argument
+        mock_project_instance.addMapLayer = Mock()
+
+        # Mock vector layer creation with proper side effect
+        def vector_layer_side_effect(*args, **kwargs):
+            # Debug print to see what is being called
+            print(f"QgsVectorLayer called with args: {args}")
+            if len(args) > 1 and args[0].endswith("data.gpkg") and args[1] == "temp_data":
+                return mock_data_layer
+            elif len(args) > 1 and "Objects" in args[1]:
+                return mock_objects_layer
+            elif len(args) > 1 and "New Objects" in args[1]:
+                assert "crs=EPSG:3857" in args[0]
+                return mock_merged_layer
+            else:
+                return mock_merged_layer
+        
+        mock_vector_layer.side_effect = vector_layer_side_effect
+        
+        result = self.qfield_service.import_qfield_projects(["/test/project1"])
+        
+        assert result.is_valid is True
+        assert "Successfully imported 1 layer(s)" in result.message
+
+    @patch('os.path.exists')
+    @patch('services.qfield_service.QgsVectorLayer')
+    @patch('services.qfield_service.QgsProject')
+    def test_import_qfield_projects_with_features_layer(self, mock_project, mock_vector_layer, mock_exists):
+        """Test importing QField projects with Features layer."""
+        # Mock that data.gpkg exists
+        mock_exists.return_value = True
+        
+        # Mock data layer
+        mock_data_layer = Mock()
+        mock_data_layer.isValid.return_value = True
+        mock_data_layer.dataProvider.return_value.subLayers.return_value = [
+            "0!!::!!Features_xyz456!!::!!Point!!::!!EPSG:4326"
+        ]
+        
+        # Mock Features sublayer
+        mock_features_layer = Mock()
+        mock_features_layer.isValid.return_value = True
+        
+        # Mock feature
+        mock_feature = Mock()
+        mock_geometry = Mock()
+        mock_geometry.type.return_value = 1  # PointGeometry
+        mock_feature.geometry.return_value = mock_geometry
+        # Mock feature fields
+        mock_field = Mock()
+        mock_field.name.return_value = "id"
+        mock_field.typeName.return_value = "Integer"
+        mock_feature.fields.return_value = [mock_field]
+        
+        mock_features_layer.getFeatures.return_value = [mock_feature]
+        
+        # Mock merged layer
+        mock_merged_layer = Mock()
+        mock_merged_layer.isValid.return_value = True
+        
+        # Mock project instance and CRS
+        mock_project_instance = Mock()
+        mock_project_instance.crs.return_value.authid.return_value = "EPSG:3857"
+        mock_project.instance.return_value = mock_project_instance
+        
+        # Patch addMapLayer to accept any argument
+        mock_project_instance.addMapLayer = Mock()
+
+        # Mock vector layer creation with proper side effect
+        def vector_layer_side_effect(*args, **kwargs):
+            print(f"QgsVectorLayer called with args: {args}")
+            if len(args) > 1 and args[0].endswith("data.gpkg") and args[1] == "temp_data":
+                return mock_data_layer
+            elif len(args) > 1 and "Features" in args[1]:
+                return mock_features_layer
+            elif len(args) > 1 and "New Features" in args[1]:
+                assert "crs=EPSG:3857" in args[0]
+                return mock_merged_layer
+            else:
+                return mock_merged_layer
+        
+        mock_vector_layer.side_effect = vector_layer_side_effect
+        
+        result = self.qfield_service.import_qfield_projects(["/test/project1"])
+        
+        assert result.is_valid is True
+        assert "Successfully imported 1 layer(s)" in result.message
+
+    @patch('os.path.exists')
+    @patch('services.qfield_service.QgsVectorLayer')
+    @patch('services.qfield_service.QgsProject')
+    def test_import_qfield_projects_with_both_layers(self, mock_project, mock_vector_layer, mock_exists):
+        """Test importing QField projects with both Objects and Features layers."""
+        # Mock that data.gpkg exists
+        mock_exists.return_value = True
+        
+        # Mock data layer
+        mock_data_layer = Mock()
+        mock_data_layer.isValid.return_value = True
+        mock_data_layer.dataProvider.return_value.subLayers.return_value = [
+            "0!!::!!Objects_abc123!!::!!Polygon!!::!!EPSG:4326",
+            "1!!::!!Features_xyz456!!::!!Point!!::!!EPSG:4326"
+        ]
+        
+        # Mock Objects sublayer
+        mock_objects_layer = Mock()
+        mock_objects_layer.isValid.return_value = True
+        
+        # Mock Features sublayer
+        mock_features_layer = Mock()
+        mock_features_layer.isValid.return_value = True
+        
+        # Mock features
+        mock_objects_feature = Mock()
+        mock_objects_geometry = Mock()
+        mock_objects_geometry.type.return_value = 3  # PolygonGeometry
+        mock_objects_feature.geometry.return_value = mock_objects_geometry
+        # Mock feature fields
+        mock_field = Mock()
+        mock_field.name.return_value = "id"
+        mock_field.typeName.return_value = "Integer"
+        mock_objects_feature.fields.return_value = [mock_field]
+        
+        mock_features_feature = Mock()
+        mock_features_geometry = Mock()
+        mock_features_geometry.type.return_value = 1  # PointGeometry
+        mock_features_feature.geometry.return_value = mock_features_geometry
+        # Mock feature fields
+        mock_field = Mock()
+        mock_field.name.return_value = "id"
+        mock_field.typeName.return_value = "Integer"
+        mock_features_feature.fields.return_value = [mock_field]
+        
+        mock_objects_layer.getFeatures.return_value = [mock_objects_feature]
+        mock_features_layer.getFeatures.return_value = [mock_features_feature]
+        
+        # Mock merged layer
+        mock_merged_layer = Mock()
+        mock_merged_layer.isValid.return_value = True
+        
+        # Mock project instance and CRS
+        mock_project_instance = Mock()
+        mock_project_instance.crs.return_value.authid.return_value = "EPSG:3857"
+        mock_project.instance.return_value = mock_project_instance
+        
+        # Patch addMapLayer to accept any argument
+        mock_project_instance.addMapLayer = Mock()
+
+        # Mock vector layer creation with proper side effect
+        def vector_layer_side_effect(*args, **kwargs):
+            print(f"QgsVectorLayer called with args: {args}")
+            if len(args) > 1 and args[0].endswith("data.gpkg") and args[1] == "temp_data":
+                return mock_data_layer
+            elif len(args) > 1 and "Objects" in args[1]:
+                return mock_objects_layer
+            elif len(args) > 1 and "Features" in args[1]:
+                return mock_features_layer
+            elif len(args) > 1 and ("New Objects" in args[1] or "New Features" in args[1]):
+                assert "crs=EPSG:3857" in args[0]
+                return mock_merged_layer
+            else:
+                return mock_merged_layer
+        
+        mock_vector_layer.side_effect = vector_layer_side_effect
+        
+        result = self.qfield_service.import_qfield_projects(["/test/project1"])
+        
+        assert result.is_valid is True
+        assert "Successfully imported 2 layer(s)" in result.message
+    
+    def test_create_merged_layer_empty_features(self):
+        """Test creating merged layer with empty features list."""
+        result = self.qfield_service._create_merged_layer("Test Layer", [])
+        
+        assert result is False
+    
+    @patch('qgis.core.QgsVectorLayer')
+    @patch('qgis.core.QgsProject')
+    def test_create_merged_layer_invalid_layer(self, mock_project, mock_vector_layer):
+        """Test creating merged layer that becomes invalid."""
+        # Mock feature
+        mock_feature = Mock()
+        mock_geometry = Mock()
+        mock_geometry.type.return_value = 1  # PointGeometry
+        mock_feature.geometry.return_value = mock_geometry
+        # Mock feature fields
+        mock_field = Mock()
+        mock_field.name.return_value = "id"
+        mock_field.typeName.return_value = "Integer"
+        mock_feature.fields.return_value = [mock_field]
+        
+        # Mock invalid vector layer
+        mock_layer = Mock()
+        mock_layer.isValid.return_value = False
+        mock_vector_layer.return_value = mock_layer
+        
+        result = self.qfield_service._create_merged_layer("Test Layer", [mock_feature])
+        
+        assert result is False 

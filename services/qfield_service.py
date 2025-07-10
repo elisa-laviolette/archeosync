@@ -35,13 +35,13 @@ The service provides:
 
 import os
 from typing import Optional, Any, Dict, List
-from qgis.core import QgsProject, QgsVectorLayer, QgsRasterLayer, QgsFeature, QgsGeometry
+from qgis.core import QgsProject, QgsVectorLayer, QgsRasterLayer, QgsFeature, QgsGeometry, QgsWkbTypes
 from qgis.PyQt.QtWidgets import QMessageBox
 
 try:
-    from ..core.interfaces import IQFieldService, ISettingsManager, ILayerService
+    from ..core.interfaces import IQFieldService, ISettingsManager, ILayerService, ValidationResult
 except ImportError:
-    from core.interfaces import IQFieldService, ISettingsManager, ILayerService
+    from core.interfaces import IQFieldService, ISettingsManager, ILayerService, ValidationResult
 
 # QFieldSync packaging imports
 try:
@@ -65,8 +65,162 @@ class QGISQFieldService(IQFieldService):
         return self._settings_manager.get_value('use_qfield', False)
 
     def get_qfieldsync_plugin(self) -> Optional[Any]:
-        # No longer relevant: return True if QFieldSync is available
-        return self._qfieldsync_available
+        """Get the QFieldSync plugin instance if available."""
+        try:
+            from qgis.core import QgsApplication
+            iface = QgsApplication.instance().interface()
+            if iface:
+                # Try to get QFieldSync plugin from QGIS plugin manager
+                from qgis.utils import plugins
+                if 'qfieldsync' in plugins:
+                    return plugins['qfieldsync']
+        except Exception as e:
+            print(f"Error getting QFieldSync plugin: {str(e)}")
+        return None
+    
+    def import_qfield_projects(self, project_paths: List[str]) -> ValidationResult:
+        """
+        Import QField projects and collect Objects and Features layers from data.gpkg files.
+        
+        Args:
+            project_paths: List of paths to QField project directories
+            
+        Returns:
+            ValidationResult with success status and message
+        """
+        try:
+            if not project_paths:
+                return ValidationResult(False, "No project paths provided")
+            
+            # Collect all Objects and Features layers from all projects
+            all_objects_features = []
+            all_features_features = []
+            
+            for project_path in project_paths:
+                # Check if project path exists and contains data.gpkg
+                data_gpkg_path = os.path.join(project_path, "data.gpkg")
+                if not os.path.exists(data_gpkg_path):
+                    print(f"Warning: data.gpkg not found in {project_path}")
+                    continue
+                
+                # Load the data.gpkg file
+                data_layer = QgsVectorLayer(data_gpkg_path, "temp_data", "ogr")
+                if not data_layer.isValid():
+                    print(f"Warning: Could not load data.gpkg from {project_path}")
+                    continue
+                
+                # Get all sublayers from the data.gpkg
+                sublayers = data_layer.dataProvider().subLayers()
+                
+                for sublayer in sublayers:
+                    # Parse sublayer info to get layer name and path
+                    layer_info = sublayer.split('!!::!!')
+                    if len(layer_info) >= 2:
+                        layer_name = layer_info[1]  # Layer name is the second part
+                        layer_path = f"{data_gpkg_path}|layername={layer_name}"
+                        
+                        # Load the sublayer
+                        sublayer_obj = QgsVectorLayer(layer_path, layer_name, "ogr")
+                        if not sublayer_obj.isValid():
+                            continue
+                        
+                        # Check if this is an Objects or Features layer (prefix match, case-insensitive)
+                        lname = layer_name.lower()
+                        if lname.startswith("objects"):
+                            # Collect all features from Objects layer
+                            for feature in sublayer_obj.getFeatures():
+                                all_objects_features.append(feature)
+                        elif lname.startswith("features"):
+                            # Collect all features from Features layer
+                            for feature in sublayer_obj.getFeatures():
+                                all_features_features.append(feature)
+            
+            # Create merged layers if we have data
+            success_count = 0
+            error_count = 0
+            
+            if all_objects_features:
+                success = self._create_merged_layer("New Objects", all_objects_features)
+                if success:
+                    success_count += 1
+                else:
+                    error_count += 1
+            
+            if all_features_features:
+                success = self._create_merged_layer("New Features", all_features_features)
+                if success:
+                    success_count += 1
+                else:
+                    error_count += 1
+            
+            if success_count == 0 and error_count == 0:
+                return ValidationResult(False, "No Objects or Features layers found in the selected QField projects")
+            
+            message = f"Successfully imported {success_count} layer(s)"
+            if error_count > 0:
+                message += f" with {error_count} error(s)"
+            
+            return ValidationResult(True, message)
+            
+        except Exception as e:
+            return ValidationResult(False, f"Error importing QField projects: {str(e)}")
+    
+    def _create_merged_layer(self, layer_name: str, features: List[QgsFeature]) -> bool:
+        """
+        Create a merged layer from a list of features.
+        
+        Args:
+            layer_name: Name for the new layer
+            features: List of features to merge
+            
+        Returns:
+            True if layer was created successfully, False otherwise
+        """
+        try:
+            if not features:
+                return False
+            
+            # Get the first feature to determine geometry type and fields
+            first_feature = features[0]
+            geometry_type = first_feature.geometry().type()
+            
+            # Use the current project CRS
+            project_crs = QgsProject.instance().crs().authid()
+            
+            # Create memory layer with same structure
+            if geometry_type == QgsWkbTypes.PointGeometry:
+                layer_uri = f"Point?crs={project_crs}"
+            elif geometry_type == QgsWkbTypes.LineGeometry:
+                layer_uri = f"LineString?crs={project_crs}"
+            elif geometry_type == QgsWkbTypes.PolygonGeometry:
+                layer_uri = f"Polygon?crs={project_crs}"
+            else:
+                layer_uri = f"Point?crs={project_crs}"  # Default to point
+            
+            # Add fields from the first feature
+            fields = first_feature.fields()
+            for field in fields:
+                layer_uri += f"&field={field.name()}:{field.typeName()}"
+            
+            # Create the layer
+            merged_layer = QgsVectorLayer(layer_uri, layer_name, "memory")
+            if not merged_layer.isValid():
+                return False
+            
+            # Add features to the layer
+            merged_layer.startEditing()
+            for feature in features:
+                merged_layer.addFeature(feature)
+            merged_layer.commitChanges()
+            
+            # Add layer to project
+            QgsProject.instance().addMapLayer(merged_layer)
+            
+            return True
+            
+        except Exception as e:
+            print(f"Error creating merged layer {layer_name}: {str(e)}")
+            return False
 
     def package_for_qfield(self, 
                           recording_area_feature: Any,

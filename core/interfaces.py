@@ -506,6 +506,19 @@ class IQFieldService(ABC):
     def get_qfieldsync_plugin(self) -> Optional[Any]:
         """Get the QFieldSync plugin instance if available."""
         pass
+    
+    @abstractmethod
+    def import_qfield_projects(self, project_paths: List[str]) -> ValidationResult:
+        """
+        Import QField projects and collect Objects and Features layers from data.gpkg files.
+        
+        Args:
+            project_paths: List of paths to QField project directories
+            
+        Returns:
+            ValidationResult with success status and message
+        """
+        pass
 
 
 class ICSVImportService(ABC):

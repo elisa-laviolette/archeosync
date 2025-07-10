@@ -461,17 +461,7 @@ class ArcheoSyncPlugin:
             
             # Process completed projects if any are selected
             if selected_completed_projects:
-                # TODO: Implement completed project import
-                message = f"Completed Projects ({len(selected_completed_projects)}):\n"
-                for project_dir in selected_completed_projects:
-                    dirname = project_dir.split('/')[-1] if '/' in project_dir else project_dir.split('\\')[-1]
-                    message += f"  - {dirname}\n"
-                
-                QMessageBox.information(
-                    self._iface.mainWindow(),
-                    "Import Data",
-                    f"Completed project import not yet implemented.\n\n{message}"
-                )
+                self._process_completed_projects(selected_completed_projects)
             
         except Exception as e:
             from qgis.PyQt.QtWidgets import QMessageBox
@@ -533,6 +523,26 @@ class ArcheoSyncPlugin:
             QMessageBox.critical(
                 self._iface.mainWindow(),
                 "CSV Import Error",
+                import_result.message
+            )
+    
+    def _process_completed_projects(self, project_paths: List[str]) -> None:
+        """Process completed QField projects for import."""
+        from qgis.PyQt.QtWidgets import QMessageBox
+        
+        # Import QField projects using the QField service
+        import_result = self._qfield_service.import_qfield_projects(project_paths)
+        
+        if import_result.is_valid:
+            QMessageBox.information(
+                self._iface.mainWindow(),
+                "QField Project Import Complete",
+                import_result.message
+            )
+        else:
+            QMessageBox.critical(
+                self._iface.mainWindow(),
+                "QField Project Import Error",
                 import_result.message
             )
     

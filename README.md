@@ -12,6 +12,9 @@ A QGIS plugin for archaeologists to prepare data for field work and import it ba
 - **Background Image Selection**: Intelligent selection of overlapping raster layers for each recording area
 - **Smart Field Validation**: Automatic detection and validation of object numbering and level fields
 - **Empty Layer Creation**: Automatic creation of empty "Objects" and "Features" layers for offline editing
+- **CSV Import Service**: Comprehensive CSV import with column mapping and validation
+- **QField Project Import**: Import completed QField projects and merge Objects/Features layers
+- **Column Mapping Dialog**: Interactive column mapping for CSV files with different structures
 
 ## Installation
 
@@ -52,7 +55,22 @@ A QGIS plugin for archaeologists to prepare data for field work and import it ba
    - **Total Station CSV Files**: All CSV files found in the configured total station folder
    - **Completed Field Projects**: All folders containing .qgs files in the completed projects folder
 3. Select the files and projects you want to import
-4. Click OK to proceed with import (import functionality to be implemented)
+4. Click OK to proceed with import
+
+#### CSV Import Features
+- **Automatic Validation**: Validates that CSV files contain required X, Y, Z columns (case-insensitive)
+- **Column Mapping**: Automatically maps columns across multiple CSV files with different structures
+- **Interactive Mapping**: If columns differ, shows a dialog to manually map columns
+- **PointZ Layer Creation**: Creates PointZ vector layers with all CSV attributes
+- **Project Integration**: Automatically adds imported layers to the QGIS project
+- **Error Handling**: Comprehensive error handling with user-friendly messages
+
+#### QField Project Import Features
+- **Data.gpkg Processing**: Automatically processes data.gpkg files from QField projects
+- **Layer Merging**: Merges Objects and Features layers from multiple projects
+- **Layer Creation**: Creates new "New Objects" and "New Features" layers in the project
+- **Feature Collection**: Collects all features from completed field recordings
+- **Validation**: Validates project structure and data integrity
 
 ## Architecture
 
@@ -79,7 +97,7 @@ The plugin follows clean architecture principles with:
 make test
 ```
 
-The project includes 317 tests with 317 passing and 1 skipped (QGIS-specific translation test).
+The project includes 324 tests with 324 passing and 1 skipped (QGIS-specific translation test).
 
 ### Project Structure
 
@@ -87,7 +105,7 @@ The project includes 317 tests with 317 passing and 1 skipped (QGIS-specific tra
   - `core/`: Core interfaces and abstractions
   - `services/`: Service implementations
   - `ui/`: User interface components
-  - `test/`: Test files (317 tests)
+  - `test/`: Test files (324 tests)
 
 ### Key Services
 
@@ -95,6 +113,7 @@ The project includes 317 tests with 317 passing and 1 skipped (QGIS-specific tra
 - **QGISFileSystemService**: File system operations with Qt integration
 - **QGISLayerService**: Layer operations including spatial analysis
 - **QGISQFieldService**: QField integration and project packaging
+- **CSVImportService**: CSV import with column mapping and validation
 - **ArcheoSyncConfigurationValidator**: Comprehensive validation system
 
 ## Recent Updates
@@ -103,7 +122,7 @@ The project includes 317 tests with 317 passing and 1 skipped (QGIS-specific tra
 - **QField Integration**: Complete QField project packaging with empty layer creation
 - **Background Image Support**: Intelligent raster layer selection for recording areas
 - **Enhanced UI**: Improved user experience with better validation and error handling
-- **Test Coverage**: Expanded to 317 tests with comprehensive coverage
+- **Test Coverage**: Expanded to 324 tests with comprehensive coverage
 
 ### Version 0.4.0
 - **Background Image Selection**: Added spatial analysis for overlapping raster layers
