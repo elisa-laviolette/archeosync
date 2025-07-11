@@ -56,14 +56,18 @@ class CSVImportService(ICSVImportService):
     point data, including validation, column mapping, and layer creation.
     """
     
-    def __init__(self, qgis_iface: Any):
+    def __init__(self, qgis_iface: Any, file_system_service: Optional[Any] = None, settings_manager: Optional[Any] = None):
         """
         Initialize the CSV import service.
         
         Args:
             qgis_iface: QGIS interface object for accessing project and canvas
+            file_system_service: Service for file system operations (optional)
+            settings_manager: Service for managing settings (optional)
         """
         self._iface = qgis_iface
+        self._file_system_service = file_system_service
+        self._settings_manager = settings_manager
         self._required_columns = ['X', 'Y', 'Z']
     
     def validate_csv_files(self, csv_files: List[str]) -> ValidationResult:
@@ -338,7 +342,44 @@ class CSVImportService(ICSVImportService):
             from qgis.core import QgsProject
             QgsProject.instance().addMapLayer(layer)
             
+            # Archive CSV files if archive folder is configured
+            if self._file_system_service and self._settings_manager:
+                self._archive_csv_files(csv_files)
+            
             return ValidationResult(True, f"Successfully imported {feature_id - 1} points from {len(csv_files)} CSV file(s)")
             
         except Exception as e:
-            return ValidationResult(False, f"Error during import: {str(e)}") 
+            return ValidationResult(False, f"Error during import: {str(e)}")
+    
+    def _archive_csv_files(self, csv_files: List[str]) -> None:
+        """
+        Move imported CSV files to the archive folder.
+        
+        Args:
+            csv_files: List of CSV file paths to archive
+        """
+        try:
+            # Get archive folder from settings
+            archive_folder = self._settings_manager.get_value('csv_archive_folder', '')
+            if not archive_folder:
+                return  # No archive folder configured
+            
+            # Create archive folder if it doesn't exist
+            if not self._file_system_service.path_exists(archive_folder):
+                if not self._file_system_service.create_directory(archive_folder):
+                    print(f"Warning: Could not create CSV archive folder: {archive_folder}")
+                    return
+            
+            # Move each CSV file to archive
+            for csv_file in csv_files:
+                if self._file_system_service.path_exists(csv_file):
+                    filename = os.path.basename(csv_file)
+                    archive_path = os.path.join(archive_folder, filename)
+                    
+                    if self._file_system_service.move_file(csv_file, archive_path):
+                        print(f"Archived CSV file: {filename}")
+                    else:
+                        print(f"Warning: Could not archive CSV file: {filename}")
+                        
+        except Exception as e:
+            print(f"Error archiving CSV files: {str(e)}") 

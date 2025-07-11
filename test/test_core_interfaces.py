@@ -79,6 +79,8 @@ class TestCoreInterfaces(unittest.TestCase):
         self.assertTrue(hasattr(IConfigurationValidator, 'validate_field_projects_folder'))
         self.assertTrue(hasattr(IConfigurationValidator, 'validate_total_station_folder'))
         self.assertTrue(hasattr(IConfigurationValidator, 'validate_completed_projects_folder'))
+        self.assertTrue(hasattr(IConfigurationValidator, 'validate_csv_archive_folder'))
+        self.assertTrue(hasattr(IConfigurationValidator, 'validate_qfield_archive_folder'))
         self.assertTrue(hasattr(IConfigurationValidator, 'validate_template_project_folder'))
     
     def test_interfaces_cannot_be_instantiated(self):

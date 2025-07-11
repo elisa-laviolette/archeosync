@@ -43,7 +43,7 @@ class TestArcheoSyncDialogSettings(unittest.TestCase):
             if key == 'field_projects_folder':
                 return '/default/field/projects'  # Return default folder path
             elif key == 'use_qfield':
-                return False  # Return boolean for QField setting
+                return True  # Return boolean for QField setting
             else:
                 return default  # Return default for other settings
         
@@ -194,8 +194,8 @@ class TestArcheoSyncDialogSettings(unittest.TestCase):
             "Use QField for field data collection"
         )
         
-        # Test default state
-        self.assertFalse(self.dialog._qfield_checkbox.isChecked())
+        # Test default state - should be checked since mock returns True
+        self.assertTrue(self.dialog._qfield_checkbox.isChecked())
 
     def test_cancel_reverts_settings(self):
         """Test cancel reverts field projects folder and QField checkbox."""

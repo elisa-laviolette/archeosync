@@ -238,4 +238,85 @@ class QGISFileSystemService(IFileSystemService):
             if self.is_file(os.path.join(directory, item)) and self.get_file_extension(item).lower() == '.qgs':
                 return True
         
-        return False 
+        return False
+    
+    def move_file(self, source_path: str, destination_path: str) -> bool:
+        """
+        Move a file from source to destination.
+        
+        Args:
+            source_path: Source file path
+            destination_path: Destination file path
+            
+        Returns:
+            True if file was moved successfully, False otherwise
+        """
+        try:
+            if not self.path_exists(source_path):
+                return False
+            
+            # Create destination directory if it doesn't exist
+            dest_dir = os.path.dirname(destination_path)
+            if not self.path_exists(dest_dir):
+                if not self.create_directory(dest_dir):
+                    return False
+            
+            # Handle case where destination file already exists
+            final_destination = destination_path
+            if self.path_exists(final_destination):
+                # Generate unique filename
+                base_name = os.path.splitext(os.path.basename(destination_path))[0]
+                extension = os.path.splitext(destination_path)[1]
+                counter = 1
+                while self.path_exists(final_destination):
+                    new_name = f"{base_name}_{counter}{extension}"
+                    final_destination = os.path.join(dest_dir, new_name)
+                    counter += 1
+            
+            # Move the file
+            import shutil
+            shutil.move(source_path, final_destination)
+            return True
+            
+        except (OSError, PermissionError, shutil.Error):
+            return False
+    
+    def move_directory(self, source_path: str, destination_path: str) -> bool:
+        """
+        Move a directory from source to destination.
+        
+        Args:
+            source_path: Source directory path
+            destination_path: Destination directory path
+            
+        Returns:
+            True if directory was moved successfully, False otherwise
+        """
+        try:
+            if not self.path_exists(source_path) or not self.is_directory(source_path):
+                return False
+            
+            # Create destination parent directory if it doesn't exist
+            dest_parent = os.path.dirname(destination_path)
+            if not self.path_exists(dest_parent):
+                if not self.create_directory(dest_parent):
+                    return False
+            
+            # Handle case where destination directory already exists
+            final_destination = destination_path
+            if self.path_exists(final_destination):
+                # Generate unique directory name
+                base_name = os.path.basename(destination_path)
+                counter = 1
+                while self.path_exists(final_destination):
+                    new_name = f"{base_name}_{counter}"
+                    final_destination = os.path.join(dest_parent, new_name)
+                    counter += 1
+            
+            # Move the directory
+            import shutil
+            shutil.move(source_path, final_destination)
+            return True
+            
+        except (OSError, PermissionError, shutil.Error):
+            return False 

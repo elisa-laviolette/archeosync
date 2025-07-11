@@ -2,6 +2,28 @@
 
 All notable changes to the ArcheoSync QGIS plugin will be documented in this file.
 
+## [0.8.0] - 2025-07-11
+
+### New Features
+- **Archive Folder Management**: Added configuration for automatic archiving of imported files
+  - CSV Archive Folder: Configure dedicated folder for archiving imported CSV files
+  - QField Archive Folder: Configure dedicated folder for archiving imported QField projects
+  - Archive folder selectors in settings dialog with browse functionality
+  - Real-time validation of archive folder paths (existence, writability, directory type)
+
+- **Automatic Archiving**: Imported files and projects are automatically moved to archive folders
+  - CSV files are moved to CSV archive folder after successful import
+  - QField projects are moved to QField archive folder after successful import
+  - Archive operations only occur after successful import to prevent data loss
+  - Graceful error handling with user feedback for archive operations
+
+### Technical Improvements
+- **Enhanced File System Service**: Added move operations for files and directories
+  - `move_file()` method for moving individual files
+  - `move_directory()` method for moving entire directories
+  - Integration with existing file system operations
+  - Proper error handling and validation
+
 ## [0.7.0] - 2025-07-10
 
 ### New Features

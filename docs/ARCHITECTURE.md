@@ -95,6 +95,8 @@ Interface for file system operations:
 - `select_directory(title: str, initial_path: Optional[str] = None) -> Optional[str]`
 - `path_exists(path: str) -> bool`
 - `create_directory(path: str) -> bool`
+- `move_file(source_path: str, destination_path: str) -> bool`
+- `move_directory(source_path: str, destination_path: str) -> bool`
 
 ### ITranslationService
 Interface for translation operations:
@@ -172,7 +174,10 @@ QGIS-specific implementation with Qt dialog integration.
 QGIS-specific implementation using QGIS translation system.
 
 ### ArcheoSyncConfigurationValidator
-Comprehensive validation with detailed error reporting and relationship checking.
+Comprehensive validation with detailed error reporting and relationship checking including:
+- Archive folder validation for CSV files and QField projects
+- Folder existence, writability, and directory type validation
+- Integration with file system service for archive operations
 
 ### QGISLayerService
 QGIS-specific implementation for layer operations including:
@@ -192,6 +197,7 @@ QGIS-specific implementation for QField integration including:
 - QField project import with data.gpkg processing
 - Layer merging from multiple completed projects
 - Consolidated method design eliminating code duplication
+- **Automatic Archiving**: Moves imported QField projects to configured archive folder after successful import
 
 ### CSVImportService
 QGIS-specific implementation for CSV import operations including:
@@ -201,11 +207,16 @@ QGIS-specific implementation for CSV import operations including:
 - Automatic project integration
 - Comprehensive error handling and validation
 - Interactive column mapping dialog integration
+- **Automatic Archiving**: Moves imported CSV files to configured archive folder after successful import
 
 ## UI Components
 
 ### SettingsDialog
-Clean, testable settings dialog with dependency injection and real-time validation.
+Clean, testable settings dialog with dependency injection and real-time validation including:
+- Archive folder configuration for CSV files and QField projects
+- Folder selection widgets with browse functionality
+- Real-time validation of archive folder paths
+- Integration with file system service for folder operations
 
 ### PrepareRecordingDialog
 Dialog for recording preparation showing selected entities in a table with:
@@ -293,7 +304,16 @@ The packaging process includes:
 - **Memory Management**: Proper cleanup of QGIS objects to prevent memory leaks
 - **Error Recovery**: Graceful handling of QGIS object deletion issues
 
-## Latest Features (v0.7.0)
+## Latest Features (v0.8.0)
+
+### Archive Folder Management
+- **CSV Archive Folder**: Configure dedicated folder for archiving imported CSV files
+- **QField Archive Folder**: Configure dedicated folder for archiving imported QField projects
+- **Automatic Archiving**: Imported files and projects are automatically moved to archive folders after successful import
+- **Configuration Dialog**: Added archive folder selectors in settings dialog with browse functionality
+- **Validation**: Real-time validation of archive folder paths (existence, writability, directory type)
+- **File System Integration**: Enhanced file system service with move operations for files and directories
+- **Error Handling**: Graceful handling of archive operations with user feedback
 
 ### QField Service Consolidation
 - **Method Consolidation**: Eliminated redundant `package_for_qfield_with_data_and_variables` method

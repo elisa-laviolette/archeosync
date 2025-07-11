@@ -107,21 +107,28 @@ class TestSettingsDialog(unittest.TestCase):
             '/path/to/field',  # field_projects_folder
             '/path/to/total',  # total_station_folder
             '/path/to/completed',  # completed_projects_folder
+            '',  # csv_archive_folder
+            '',  # qfield_archive_folder
             '',  # recording_areas_layer
             '',  # objects_layer
+            '',  # objects_number_field
+            '',  # objects_level_field
             '',  # features_layer
             False,  # use_qfield
+            [],  # extra_qfield_layers
             '/path/to/template'  # template_project_folder
         ]
         
         # Call load_settings
         self.dialog._load_settings()
         
-        # Verify settings manager was called correctly
+        # Verify settings manager was called with expected values
         expected_calls = [
             call('field_projects_folder', ''),
             call('total_station_folder', ''),
             call('completed_projects_folder', ''),
+            call('csv_archive_folder', ''),
+            call('qfield_archive_folder', ''),
             call('recording_areas_layer', ''),
             call('objects_layer', ''),
             call('features_layer', ''),
@@ -138,6 +145,8 @@ class TestSettingsDialog(unittest.TestCase):
             '/path/to/field',
             '/path/to/total',
             '/path/to/completed',
+            '',  # csv_archive_folder
+            '',  # qfield_archive_folder
             'test_layer_id',  # recording_areas_layer
             'test_objects_layer_id',  # objects_layer
             '',  # objects_number_field
@@ -206,6 +215,8 @@ class TestSettingsDialog(unittest.TestCase):
             'field_projects_folder': '/path/to/field',
             'total_station_folder': '/path/to/total',
             'completed_projects_folder': '/path/to/completed',
+            'csv_archive_folder': '',
+            'qfield_archive_folder': '',
             'recording_areas_layer': 'test_layer_id',
             'objects_layer': 'test_objects_layer_id',
             'objects_number_field': '',
@@ -253,6 +264,8 @@ class TestSettingsDialog(unittest.TestCase):
             'field_projects_folder': '/path/to/field',
             'total_station_folder': '/path/to/total',
             'completed_projects_folder': '/path/to/completed',
+            'csv_archive_folder': '',
+            'qfield_archive_folder': '',
             'recording_areas_layer': 'test_layer_id',
             'objects_layer': 'test_objects_layer_id',
             'objects_number_field': '',
@@ -436,6 +449,8 @@ class TestSettingsDialog(unittest.TestCase):
             call('field_projects_folder', '/path/to/field'),
             call('total_station_folder', '/path/to/total'),
             call('completed_projects_folder', '/path/to/completed'),
+            call('csv_archive_folder', ''),
+            call('qfield_archive_folder', ''),
             call('recording_areas_layer', ''),
             call('objects_layer', 'test_objects_layer_id'),  # Now mandatory, so has a value
             call('objects_number_field', ''),

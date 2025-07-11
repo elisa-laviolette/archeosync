@@ -142,6 +142,23 @@ class SettingsDialog(QtWidgets.QDialog):
         )
         settings_layout.addRow("Completed Field Projects:", self._completed_projects_widget)
         
+        # Archive folders section
+        archive_label = QtWidgets.QLabel("Archive Folders")
+        archive_label.setStyleSheet("font-weight: bold; margin-top: 10px;")
+        settings_layout.addRow(archive_label)
+        
+        # CSV archive folder
+        self._csv_archive_widget = self._create_folder_selector(
+            "Select folder to archive imported CSV files..."
+        )
+        settings_layout.addRow("CSV Archive Folder:", self._csv_archive_widget)
+        
+        # QField projects archive folder
+        self._qfield_archive_widget = self._create_folder_selector(
+            "Select folder to archive imported QField projects..."
+        )
+        settings_layout.addRow("QField Projects Archive Folder:", self._qfield_archive_widget)
+        
         # Recording areas layer
         self._recording_areas_widget = self._create_layer_selector()
         settings_layout.addRow("Recording Areas Layer:", self._recording_areas_widget)
@@ -314,6 +331,14 @@ class SettingsDialog(QtWidgets.QDialog):
         self._completed_projects_widget.browse_button.clicked.connect(
             lambda: self._browse_folder(self._completed_projects_widget.input_field,
                                       "Select Folder for Completed Field Projects")
+        )
+        self._csv_archive_widget.browse_button.clicked.connect(
+            lambda: self._browse_folder(self._csv_archive_widget.input_field,
+                                      "Select Folder for CSV Archive")
+        )
+        self._qfield_archive_widget.browse_button.clicked.connect(
+            lambda: self._browse_folder(self._qfield_archive_widget.input_field,
+                                      "Select Folder for QField Archive")
         )
         self._template_project_widget.browse_button.clicked.connect(
             lambda: self._browse_folder(self._template_project_widget.input_field,
@@ -537,6 +562,14 @@ class SettingsDialog(QtWidgets.QDialog):
             completed_projects_path = self._settings_manager.get_value('completed_projects_folder', '')
             self._completed_projects_widget.input_field.setText(completed_projects_path)
             
+            # Load CSV archive folder
+            csv_archive_path = self._settings_manager.get_value('csv_archive_folder', '')
+            self._csv_archive_widget.input_field.setText(csv_archive_path)
+            
+            # Load QField archive folder
+            qfield_archive_path = self._settings_manager.get_value('qfield_archive_folder', '')
+            self._qfield_archive_widget.input_field.setText(qfield_archive_path)
+            
             # Load recording areas layer
             recording_areas_layer_id = self._settings_manager.get_value('recording_areas_layer', '')
             self._refresh_layer_list()  # Populate the combo box
@@ -597,6 +630,8 @@ class SettingsDialog(QtWidgets.QDialog):
                 'field_projects_folder': field_projects_path,
                 'total_station_folder': total_station_path,
                 'completed_projects_folder': completed_projects_path,
+                'csv_archive_folder': csv_archive_path,
+                'qfield_archive_folder': qfield_archive_path,
                 'recording_areas_layer': recording_areas_layer_id,
                 'objects_layer': objects_layer_id,
                 'objects_number_field': self._settings_manager.get_value('objects_number_field', ''),
@@ -618,6 +653,8 @@ class SettingsDialog(QtWidgets.QDialog):
                 'field_projects_folder': self._field_projects_widget.input_field.text(),
                 'total_station_folder': self._total_station_widget.input_field.text(),
                 'completed_projects_folder': self._completed_projects_widget.input_field.text(),
+                'csv_archive_folder': self._csv_archive_widget.input_field.text(),
+                'qfield_archive_folder': self._qfield_archive_widget.input_field.text(),
                 'recording_areas_layer': self._recording_areas_widget.combo_box.currentData(),
                 'objects_layer': self._objects_widget.combo_box.currentData(),
                 'objects_number_field': self._number_field_combo.currentData(),
@@ -658,6 +695,12 @@ class SettingsDialog(QtWidgets.QDialog):
             )
             self._completed_projects_widget.input_field.setText(
                 self._original_values.get('completed_projects_folder', '')
+            )
+            self._csv_archive_widget.input_field.setText(
+                self._original_values.get('csv_archive_folder', '')
+            )
+            self._qfield_archive_widget.input_field.setText(
+                self._original_values.get('qfield_archive_folder', '')
             )
             self._qfield_checkbox.setChecked(
                 self._original_values.get('use_qfield', False)

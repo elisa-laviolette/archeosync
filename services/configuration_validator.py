@@ -152,6 +152,56 @@ class ArcheoSyncConfigurationValidator(IConfigurationValidator):
         
         return errors
     
+    def validate_csv_archive_folder(self, path: str) -> List[str]:
+        """
+        Validate CSV archive folder configuration.
+        
+        Args:
+            path: Path to validate
+            
+        Returns:
+            List of validation error messages (empty if valid)
+        """
+        errors = []
+        
+        # CSV archive folder is optional, so no error if empty
+        if not path:
+            return errors
+        
+        if not self._file_system_service.path_exists(path):
+            errors.append(f"CSV archive folder does not exist: {path}")
+        elif not self._file_system_service.is_directory(path):
+            errors.append(f"CSV archive path is not a directory: {path}")
+        elif not self._file_system_service.is_writable(path):
+            errors.append(f"CSV archive folder is not writable: {path}")
+        
+        return errors
+    
+    def validate_qfield_archive_folder(self, path: str) -> List[str]:
+        """
+        Validate QField archive folder configuration.
+        
+        Args:
+            path: Path to validate
+            
+        Returns:
+            List of validation error messages (empty if valid)
+        """
+        errors = []
+        
+        # QField archive folder is optional, so no error if empty
+        if not path:
+            return errors
+        
+        if not self._file_system_service.path_exists(path):
+            errors.append(f"QField archive folder does not exist: {path}")
+        elif not self._file_system_service.is_directory(path):
+            errors.append(f"QField archive path is not a directory: {path}")
+        elif not self._file_system_service.is_writable(path):
+            errors.append(f"QField archive folder is not writable: {path}")
+        
+        return errors
+    
     def validate_template_project_folder(self, path: str) -> List[str]:
         """
         Validate template project folder configuration.
@@ -403,6 +453,16 @@ class ArcheoSyncConfigurationValidator(IConfigurationValidator):
         if 'completed_projects_folder' in settings:
             validation_results['completed_projects_folder'] = self.validate_completed_projects_folder(
                 settings['completed_projects_folder']
+            )
+        
+        if 'csv_archive_folder' in settings:
+            validation_results['csv_archive_folder'] = self.validate_csv_archive_folder(
+                settings['csv_archive_folder']
+            )
+        
+        if 'qfield_archive_folder' in settings:
+            validation_results['qfield_archive_folder'] = self.validate_qfield_archive_folder(
+                settings['qfield_archive_folder']
             )
         
         # Template project folder is only required when QField is not used

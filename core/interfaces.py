@@ -113,6 +113,16 @@ class IFileSystemService(ABC):
     def contains_qgs_file(self, directory: str) -> bool:
         """Check if a directory contains a .qgs file."""
         pass
+    
+    @abstractmethod
+    def move_file(self, source_path: str, destination_path: str) -> bool:
+        """Move a file from source to destination."""
+        pass
+    
+    @abstractmethod
+    def move_directory(self, source_path: str, destination_path: str) -> bool:
+        """Move a directory from source to destination."""
+        pass
 
 
 class ITranslationService(ABC):
@@ -195,6 +205,16 @@ class IConfigurationValidator(ABC):
     @abstractmethod
     def validate_completed_projects_folder(self, path: str) -> List[str]:
         """Validate completed projects folder configuration."""
+        pass
+    
+    @abstractmethod
+    def validate_csv_archive_folder(self, path: str) -> List[str]:
+        """Validate CSV archive folder configuration."""
+        pass
+    
+    @abstractmethod
+    def validate_qfield_archive_folder(self, path: str) -> List[str]:
+        """Validate QField archive folder configuration."""
         pass
     
     @abstractmethod

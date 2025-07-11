@@ -47,11 +47,34 @@ class TestQFieldService:
     """Test QField service functionality."""
 
     def setup_method(self):
-        """Runs before each test."""
-        self.qgis_app, self.canvas, self.iface, self.parent = get_qgis_app()
+        """Set up test fixtures."""
         self.settings_manager = Mock()
         self.layer_service = Mock()
-        self.qfield_service = QGISQFieldService(self.settings_manager, self.layer_service)
+        self.file_system_service = Mock()
+        
+        # Mock QGIS objects
+        self.mock_project = Mock()
+        self.mock_layer = Mock()
+        self.mock_feature = Mock()
+        self.mock_geometry = Mock()
+        
+        # Set up mock returns
+        self.mock_project.crs.return_value.authid.return_value = "EPSG:4326"
+        self.mock_layer.isValid.return_value = True
+        self.mock_feature.geometry.return_value = self.mock_geometry
+        self.mock_geometry.type.return_value = 1  # Point geometry
+        
+        # Mock QgsProject.instance()
+        with patch('archeosync.services.qfield_service.QgsProject') as mock_qgs_project:
+            mock_qgs_project.instance.return_value = self.mock_project
+            mock_qgs_project.instance.return_value.addMapLayer = Mock()
+            
+            # Mock QgsVectorLayer
+            with patch('archeosync.services.qfield_service.QgsVectorLayer') as mock_vector_layer:
+                mock_vector_layer.return_value = self.mock_layer
+                
+                # Create the service with the new parameter
+                self.qfield_service = QGISQFieldService(self.settings_manager, self.layer_service, self.file_system_service)
 
     def test_qfield_service_creation(self):
         """Test that QField service can be created."""
@@ -717,3 +740,148 @@ class TestQFieldService:
         result = self.qfield_service._create_merged_layer("Test Layer", [mock_feature])
         
         assert result is False 
+
+    def test_import_qfield_projects_no_paths(self):
+        """Test import with no project paths."""
+        result = self.qfield_service.import_qfield_projects([])
+        assert result.is_valid is False
+        assert "No project paths provided" in result.message
+    
+    @patch('archeosync.services.qfield_service.QgsVectorLayer')
+    def test_import_qfield_projects_archives_projects_when_configured(self, mock_layer):
+        """Test that QField projects are archived after successful import when archive folder is configured."""
+        # Mock settings to return archive folder
+        self.settings_manager.get_value.return_value = "/archive/path"
+        
+        # Mock file system service
+        self.file_system_service.path_exists.return_value = True
+        self.file_system_service.create_directory.return_value = True
+        self.file_system_service.move_directory.return_value = True
+        
+        # Create mock data layer
+        mock_data_layer = Mock()
+        mock_data_layer.isValid.return_value = True
+        mock_data_layer.dataProvider.return_value.subLayers.return_value = [
+            "0!!::!!Objects_layer!!::!!Polygon!!::!!EPSG:4326",
+            "1!!::!!Features_layer!!::!!Point!!::!!EPSG:4326"
+        ]
+        
+        # Create mock sublayers
+        mock_objects_layer = Mock()
+        mock_objects_layer.isValid.return_value = True
+        mock_objects_layer.getFeatures.return_value = [self.mock_feature]
+        
+        mock_features_layer = Mock()
+        mock_features_layer.isValid.return_value = True
+        mock_features_layer.getFeatures.return_value = [self.mock_feature]
+        
+        # Create mock merged layer
+        mock_merged_layer = Mock()
+        mock_merged_layer.isValid.return_value = True
+        
+        # Set up side effect for QgsVectorLayer
+        def vector_layer_side_effect(*args, **kwargs):
+            # First call: data.gpkg
+            if len(args) > 1 and args[0].endswith("data.gpkg") and args[1] == "temp_data":
+                return mock_data_layer
+            # Second/third calls: sublayers
+            elif len(args) > 1 and "Objects" in args[1]:
+                return mock_objects_layer
+            elif len(args) > 1 and "Features" in args[1]:
+                return mock_features_layer
+            # Merged layer
+            elif len(args) > 1 and ("New Objects" in args[1] or "New Features" in args[1]):
+                return mock_merged_layer
+            else:
+                return mock_merged_layer
+        
+        mock_layer.side_effect = vector_layer_side_effect
+        
+        with patch('archeosync.services.qfield_service.QgsProject') as mock_project:
+            mock_project.instance.return_value = self.mock_project
+            
+            # Mock os.path.exists to return True for data.gpkg and project directory
+            def exists_side_effect(path):
+                return path.endswith("data.gpkg") or path == "/test/project"
+            
+            with patch('archeosync.services.qfield_service.os.path.exists', side_effect=exists_side_effect):
+                # Instantiate the service after patching
+                from archeosync.services.qfield_service import QGISQFieldService
+                qfield_service = QGISQFieldService(self.settings_manager, self.layer_service, self.file_system_service)
+                result = qfield_service.import_qfield_projects(["/test/project"])
+                
+                # Verify import was successful
+                assert result.is_valid is True
+                
+                # Verify archive folder was checked
+                self.settings_manager.get_value.assert_called_with('qfield_archive_folder', '')
+                
+                # Verify project was moved to archive
+                self.file_system_service.move_directory.assert_called_once()
+
+    @patch('archeosync.services.qfield_service.QgsVectorLayer')
+    def test_import_qfield_projects_does_not_archive_when_not_configured(self, mock_layer):
+        """Test that QField projects are not archived when archive folder is not configured."""
+        # Mock settings to return empty archive folder
+        self.settings_manager.get_value.return_value = ""
+        
+        # Create mock data layer
+        mock_data_layer = Mock()
+        mock_data_layer.isValid.return_value = True
+        mock_data_layer.dataProvider.return_value.subLayers.return_value = [
+            "0!!::!!Objects_layer!!::!!Polygon!!::!!EPSG:4326",
+            "1!!::!!Features_layer!!::!!Point!!::!!EPSG:4326"
+        ]
+        
+        # Create mock sublayers
+        mock_objects_layer = Mock()
+        mock_objects_layer.isValid.return_value = True
+        mock_objects_layer.getFeatures.return_value = [self.mock_feature]
+        
+        mock_features_layer = Mock()
+        mock_features_layer.isValid.return_value = True
+        mock_features_layer.getFeatures.return_value = [self.mock_feature]
+        
+        # Create mock merged layer
+        mock_merged_layer = Mock()
+        mock_merged_layer.isValid.return_value = True
+        
+        # Set up side effect for QgsVectorLayer
+        def vector_layer_side_effect(*args, **kwargs):
+            # First call: data.gpkg
+            if len(args) > 1 and args[0].endswith("data.gpkg") and args[1] == "temp_data":
+                return mock_data_layer
+            # Second/third calls: sublayers
+            elif len(args) > 1 and "Objects" in args[1]:
+                return mock_objects_layer
+            elif len(args) > 1 and "Features" in args[1]:
+                return mock_features_layer
+            # Merged layer
+            elif len(args) > 1 and ("New Objects" in args[1] or "New Features" in args[1]):
+                return mock_merged_layer
+            else:
+                return mock_merged_layer
+        
+        mock_layer.side_effect = vector_layer_side_effect
+        
+        with patch('archeosync.services.qfield_service.QgsProject') as mock_project:
+            mock_project.instance.return_value = self.mock_project
+            
+            # Mock os.path.exists to return True for data.gpkg and project directory
+            def exists_side_effect(path):
+                return path.endswith("data.gpkg") or path == "/test/project"
+            
+            with patch('archeosync.services.qfield_service.os.path.exists', side_effect=exists_side_effect):
+                # Instantiate the service after patching
+                from archeosync.services.qfield_service import QGISQFieldService
+                qfield_service = QGISQFieldService(self.settings_manager, self.layer_service, self.file_system_service)
+                result = qfield_service.import_qfield_projects(["/test/project"])
+                
+                # Verify import was successful
+                assert result.is_valid is True
+                
+                # Verify archive folder was checked
+                self.settings_manager.get_value.assert_called_with('qfield_archive_folder', '')
+                
+                # Verify no file operations were performed
+                self.file_system_service.move_directory.assert_not_called() 

@@ -112,10 +112,10 @@ class ArcheoSyncPlugin:
         self._layer_service = QGISLayerService()
 
         # Initialize QField service
-        self._qfield_service = QGISQFieldService(self._settings_manager, self._layer_service)
+        self._qfield_service = QGISQFieldService(self._settings_manager, self._layer_service, self._file_system_service)
         
         # Initialize CSV import service
-        self._csv_import_service = CSVImportService(self._iface)
+        self._csv_import_service = CSVImportService(self._iface, self._file_system_service, self._settings_manager)
         
         # Initialize configuration validator
         self._configuration_validator = ArcheoSyncConfigurationValidator(

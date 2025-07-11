@@ -32,7 +32,11 @@ class TestCSVImportService:
         self.mock_project = Mock()
         self.mock_iface.mapCanvas.return_value.mapSettings.return_value.destinationCrs.return_value = Mock()
         
-        self.csv_service = CSVImportService(self.mock_iface)
+        # Create mock services for the new parameters
+        self.mock_file_system_service = Mock()
+        self.mock_settings_manager = Mock()
+        
+        self.csv_service = CSVImportService(self.mock_iface, self.mock_file_system_service, self.mock_settings_manager)
         
         # Create temporary directory for test files
         self.temp_dir = tempfile.mkdtemp()
@@ -337,7 +341,124 @@ class TestCSVImportService:
         
         assert result.is_valid is False
         assert "Failed to create vector layer" in result.message
-
+    
+    def test_import_csv_files_archives_files_when_configured(self):
+        """Test that CSV files are archived after successful import when archive folder is configured."""
+        # Create valid CSV file
+        csv1 = self._create_test_csv(
+            "test1.csv",
+            ["X", "Y", "Z", "Description"],
+            [["100.0", "200.0", "10.5", "Point 1"]]
+        )
+        
+        # Mock settings to return archive folder
+        self.mock_settings_manager.get_value.return_value = "/archive/path"
+        
+        # Mock file system service
+        self.mock_file_system_service.path_exists.return_value = True
+        self.mock_file_system_service.create_directory.return_value = True
+        self.mock_file_system_service.move_file.return_value = True
+        
+        # Mock QGIS objects
+        with patch('archeosync.services.csv_import_service.QgsVectorLayer') as mock_layer, \
+             patch('archeosync.services.csv_import_service.QgsFeature') as mock_feature, \
+             patch('archeosync.services.csv_import_service.QgsGeometry') as mock_geometry, \
+             patch('archeosync.services.csv_import_service.QgsPointXY') as mock_point:
+            
+            mock_layer_instance = Mock()
+            mock_layer.return_value = mock_layer_instance
+            mock_layer_instance.isValid.return_value = True
+            mock_layer_instance.fields.return_value = []
+            mock_layer_instance.startEditing = Mock()
+            mock_layer_instance.addFeature = Mock()
+            mock_layer_instance.commitChanges = Mock()
+            
+            mock_feature_instance = Mock()
+            mock_feature.return_value = mock_feature_instance
+            mock_feature_instance.setId = Mock()
+            mock_feature_instance.setGeometry = Mock()
+            mock_feature_instance.setAttribute = Mock()
+            
+            mock_geometry_instance = Mock()
+            mock_geometry.return_value = mock_geometry_instance
+            mock_geometry.fromPointXY = Mock(return_value=mock_geometry_instance)
+            
+            mock_point_instance = Mock()
+            mock_point.return_value = mock_point_instance
+            
+            with patch('qgis.core.QgsProject') as mock_project:
+                mock_project_instance = Mock()
+                mock_project.instance.return_value = mock_project_instance
+                mock_project_instance.addMapLayer = Mock()
+                
+                csv_files = [csv1]
+                result = self.csv_service.import_csv_files(csv_files)
+                
+                # Verify import was successful
+                assert result.is_valid is True
+                
+                # Verify archive folder was checked
+                self.mock_settings_manager.get_value.assert_called_with('csv_archive_folder', '')
+                
+                # Verify file was moved to archive
+                self.mock_file_system_service.move_file.assert_called_once()
+    
+    def test_import_csv_files_does_not_archive_when_not_configured(self):
+        """Test that CSV files are not archived when archive folder is not configured."""
+        # Create valid CSV file
+        csv1 = self._create_test_csv(
+            "test1.csv",
+            ["X", "Y", "Z", "Description"],
+            [["100.0", "200.0", "10.5", "Point 1"]]
+        )
+        
+        # Mock settings to return empty archive folder
+        self.mock_settings_manager.get_value.return_value = ""
+        
+        # Mock QGIS objects
+        with patch('archeosync.services.csv_import_service.QgsVectorLayer') as mock_layer, \
+             patch('archeosync.services.csv_import_service.QgsFeature') as mock_feature, \
+             patch('archeosync.services.csv_import_service.QgsGeometry') as mock_geometry, \
+             patch('archeosync.services.csv_import_service.QgsPointXY') as mock_point:
+            
+            mock_layer_instance = Mock()
+            mock_layer.return_value = mock_layer_instance
+            mock_layer_instance.isValid.return_value = True
+            mock_layer_instance.fields.return_value = []
+            mock_layer_instance.startEditing = Mock()
+            mock_layer_instance.addFeature = Mock()
+            mock_layer_instance.commitChanges = Mock()
+            
+            mock_feature_instance = Mock()
+            mock_feature.return_value = mock_feature_instance
+            mock_feature_instance.setId = Mock()
+            mock_feature_instance.setGeometry = Mock()
+            mock_feature_instance.setAttribute = Mock()
+            
+            mock_geometry_instance = Mock()
+            mock_geometry.return_value = mock_geometry_instance
+            mock_geometry.fromPointXY = Mock(return_value=mock_geometry_instance)
+            
+            mock_point_instance = Mock()
+            mock_point.return_value = mock_point_instance
+            
+            with patch('qgis.core.QgsProject') as mock_project:
+                mock_project_instance = Mock()
+                mock_project.instance.return_value = mock_project_instance
+                mock_project_instance.addMapLayer = Mock()
+                
+                csv_files = [csv1]
+                result = self.csv_service.import_csv_files(csv_files)
+                
+                # Verify import was successful
+                assert result.is_valid is True
+                
+                # Verify archive folder was checked
+                self.mock_settings_manager.get_value.assert_called_with('csv_archive_folder', '')
+                
+                # Verify no file operations were performed
+                self.mock_file_system_service.move_file.assert_not_called()
+    
     @patch('archeosync.services.csv_import_service.QgsVectorLayer')
     @patch('archeosync.services.csv_import_service.QgsFeature')
     @patch('archeosync.services.csv_import_service.QgsGeometry')

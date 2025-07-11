@@ -229,6 +229,97 @@ class TestQGISFileSystemService(unittest.TestCase):
         # Test listing with file instead of directory
         result = self.file_system_service.list_files(self.temp_file)
         self.assertEqual(result, [])
+    
+    def test_move_file_success(self):
+        """Test successful file move operation."""
+        source_file = os.path.join(self.temp_dir, 'source.txt')
+        dest_file = os.path.join(self.temp_dir, 'dest.txt')
+        
+        # Create source file
+        with open(source_file, 'w') as f:
+            f.write('source content')
+        
+        # Test move
+        result = self.file_system_service.move_file(source_file, dest_file)
+        self.assertTrue(result)
+        self.assertTrue(os.path.exists(dest_file))
+        self.assertFalse(os.path.exists(source_file))
+    
+    def test_move_file_source_not_exists(self):
+        """Test file move when source file does not exist."""
+        result = self.file_system_service.move_file('/nonexistent/file.txt', '/dest/file.txt')
+        self.assertFalse(result)
+    
+    def test_move_file_destination_exists(self):
+        """Test file move when destination already exists."""
+        source_file = os.path.join(self.temp_dir, 'source.txt')
+        dest_file = os.path.join(self.temp_dir, 'dest.txt')
+        
+        # Create both files
+        with open(source_file, 'w') as f:
+            f.write('source content')
+        with open(dest_file, 'w') as f:
+            f.write('dest content')
+        
+        # Test move - should create a new filename
+        result = self.file_system_service.move_file(source_file, dest_file)
+        self.assertTrue(result)
+        self.assertFalse(os.path.exists(source_file))
+        # Should have created a new file with _1 suffix
+        new_files = [f for f in os.listdir(self.temp_dir) if f.startswith('dest') and f.endswith('.txt')]
+        self.assertEqual(len(new_files), 2)  # Original dest.txt and new dest_1.txt
+        self.assertTrue('dest.txt' in new_files)
+        self.assertTrue('dest_1.txt' in new_files)
+    
+    def test_move_directory_success(self):
+        """Test successful directory move operation."""
+        source_dir = os.path.join(self.temp_dir, 'source_dir')
+        dest_dir = os.path.join(self.temp_dir, 'dest_dir')
+        
+        # Create source directory with a file
+        os.makedirs(source_dir)
+        with open(os.path.join(source_dir, 'test.txt'), 'w') as f:
+            f.write('test content')
+        
+        # Test move
+        result = self.file_system_service.move_directory(source_dir, dest_dir)
+        self.assertTrue(result)
+        self.assertTrue(os.path.exists(dest_dir))
+        self.assertFalse(os.path.exists(source_dir))
+        self.assertTrue(os.path.exists(os.path.join(dest_dir, 'test.txt')))
+    
+    def test_move_directory_source_not_exists(self):
+        """Test directory move when source directory does not exist."""
+        result = self.file_system_service.move_directory('/nonexistent/dir', '/dest/dir')
+        self.assertFalse(result)
+    
+    def test_move_directory_source_not_directory(self):
+        """Test directory move when source is not a directory."""
+        result = self.file_system_service.move_directory(self.temp_file, '/dest/dir')
+        self.assertFalse(result)
+    
+    def test_move_directory_destination_exists(self):
+        """Test directory move when destination already exists."""
+        source_dir = os.path.join(self.temp_dir, 'source_dir')
+        dest_dir = os.path.join(self.temp_dir, 'dest_dir')
+        
+        # Create both directories
+        os.makedirs(source_dir)
+        os.makedirs(dest_dir)
+        with open(os.path.join(source_dir, 'test.txt'), 'w') as f:
+            f.write('source content')
+        with open(os.path.join(dest_dir, 'existing.txt'), 'w') as f:
+            f.write('dest content')
+        
+        # Test move - should create a new directory name
+        result = self.file_system_service.move_directory(source_dir, dest_dir)
+        self.assertTrue(result)
+        self.assertFalse(os.path.exists(source_dir))
+        # Should have created a new directory with _1 suffix
+        new_dirs = [d for d in os.listdir(self.temp_dir) if d.startswith('dest_dir')]
+        self.assertEqual(len(new_dirs), 2)  # Original dest_dir and new dest_dir_1
+        self.assertTrue('dest_dir' in new_dirs)
+        self.assertTrue('dest_dir_1' in new_dirs)
 
 
 class TestQGISLayerService(unittest.TestCase):
@@ -1398,6 +1489,88 @@ class TestArcheoSyncConfigurationValidator(unittest.TestCase):
         errors = self.validator.validate_features_layer('test_layer')
         self.assertEqual(len(errors), 1)
         self.assertIn('Layer not found in current project', errors[0])
+    
+    def test_validate_csv_archive_folder_empty_path(self):
+        """Test validation of empty CSV archive folder path."""
+        errors = self.validator.validate_csv_archive_folder('')
+        self.assertEqual(len(errors), 0)  # Empty path is valid (optional)
+    
+    def test_validate_csv_archive_folder_not_exists(self):
+        """Test validation of CSV archive folder that does not exist."""
+        self.file_system_service.path_exists.return_value = False
+        
+        errors = self.validator.validate_csv_archive_folder('/test/path')
+        self.assertEqual(len(errors), 1)
+        self.assertIn('CSV archive folder does not exist', errors[0])
+    
+    def test_validate_csv_archive_folder_not_directory(self):
+        """Test validation of CSV archive folder that is not a directory."""
+        self.file_system_service.path_exists.return_value = True
+        self.file_system_service.is_directory.return_value = False
+        
+        errors = self.validator.validate_csv_archive_folder('/test/path')
+        self.assertEqual(len(errors), 1)
+        self.assertIn('CSV archive path is not a directory', errors[0])
+    
+    def test_validate_csv_archive_folder_not_writable(self):
+        """Test validation of CSV archive folder that is not writable."""
+        self.file_system_service.path_exists.return_value = True
+        self.file_system_service.is_directory.return_value = True
+        self.file_system_service.is_writable.return_value = False
+        
+        errors = self.validator.validate_csv_archive_folder('/test/path')
+        self.assertEqual(len(errors), 1)
+        self.assertIn('CSV archive folder is not writable', errors[0])
+    
+    def test_validate_csv_archive_folder_valid(self):
+        """Test validation of valid CSV archive folder."""
+        self.file_system_service.path_exists.return_value = True
+        self.file_system_service.is_directory.return_value = True
+        self.file_system_service.is_writable.return_value = True
+        
+        errors = self.validator.validate_csv_archive_folder('/test/path')
+        self.assertEqual(len(errors), 0)
+    
+    def test_validate_qfield_archive_folder_empty_path(self):
+        """Test validation of empty QField archive folder path."""
+        errors = self.validator.validate_qfield_archive_folder('')
+        self.assertEqual(len(errors), 0)  # Empty path is valid (optional)
+    
+    def test_validate_qfield_archive_folder_not_exists(self):
+        """Test validation of QField archive folder that does not exist."""
+        self.file_system_service.path_exists.return_value = False
+        
+        errors = self.validator.validate_qfield_archive_folder('/test/path')
+        self.assertEqual(len(errors), 1)
+        self.assertIn('QField archive folder does not exist', errors[0])
+    
+    def test_validate_qfield_archive_folder_not_directory(self):
+        """Test validation of QField archive folder that is not a directory."""
+        self.file_system_service.path_exists.return_value = True
+        self.file_system_service.is_directory.return_value = False
+        
+        errors = self.validator.validate_qfield_archive_folder('/test/path')
+        self.assertEqual(len(errors), 1)
+        self.assertIn('QField archive path is not a directory', errors[0])
+    
+    def test_validate_qfield_archive_folder_not_writable(self):
+        """Test validation of QField archive folder that is not writable."""
+        self.file_system_service.path_exists.return_value = True
+        self.file_system_service.is_directory.return_value = True
+        self.file_system_service.is_writable.return_value = False
+        
+        errors = self.validator.validate_qfield_archive_folder('/test/path')
+        self.assertEqual(len(errors), 1)
+        self.assertIn('QField archive folder is not writable', errors[0])
+    
+    def test_validate_qfield_archive_folder_valid(self):
+        """Test validation of valid QField archive folder."""
+        self.file_system_service.path_exists.return_value = True
+        self.file_system_service.is_directory.return_value = True
+        self.file_system_service.is_writable.return_value = True
+        
+        errors = self.validator.validate_qfield_archive_folder('/test/path')
+        self.assertEqual(len(errors), 0)
     
     def test_validate_all_settings(self):
         """Test validation of all settings at once."""

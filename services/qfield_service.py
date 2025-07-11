@@ -56,10 +56,27 @@ class QGISQFieldService(IQFieldService):
     """
     QGIS-specific implementation of QField operations using QFieldSync's libqfieldsync.
     """
-    def __init__(self, settings_manager: ISettingsManager, layer_service: ILayerService):
+    def __init__(self, settings_manager: ISettingsManager, layer_service: ILayerService, file_system_service: Optional[Any] = None):
+        """
+        Initialize the QField service.
+        
+        Args:
+            settings_manager: Service for managing settings
+            layer_service: Service for layer operations
+            file_system_service: Service for file system operations (optional)
+        """
         self._settings_manager = settings_manager
         self._layer_service = layer_service
-        self._qfieldsync_available = OfflineConverter is not None and QgisCoreOffliner is not None
+        self._file_system_service = file_system_service
+        
+        # Check if QFieldSync is available
+        self._qfieldsync_available = self._check_qfieldsync_availability()
+
+    def _check_qfieldsync_availability(self) -> bool:
+        """
+        Check if QFieldSync (libqfieldsync) is available in the QGIS environment.
+        """
+        return OfflineConverter is not None and QgisCoreOffliner is not None
 
     def is_qfield_enabled(self) -> bool:
         return self._settings_manager.get_value('use_qfield', False)
@@ -156,6 +173,10 @@ class QGISQFieldService(IQFieldService):
             if success_count == 0 and error_count == 0:
                 return ValidationResult(False, "No Objects or Features layers found in the selected QField projects")
             
+            # Archive QField projects if archive folder is configured
+            if self._file_system_service:
+                self._archive_qfield_projects(project_paths)
+            
             message = f"Successfully imported {success_count} layer(s)"
             if error_count > 0:
                 message += f" with {error_count} error(s)"
@@ -164,6 +185,39 @@ class QGISQFieldService(IQFieldService):
             
         except Exception as e:
             return ValidationResult(False, f"Error importing QField projects: {str(e)}")
+    
+    def _archive_qfield_projects(self, project_paths: List[str]) -> None:
+        """
+        Move imported QField projects to the archive folder.
+        
+        Args:
+            project_paths: List of QField project paths to archive
+        """
+        try:
+            # Get archive folder from settings
+            archive_folder = self._settings_manager.get_value('qfield_archive_folder', '')
+            if not archive_folder:
+                return  # No archive folder configured
+            
+            # Create archive folder if it doesn't exist
+            if not self._file_system_service.path_exists(archive_folder):
+                if not self._file_system_service.create_directory(archive_folder):
+                    print(f"Warning: Could not create QField archive folder: {archive_folder}")
+                    return
+            
+            # Move each QField project to archive
+            for project_path in project_paths:
+                if self._file_system_service.path_exists(project_path):
+                    project_name = os.path.basename(project_path)
+                    archive_path = os.path.join(archive_folder, project_name)
+                    
+                    if self._file_system_service.move_directory(project_path, archive_path):
+                        print(f"Archived QField project: {project_name}")
+                    else:
+                        print(f"Warning: Could not archive QField project: {project_name}")
+                        
+        except Exception as e:
+            print(f"Error archiving QField projects: {str(e)}")
     
     def _create_merged_layer(self, layer_name: str, features: List[QgsFeature]) -> bool:
         """

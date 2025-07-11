@@ -5,8 +5,10 @@ A QGIS plugin for archaeologists to prepare data for field work and import it ba
 ## Features
 
 - **Configuration Management**: Set up folders for field projects, total station data, and completed projects
+- **Archive Management**: Configure archive folders for imported CSV files and QField projects
 - **Prepare Recording**: Create QField projects for selected recording areas with proper layer configuration
 - **Import Data**: Import CSV files from total station data and completed field projects
+- **Automatic Archiving**: Imported files and projects are automatically moved to archive folders after successful import
 - **QField Integration**: Seamless integration with QField for mobile data collection
 - **Layer Management**: Automatic layer creation and configuration for field work
 - **Background Image Selection**: Intelligent selection of overlapping raster layers for each recording area
@@ -32,6 +34,8 @@ A QGIS plugin for archaeologists to prepare data for field work and import it ba
    - **Total Station CSV Files**: Folder containing CSV files from total station data
    - **Completed Field Projects**: Folder containing completed field projects (with .qgs files)
    - **Template QGIS Project**: Template project for field work (optional if using QField)
+   - **CSV Archive Folder**: Folder where imported CSV files will be moved after successful import
+   - **QField Archive Folder**: Folder where imported QField projects will be moved after successful import
 3. Select the appropriate layers for recording areas, objects, and features
 4. Configure field mappings for objects layer (number and level fields)
 5. Choose whether to use QField integration
@@ -65,6 +69,7 @@ A QGIS plugin for archaeologists to prepare data for field work and import it ba
 - **Interactive Mapping**: If columns differ, shows a dialog to manually map columns
 - **PointZ Layer Creation**: Creates PointZ vector layers with all CSV attributes
 - **Project Integration**: Automatically adds imported layers to the QGIS project
+- **Automatic Archiving**: Moves imported CSV files to the configured archive folder after successful import
 - **Error Handling**: Comprehensive error handling with user-friendly messages
 
 #### QField Project Import Features
@@ -72,6 +77,7 @@ A QGIS plugin for archaeologists to prepare data for field work and import it ba
 - **Layer Merging**: Merges Objects and Features layers from multiple projects
 - **Layer Creation**: Creates new "New Objects" and "New Features" layers in the project
 - **Feature Collection**: Collects all features from completed field recordings
+- **Automatic Archiving**: Moves imported QField projects to the configured archive folder after successful import
 - **Validation**: Validates project structure and data integrity
 
 ## Architecture
@@ -99,7 +105,7 @@ The plugin follows clean architecture principles with:
 make test
 ```
 
-The project includes 324 tests with 324 passing and 1 skipped (QGIS-specific translation test).
+The project includes 347 tests with 347 passing and 1 skipped (QGIS-specific translation test).
 
 ### Project Structure
 
@@ -112,15 +118,32 @@ The project includes 324 tests with 324 passing and 1 skipped (QGIS-specific tra
 ### Key Services
 
 - **QGISSettingsManager**: QGIS-specific settings management
-- **QGISFileSystemService**: File system operations with Qt integration
+- **QGISFileSystemService**: File system operations with Qt integration and archive functionality
 - **QGISLayerService**: Layer operations including spatial analysis
-- **QGISQFieldService**: QField integration and project packaging
-- **CSVImportService**: CSV import with column mapping and validation
-- **ArcheoSyncConfigurationValidator**: Comprehensive validation system
+- **QGISQFieldService**: QField integration and project packaging with automatic archiving
+- **CSVImportService**: CSV import with column mapping, validation, and automatic archiving
+- **ArcheoSyncConfigurationValidator**: Comprehensive validation system including archive folder validation
 
 ## Recent Updates
 
-### Version 0.5.0 (Latest)
+### Version 0.8.0 (Latest)
+- **Archive Folder Management**: Added configuration for CSV and QField project archive folders
+- **Automatic Archiving**: Imported files and projects are automatically moved to archive folders after successful import
+- **Enhanced File System Service**: Added move operations for files and directories
+- **Configuration Validation**: Real-time validation of archive folder paths
+- **Test Coverage**: Expanded to 347 tests with comprehensive coverage
+
+### Version 0.7.0
+- **QField Service Consolidation**: Eliminated redundant methods and improved API design
+- **Extra Layers Support**: Added support for additional read-only layers in QField projects
+- **Enhanced Configuration**: Multi-select widget for extra vector layers
+
+### Version 0.6.0
+- **Complete Import System**: Comprehensive CSV import and QField project import functionality
+- **Column Mapping Dialog**: Interactive UI for CSV column mapping
+- **QField Integration Enhancements**: Complete project packaging with empty layer creation
+
+### Version 0.5.0
 - **QField Integration**: Complete QField project packaging with empty layer creation
 - **Background Image Support**: Intelligent raster layer selection for recording areas
 - **Enhanced UI**: Improved user experience with better validation and error handling
