@@ -228,8 +228,9 @@ class QGISQFieldService(IQFieldService):
                           objects_layer_id: str,
                           features_layer_id: Optional[str],
                           background_layer_id: Optional[str],
-                          destination_folder: str,
-                          project_name: str) -> bool:
+                          extra_layers: Optional[List[str]] = None,
+                          destination_folder: str = "",
+                          project_name: str = "") -> bool:
         """
         Package a QField project for a specific recording area using QFieldSync's OfflineConverter.
         Creates empty objects and features layers for offline editing in QField.
@@ -298,60 +299,60 @@ class QGISQFieldService(IQFieldService):
                     try:
                         from libqfieldsync.layer import LayerSource, SyncAction
                         layer_source = LayerSource(layer, original_project)
-                        
                         # Store original configuration
                         original_layer_configs[layer.id()] = {
                             'action': layer_source.action,
                             'cloud_action': layer_source.cloud_action
                         }
-                        
-                        # Set layers to REMOVE by default
+                        # Default: REMOVE
                         layer_source.action = SyncAction.REMOVE
                         layer_source.cloud_action = SyncAction.REMOVE
-                        
-                        # Set recording areas layer as COPY (read-only)
-                        if layer.id() == recording_areas_layer_id:
-                            layer_source.action = SyncAction.COPY
-                            layer_source.cloud_action = SyncAction.COPY
-                            # Make it read-only by locking all editing operations
-                            layer_source.is_feature_addition_locked = True
-                            layer_source.is_attribute_editing_locked = True
-                            layer_source.is_geometry_editing_locked = True
-                            layer_source.is_feature_deletion_locked = True
-                        
-                        # Set background layer as COPY (read-only) if specified
-                        elif background_layer_id and layer.id() == background_layer_id:
-                            layer_source.action = SyncAction.COPY
-                            layer_source.cloud_action = SyncAction.COPY
-                            # Make it read-only by locking all editing operations
-                            layer_source.is_feature_addition_locked = True
-                            layer_source.is_attribute_editing_locked = True
-                            layer_source.is_geometry_editing_locked = True
-                            layer_source.is_feature_deletion_locked = True
-                        
-                        # Set empty objects layer for OFFLINE editing
-                        elif empty_objects_layer_id and layer.id() == empty_objects_layer_id:
+                        # 1. Empty objects layer: OFFLINE (editable)
+                        if empty_objects_layer_id and layer.id() == empty_objects_layer_id:
                             layer_source.action = SyncAction.OFFLINE
                             layer_source.cloud_action = SyncAction.OFFLINE
-                            # Enable all editing operations for offline editing
                             layer_source.is_feature_addition_locked = False
                             layer_source.is_attribute_editing_locked = False
                             layer_source.is_geometry_editing_locked = False
                             layer_source.is_feature_deletion_locked = False
-                        
-                        # Set empty features layer for OFFLINE editing
+                        # 2. Empty features layer: OFFLINE (editable)
                         elif empty_features_layer_id and layer.id() == empty_features_layer_id:
                             layer_source.action = SyncAction.OFFLINE
                             layer_source.cloud_action = SyncAction.OFFLINE
-                            # Enable all editing operations for offline editing
                             layer_source.is_feature_addition_locked = False
                             layer_source.is_attribute_editing_locked = False
                             layer_source.is_geometry_editing_locked = False
                             layer_source.is_feature_deletion_locked = False
-                        
-                        # Apply the configuration
+                        # 3. Original objects/features layers: REMOVE
+                        elif layer.id() == objects_layer_id or (features_layer_id and layer.id() == features_layer_id):
+                            layer_source.action = SyncAction.REMOVE
+                            layer_source.cloud_action = SyncAction.REMOVE
+                        # 4. Recording areas layer: COPY (read-only)
+                        elif layer.id() == recording_areas_layer_id:
+                            layer_source.action = SyncAction.COPY
+                            layer_source.cloud_action = SyncAction.COPY
+                            layer_source.is_feature_addition_locked = True
+                            layer_source.is_attribute_editing_locked = True
+                            layer_source.is_geometry_editing_locked = True
+                            layer_source.is_feature_deletion_locked = True
+                        # 5. Background raster: COPY (read-only) if selected
+                        elif background_layer_id and layer.id() == background_layer_id:
+                            layer_source.action = SyncAction.COPY
+                            layer_source.cloud_action = SyncAction.COPY
+                            layer_source.is_feature_addition_locked = True
+                            layer_source.is_attribute_editing_locked = True
+                            layer_source.is_geometry_editing_locked = True
+                            layer_source.is_feature_deletion_locked = True
+                        # 6. Extra layers: COPY (read-only)
+                        elif extra_layers and layer.id() in extra_layers:
+                            layer_source.action = SyncAction.COPY
+                            layer_source.cloud_action = SyncAction.COPY
+                            layer_source.is_feature_addition_locked = True
+                            layer_source.is_attribute_editing_locked = True
+                            layer_source.is_geometry_editing_locked = True
+                            layer_source.is_feature_deletion_locked = True
+                        # 7. All others: REMOVE (already set by default)
                         layer_source.apply()
-                        
                     except ImportError:
                         print("Warning: Could not import LayerSource from libqfieldsync")
                     except Exception as e:
@@ -472,217 +473,13 @@ class QGISQFieldService(IQFieldService):
                                    objects_layer_id: str,
                                    features_layer_id: Optional[str],
                                    background_layer_id: Optional[str],
-                                   destination_folder: str,
-                                   project_name: str) -> bool:
+                                   extra_layers: Optional[List[str]] = None,
+                                   destination_folder: str = "",
+                                   project_name: str = "",
+                                   add_variables: bool = True,
+                                   next_values: Dict[str, str] = None) -> bool:
         """
         Package a QField project for a specific recording area using extracted feature data.
-        This method avoids issues with QGIS object deletion by using pre-extracted data.
-        Creates empty objects and features layers for offline editing in QField.
-        """
-        try:
-            if not self._qfieldsync_available:
-                raise RuntimeError("QFieldSync (libqfieldsync) is not available")
-            if not feature_data or not recording_areas_layer_id or not objects_layer_id:
-                raise ValueError("Required parameters are missing")
-            if not destination_folder or not project_name:
-                raise ValueError("Destination folder and project name are required")
-
-            # Prepare output directory and project file
-            project_dir = os.path.join(destination_folder, project_name)
-            if not os.path.exists(project_dir):
-                os.makedirs(project_dir)
-            project_file = os.path.join(project_dir, f"{project_name}_qfield.qgs")
-
-            # Work with the original project and configure QFieldSync layer settings
-            original_project = QgsProject.instance()
-            
-            # Store original layer configurations to restore later
-            original_layer_configs = {}
-            
-            # Store created empty layers to remove later
-            created_empty_layers = []
-            
-            try:
-                # Create empty objects layer for offline editing
-                empty_objects_layer_id = self._layer_service.create_empty_layer_copy(
-                    objects_layer_id, 
-                    "Objects"
-                )
-                if empty_objects_layer_id:
-                    created_empty_layers.append(empty_objects_layer_id)
-                    print(f"Created empty objects layer: {empty_objects_layer_id}")
-                else:
-                    print("Warning: Failed to create empty objects layer")
-                
-                # Create empty features layer for offline editing if features layer is configured
-                empty_features_layer_id = None
-                if features_layer_id:
-                    empty_features_layer_id = self._layer_service.create_empty_layer_copy(
-                        features_layer_id, 
-                        "Features"
-                    )
-                    if empty_features_layer_id:
-                        created_empty_layers.append(empty_features_layer_id)
-                        print(f"Created empty features layer: {empty_features_layer_id}")
-                    else:
-                        print("Warning: Failed to create empty features layer")
-                
-                # Configure QFieldSync layer settings for all layers
-                for layer in original_project.mapLayers().values():
-                    try:
-                        from libqfieldsync.layer import LayerSource, SyncAction
-                        layer_source = LayerSource(layer, original_project)
-                        
-                        # Store original configuration
-                        original_layer_configs[layer.id()] = {
-                            'action': layer_source.action,
-                            'cloud_action': layer_source.cloud_action
-                        }
-                        
-                        # Set layers to REMOVE by default
-                        layer_source.action = SyncAction.REMOVE
-                        layer_source.cloud_action = SyncAction.REMOVE
-                        
-                        # Set recording areas layer as COPY (read-only)
-                        if layer.id() == recording_areas_layer_id:
-                            layer_source.action = SyncAction.COPY
-                            layer_source.cloud_action = SyncAction.COPY
-                            # Make it read-only by locking all editing operations
-                            layer_source.is_feature_addition_locked = True
-                            layer_source.is_attribute_editing_locked = True
-                            layer_source.is_geometry_editing_locked = True
-                            layer_source.is_feature_deletion_locked = True
-                        
-                        # Set background layer as COPY (read-only) if specified
-                        elif background_layer_id and layer.id() == background_layer_id:
-                            layer_source.action = SyncAction.COPY
-                            layer_source.cloud_action = SyncAction.COPY
-                            # Make it read-only by locking all editing operations
-                            layer_source.is_feature_addition_locked = True
-                            layer_source.is_attribute_editing_locked = True
-                            layer_source.is_geometry_editing_locked = True
-                            layer_source.is_feature_deletion_locked = True
-                        
-                        # Set empty objects layer for OFFLINE editing
-                        elif empty_objects_layer_id and layer.id() == empty_objects_layer_id:
-                            layer_source.action = SyncAction.OFFLINE
-                            layer_source.cloud_action = SyncAction.OFFLINE
-                            # Enable all editing operations for offline editing
-                            layer_source.is_feature_addition_locked = False
-                            layer_source.is_attribute_editing_locked = False
-                            layer_source.is_geometry_editing_locked = False
-                            layer_source.is_feature_deletion_locked = False
-                        
-                        # Set empty features layer for OFFLINE editing
-                        elif empty_features_layer_id and layer.id() == empty_features_layer_id:
-                            layer_source.action = SyncAction.OFFLINE
-                            layer_source.cloud_action = SyncAction.OFFLINE
-                            # Enable all editing operations for offline editing
-                            layer_source.is_feature_addition_locked = False
-                            layer_source.is_attribute_editing_locked = False
-                            layer_source.is_geometry_editing_locked = False
-                            layer_source.is_feature_deletion_locked = False
-                        
-                        # Apply the configuration
-                        layer_source.apply()
-                        
-                    except ImportError:
-                        print("Warning: Could not import LayerSource from libqfieldsync")
-                    except Exception as e:
-                        print(f"Warning: Could not configure layer {layer.name()}: {str(e)}")
-                
-                # Use the pre-extracted geometry data
-                area_of_interest = feature_data.get('geometry_wkt')
-                area_of_interest_crs = original_project.crs().authid()
-                
-                if not area_of_interest:
-                    # fallback: use original project extent or create default
-                    try:
-                        # Try to get extent from original project's map canvas
-                        from qgis.core import QgsApplication
-                        iface = QgsApplication.instance().interface()
-                        if iface and iface.mapCanvas():
-                            area_of_interest = iface.mapCanvas().extent().asWktPolygon()
-                        else:
-                            # Create a default extent
-                            from qgis.core import QgsRectangle
-                            area_of_interest = QgsRectangle(-180, -90, 180, 90).asWktPolygon()
-                    except:
-                        # Last resort: create a default extent
-                        from qgis.core import QgsRectangle
-                        area_of_interest = QgsRectangle(-180, -90, 180, 90).asWktPolygon()
-                    area_of_interest_crs = original_project.crs().authid()
-
-                # Attachments and dirs to copy (not used in this minimal example)
-                attachment_dirs = []  # Empty list instead of None
-                dirs_to_copy = {}     # Empty dict instead of list - should be Dict[str, bool]
-                export_title = project_name
-
-                # Use QgisCoreOffliner for offline editing
-                offliner = QgisCoreOffliner(offline_editing=False)
-
-                # Validate that we have all required data before proceeding
-                if not area_of_interest:
-                    print(f"Warning: No area of interest found for {project_name}, using fallback extent")
-
-                # Call the packaging logic with the original project
-                success = self._package_with_offline_converter(
-                    original_project,
-                    project_file,
-                    area_of_interest,
-                    area_of_interest_crs,
-                    attachment_dirs,
-                    offliner,
-                    ExportType.Cable,
-                    dirs_to_copy,
-                    export_title
-                )
-                
-                return success
-                
-            finally:
-                # Restore original layer configurations
-                for layer_id, config in original_layer_configs.items():
-                    try:
-                        layer = original_project.mapLayer(layer_id)
-                        if layer:
-                            from libqfieldsync.layer import LayerSource
-                            layer_source = LayerSource(layer, original_project)
-                            layer_source.action = config['action']
-                            layer_source.cloud_action = config['cloud_action']
-                            layer_source.apply()
-                    except Exception as e:
-                        print(f"Warning: Could not restore layer configuration for {layer_id}: {str(e)}")
-                
-                # Remove the created empty layers from the main QGIS project
-                for layer_id in created_empty_layers:
-                    try:
-                        if self._layer_service.remove_layer_from_project(layer_id):
-                            print(f"Removed empty layer: {layer_id}")
-                        else:
-                            print(f"Warning: Could not remove empty layer: {layer_id}")
-                    except Exception as e:
-                        print(f"Error removing empty layer {layer_id}: {str(e)}")
-                        
-        except Exception as e:
-            print(f"Error packaging QField project for {project_name}: {str(e)}")
-            print(f"Error type: {type(e)}")
-            import traceback
-            traceback.print_exc()
-            return False
-
-    def package_for_qfield_with_data_and_variables(self, 
-                                                 feature_data: Dict[str, Any],
-                                                 recording_areas_layer_id: str,
-                                                 objects_layer_id: str,
-                                                 features_layer_id: Optional[str],
-                                                 background_layer_id: Optional[str],
-                                                 destination_folder: str,
-                                                 project_name: str,
-                                                 next_values: Dict[str, str]) -> bool:
-        """
-        Package a QField project for a specific recording area using extracted feature data
-        and add project variables for recording area, level, and first number.
         
         Args:
             feature_data: Dictionary containing feature data (id, geometry_wkt, attributes)
@@ -690,9 +487,11 @@ class QGISQFieldService(IQFieldService):
             objects_layer_id: ID of the objects layer
             features_layer_id: ID of the features layer (optional)
             background_layer_id: ID of the background image layer (optional)
+            extra_layers: List of additional layer IDs to include as read-only (optional)
             destination_folder: Folder where to save the QField project
             project_name: Name for the QField project
-            next_values: Dictionary containing next_number, next_level, and background_image values
+            add_variables: Whether to add project variables (next_number, next_level, recording_area_name)
+            next_values: Dictionary containing next_number, next_level, and background_image values (required if add_variables=True)
             
         Returns:
             True if packaging was successful, False otherwise
@@ -713,6 +512,8 @@ class QGISQFieldService(IQFieldService):
                 raise ValueError("Required parameters are missing")
             if not destination_folder or not project_name:
                 raise ValueError("Destination folder and project name are required")
+            if add_variables and not next_values:
+                raise ValueError("next_values is required when add_variables=True")
 
             # Prepare output directory and project file
             project_dir = os.path.join(destination_folder, project_name)
@@ -766,51 +567,74 @@ class QGISQFieldService(IQFieldService):
                             'cloud_action': layer_source.cloud_action
                         }
                         
-                        # Set layers to REMOVE by default
+                        # Default: REMOVE
                         layer_source.action = SyncAction.REMOVE
                         layer_source.cloud_action = SyncAction.REMOVE
                         
-                        # Set recording areas layer as COPY (read-only)
-                        if layer.id() == recording_areas_layer_id:
-                            layer_source.action = SyncAction.COPY
-                            layer_source.cloud_action = SyncAction.COPY
-                            # Make it read-only by locking all editing operations
-                            layer_source.is_feature_addition_locked = True
-                            layer_source.is_attribute_editing_locked = True
-                            layer_source.is_geometry_editing_locked = True
-                            layer_source.is_feature_deletion_locked = True
+                        # Debug logging
+                        print(f"DEBUG: Configuring layer '{layer.name()}' (ID: {layer.id()})")
+                        print(f"DEBUG: - empty_objects_layer_id: {empty_objects_layer_id}")
+                        print(f"DEBUG: - empty_features_layer_id: {empty_features_layer_id}")
+                        print(f"DEBUG: - objects_layer_id: {objects_layer_id}")
+                        print(f"DEBUG: - features_layer_id: {features_layer_id}")
+                        print(f"DEBUG: - recording_areas_layer_id: {recording_areas_layer_id}")
+                        print(f"DEBUG: - background_layer_id: {background_layer_id}")
+                        print(f"DEBUG: - extra_layers: {extra_layers}")
                         
-                        # Set background layer as COPY (read-only) if specified
-                        elif background_layer_id and layer.id() == background_layer_id:
-                            layer_source.action = SyncAction.COPY
-                            layer_source.cloud_action = SyncAction.COPY
-                            # Make it read-only by locking all editing operations
-                            layer_source.is_feature_addition_locked = True
-                            layer_source.is_attribute_editing_locked = True
-                            layer_source.is_geometry_editing_locked = True
-                            layer_source.is_feature_deletion_locked = True
-                        
-                        # Set empty objects layer for OFFLINE editing
-                        elif empty_objects_layer_id and layer.id() == empty_objects_layer_id:
+                        # 1. Empty objects layer: OFFLINE (editable)
+                        if empty_objects_layer_id and layer.id() == empty_objects_layer_id:
+                            print(f"DEBUG: Setting layer '{layer.name()}' to OFFLINE (empty objects)")
                             layer_source.action = SyncAction.OFFLINE
                             layer_source.cloud_action = SyncAction.OFFLINE
-                            # Enable all editing operations for offline editing
                             layer_source.is_feature_addition_locked = False
                             layer_source.is_attribute_editing_locked = False
                             layer_source.is_geometry_editing_locked = False
                             layer_source.is_feature_deletion_locked = False
-                        
-                        # Set empty features layer for OFFLINE editing
+                        # 2. Empty features layer: OFFLINE (editable)
                         elif empty_features_layer_id and layer.id() == empty_features_layer_id:
+                            print(f"DEBUG: Setting layer '{layer.name()}' to OFFLINE (empty features)")
                             layer_source.action = SyncAction.OFFLINE
                             layer_source.cloud_action = SyncAction.OFFLINE
-                            # Enable all editing operations for offline editing
                             layer_source.is_feature_addition_locked = False
                             layer_source.is_attribute_editing_locked = False
                             layer_source.is_geometry_editing_locked = False
                             layer_source.is_feature_deletion_locked = False
+                        # 3. Original objects/features layers: REMOVE
+                        elif layer.id() == objects_layer_id or (features_layer_id and layer.id() == features_layer_id):
+                            print(f"DEBUG: Setting layer '{layer.name()}' to REMOVE (original objects/features)")
+                            layer_source.action = SyncAction.REMOVE
+                            layer_source.cloud_action = SyncAction.REMOVE
+                        # 4. Recording areas layer: COPY (read-only)
+                        elif layer.id() == recording_areas_layer_id:
+                            print(f"DEBUG: Setting layer '{layer.name()}' to COPY (recording areas)")
+                            layer_source.action = SyncAction.COPY
+                            layer_source.cloud_action = SyncAction.COPY
+                            layer_source.is_feature_addition_locked = True
+                            layer_source.is_attribute_editing_locked = True
+                            layer_source.is_geometry_editing_locked = True
+                            layer_source.is_feature_deletion_locked = True
+                        # 5. Background raster: COPY (read-only) if selected
+                        elif background_layer_id and layer.id() == background_layer_id:
+                            print(f"DEBUG: Setting layer '{layer.name()}' to COPY (background)")
+                            layer_source.action = SyncAction.COPY
+                            layer_source.cloud_action = SyncAction.COPY
+                            layer_source.is_feature_addition_locked = True
+                            layer_source.is_attribute_editing_locked = True
+                            layer_source.is_geometry_editing_locked = True
+                            layer_source.is_feature_deletion_locked = True
+                        # 6. Extra layers: COPY (read-only)
+                        elif extra_layers and layer.id() in extra_layers:
+                            print(f"DEBUG: Setting layer '{layer.name()}' to COPY (extra layer)")
+                            layer_source.action = SyncAction.COPY
+                            layer_source.cloud_action = SyncAction.COPY
+                            layer_source.is_feature_addition_locked = True
+                            layer_source.is_attribute_editing_locked = True
+                            layer_source.is_geometry_editing_locked = True
+                            layer_source.is_feature_deletion_locked = True
+                        # 7. All others: REMOVE (already set by default)
+                        else:
+                            print(f"DEBUG: Setting layer '{layer.name()}' to REMOVE (default)")
                         
-                        # Apply the configuration
                         layer_source.apply()
                         
                     except ImportError:
@@ -865,7 +689,7 @@ class QGISQFieldService(IQFieldService):
                     export_title
                 )
                 
-                if success:
+                if success and add_variables:
                     # Add project variables to the created QField project
                     self._add_project_variables_to_qfield_project(
                         project_file, feature_data, next_values
@@ -903,6 +727,8 @@ class QGISQFieldService(IQFieldService):
             import traceback
             traceback.print_exc()
             return False
+
+
 
     def _add_project_variables_to_qfield_project(self, project_file: str, 
                                                 feature_data: Dict[str, Any], 

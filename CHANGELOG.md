@@ -2,6 +2,25 @@
 
 All notable changes to the ArcheoSync QGIS plugin will be documented in this file.
 
+## [0.7.0] - 2025-07-10
+
+### New Features
+- **Extra Layers Support**: Added configuration option for additional vector layers in QField projects
+  - Multi-select widget in settings dialog for choosing extra layers
+  - Selected layers are included as read-only in QField projects
+  - Recording areas layer is always included and cannot be deselected
+  - User-friendly checkbox interface with clear labeling
+
+### Technical Improvements
+- **QField Service Consolidation**: Eliminated redundant method implementation
+  - Removed `package_for_qfield_with_data_and_variables` method
+  - Enhanced `package_for_qfield_with_data` with optional parameters:
+    - `add_variables`: Controls project variable injection (default: True)
+    - `next_values`: Required when `add_variables=True` for field preparation
+    - `extra_layers`: Support for additional read-only layers
+  - Improved code maintainability and reduced duplication
+  - Preserved all existing functionality with backward compatibility
+
 ## [0.6.0] - 2025-07-10
 
 ### New Features

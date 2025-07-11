@@ -346,7 +346,7 @@ class TestQFieldService:
              patch('os.path.join', side_effect=lambda *args: '/'.join(args)), \
              patch.object(self.qfield_service, '_package_with_offline_converter', return_value=True), \
              patch.object(self.qfield_service, '_add_project_variables_to_qfield_project') as mock_add_vars:
-            result = self.qfield_service.package_for_qfield_with_data_and_variables(
+            result = self.qfield_service.package_for_qfield_with_data(
                 feature_data=feature_data,
                 recording_areas_layer_id='recording_areas',
                 objects_layer_id='objects',
@@ -354,6 +354,7 @@ class TestQFieldService:
                 background_layer_id='background',
                 destination_folder='/tmp/test',
                 project_name='TestProject',
+                add_variables=True,
                 next_values=next_values
             )
             assert result is True
@@ -388,7 +389,7 @@ class TestQFieldService:
              patch('os.path.join', side_effect=lambda *args: '/'.join(args)), \
              patch.object(self.qfield_service, '_package_with_offline_converter', return_value=True), \
              patch.object(self.qfield_service, '_add_project_variables_to_qfield_project') as mock_add_vars:
-            result = self.qfield_service.package_for_qfield_with_data_and_variables(
+            result = self.qfield_service.package_for_qfield_with_data(
                 feature_data=feature_data,
                 recording_areas_layer_id='recording_areas',
                 objects_layer_id='objects',
@@ -396,6 +397,7 @@ class TestQFieldService:
                 background_layer_id='background',
                 destination_folder='/tmp/test',
                 project_name='TestProject',
+                add_variables=True,
                 next_values=next_values
             )
             assert result is True

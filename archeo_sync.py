@@ -394,16 +394,21 @@ class ArcheoSyncPlugin:
                     # Get background image from next values
                     background_layer_id = next_values[i]['background_image'] if i < len(next_values) else ''
                     
+                    # Get extra layers from settings
+                    extra_layers = self._settings_manager.get_value('extra_qfield_layers', [])
+                    
                     # Package for QField using extracted feature data to avoid QGIS object deletion issues
-                    # Use the new method that adds project variables
-                    success = self._qfield_service.package_for_qfield_with_data_and_variables(
+                    # Use the consolidated method with optional variables
+                    success = self._qfield_service.package_for_qfield_with_data(
                         feature_data=feature_info,
                         recording_areas_layer_id=recording_areas_layer_id,
                         objects_layer_id=objects_layer_id,
                         features_layer_id=features_layer_id if features_layer_id else None,
                         background_layer_id=background_layer_id if background_layer_id else None,
+                        extra_layers=extra_layers,
                         destination_folder=destination_folder,
                         project_name=project_name,
+                        add_variables=True,
                         next_values=next_values[i] if i < len(next_values) else {}
                     )
                     

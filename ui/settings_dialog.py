@@ -47,7 +47,7 @@ The dialog provides:
 - Proper state management
 """
 
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from qgis.PyQt import QtWidgets
 from qgis.PyQt.QtCore import Qt
 
@@ -162,6 +162,10 @@ class SettingsDialog(QtWidgets.QDialog):
         self._qfield_checkbox = QtWidgets.QCheckBox("Use QField for field data collection")
         settings_layout.addRow("QField Integration:", self._qfield_checkbox)
         
+        # Extra layers for QField projects
+        self._extra_layers_widget = self._create_extra_layers_widget()
+        settings_layout.addRow("Extra QField Layers:", self._extra_layers_widget)
+        
         # Template QGIS project (conditional)
         self._template_project_widget = self._create_folder_selector(
             "Select folder containing template QGIS project..."
@@ -252,6 +256,37 @@ class SettingsDialog(QtWidgets.QDialog):
         
         return widget
     
+    def _create_extra_layers_widget(self) -> QtWidgets.QWidget:
+        """Create a widget for selecting extra vector layers to include in QField projects."""
+        widget = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Description label
+        description_label = QtWidgets.QLabel(
+            "Select additional vector layers to include in QField projects as read-only layers. "
+            "The recording areas layer is always included and cannot be modified."
+        )
+        description_label.setWordWrap(True)
+        description_label.setStyleSheet("color: gray; font-size: 11px;")
+        layout.addWidget(description_label)
+        
+        # List widget for layer selection (with checkboxes)
+        self._extra_layers_list = QtWidgets.QListWidget()
+        self._extra_layers_list.setSelectionMode(QtWidgets.QAbstractItemView.NoSelection)
+        self._extra_layers_list.setMaximumHeight(150)
+        layout.addWidget(self._extra_layers_list)
+        
+        # Refresh button
+        refresh_button = QtWidgets.QPushButton("Refresh Layers")
+        refresh_button.setToolTip("Refresh the list of available vector layers")
+        layout.addWidget(refresh_button)
+        
+        # Store reference to refresh button
+        widget.refresh_button = refresh_button
+        
+        return widget
+    
     def _create_button_box(self, parent_layout: QtWidgets.QVBoxLayout) -> None:
         """Create the dialog button box."""
         self._button_box = QtWidgets.QDialogButtonBox(
@@ -290,6 +325,9 @@ class SettingsDialog(QtWidgets.QDialog):
         self._objects_widget.refresh_button.clicked.connect(self._refresh_objects_layer_list)
         self._objects_widget.combo_box.currentIndexChanged.connect(self._on_objects_layer_changed)
         self._features_widget.refresh_button.clicked.connect(self._refresh_features_layer_list)
+        
+        # Extra layers connections
+        self._extra_layers_widget.refresh_button.clicked.connect(self._refresh_extra_layers_list)
         
         # QField checkbox connection
         self._qfield_checkbox.stateChanged.connect(self._update_ui_state)
@@ -384,6 +422,53 @@ class SettingsDialog(QtWidgets.QDialog):
             
         except Exception as e:
             self._show_error("Layer Error", f"Failed to refresh features layer list: {str(e)}")
+    
+    def _refresh_extra_layers_list(self) -> None:
+        """Refresh the list of available vector layers for extra QField layers."""
+        try:
+            # Get current checked state by layer id
+            checked_layer_ids = set()
+            for i in range(self._extra_layers_list.count()):
+                item = self._extra_layers_list.item(i)
+                if item.checkState() == Qt.Checked:
+                    checked_layer_ids.add(item.data(Qt.UserRole))
+            
+            # Get the current recording areas layer id
+            recording_areas_layer_id = self._recording_areas_widget.combo_box.currentData()
+            
+            # Clear existing items
+            self._extra_layers_list.clear()
+            
+            # Get vector layers from the service
+            vector_layers = self._layer_service.get_vector_layers()
+            
+            for layer_info in vector_layers:
+                item = QtWidgets.QListWidgetItem()
+                display_text = f"{layer_info['name']} ({layer_info['feature_count']} features)"
+                item.setText(display_text)
+                item.setData(Qt.UserRole, layer_info['id'])
+                item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+                # Recording areas layer: always checked and disabled
+                if layer_info['id'] == recording_areas_layer_id:
+                    item.setCheckState(Qt.Checked)
+                    item.setFlags(item.flags() & ~Qt.ItemIsEnabled)
+                else:
+                    # Restore checked state if previously checked
+                    item.setCheckState(Qt.Checked if layer_info['id'] in checked_layer_ids else Qt.Unchecked)
+                self._extra_layers_list.addItem(item)
+        except Exception as e:
+            self._show_error("Layer Error", f"Failed to refresh extra layers list: {str(e)}")
+    
+    def _get_selected_extra_layers(self) -> List[str]:
+        """Get the list of checked extra layer IDs (excluding the recording areas layer)."""
+        selected_layers = []
+        recording_areas_layer_id = self._recording_areas_widget.combo_box.currentData()
+        for i in range(self._extra_layers_list.count()):
+            item = self._extra_layers_list.item(i)
+            if item.checkState() == Qt.Checked and item.data(Qt.UserRole) != recording_areas_layer_id:
+                selected_layers.append(item.data(Qt.UserRole))
+        print(f"DEBUG: Selected extra layers: {selected_layers}")
+        return selected_layers
     
     def _on_objects_layer_changed(self) -> None:
         """Handle changes to the objects layer selection."""
@@ -491,6 +576,18 @@ class SettingsDialog(QtWidgets.QDialog):
             use_qfield = self._settings_manager.get_value('use_qfield', False)
             self._qfield_checkbox.setChecked(bool(use_qfield))
             
+            # Load extra layers for QField
+            extra_layers = self._settings_manager.get_value('extra_qfield_layers', [])
+            self._refresh_extra_layers_list()  # Populate the list
+            # Set checked state for extra layers (recording areas handled in refresh)
+            for i in range(self._extra_layers_list.count()):
+                item = self._extra_layers_list.item(i)
+                layer_id = item.data(Qt.UserRole)
+                if layer_id in extra_layers:
+                    item.setCheckState(Qt.Checked)
+                elif item.flags() & Qt.ItemIsEnabled:
+                    item.setCheckState(Qt.Unchecked)
+            
             # Load template project folder
             template_project_path = self._settings_manager.get_value('template_project_folder', '')
             self._template_project_widget.input_field.setText(template_project_path)
@@ -506,6 +603,7 @@ class SettingsDialog(QtWidgets.QDialog):
                 'objects_level_field': self._settings_manager.get_value('objects_level_field', ''),
                 'features_layer': features_layer_id,
                 'use_qfield': bool(use_qfield),
+                'extra_qfield_layers': extra_layers,
                 'template_project_folder': template_project_path
             }
             
@@ -526,6 +624,7 @@ class SettingsDialog(QtWidgets.QDialog):
                 'objects_level_field': self._level_field_combo.currentData(),
                 'features_layer': self._features_widget.combo_box.currentData(),
                 'use_qfield': self._qfield_checkbox.isChecked(),
+                'extra_qfield_layers': self._get_selected_extra_layers(),
                 'template_project_folder': self._template_project_widget.input_field.text()
             }
             

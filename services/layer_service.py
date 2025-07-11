@@ -166,6 +166,30 @@ class QGISLayerService(ILayerService):
         
         return layers
     
+    def get_vector_layers(self) -> List[Dict[str, Any]]:
+        """
+        Get all vector layers from the current QGIS project.
+        
+        Returns:
+            List of dictionaries containing vector layer information
+        """
+        vector_layers = []
+        project = QgsProject.instance()
+        
+        for layer in project.mapLayers().values():
+            if isinstance(layer, QgsVectorLayer):
+                layer_info = {
+                    'id': layer.id(),
+                    'name': layer.name(),
+                    'source': layer.source(),
+                    'crs': layer.crs().authid() if layer.crs() else 'Unknown',
+                    'feature_count': layer.featureCount(),
+                    'geometry_type': layer.geometryType()
+                }
+                vector_layers.append(layer_info)
+        
+        return vector_layers
+    
     def get_layer_by_id(self, layer_id: str) -> Optional[QgsVectorLayer]:
         """
         Get a layer by its ID.

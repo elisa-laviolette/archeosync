@@ -126,6 +126,7 @@ class TestSettingsDialog(unittest.TestCase):
             call('objects_layer', ''),
             call('features_layer', ''),
             call('use_qfield', False),
+            call('extra_qfield_layers', []),
             call('template_project_folder', '')
         ]
         self.mock_settings_manager.get_value.assert_has_calls(expected_calls)
@@ -143,6 +144,7 @@ class TestSettingsDialog(unittest.TestCase):
             '',  # objects_level_field
             'test_features_layer_id',  # features_layer
             True,  # use_qfield
+            [],  # extra_qfield_layers
             '/path/to/template'
         ]
         
@@ -210,6 +212,7 @@ class TestSettingsDialog(unittest.TestCase):
             'objects_level_field': '',
             'features_layer': 'test_features_layer_id',
             'use_qfield': False,
+            'extra_qfield_layers': [],
             'template_project_folder': '/path/to/template'
         }.get(key, default)
         
@@ -256,6 +259,7 @@ class TestSettingsDialog(unittest.TestCase):
             'objects_level_field': '',
             'features_layer': 'test_features_layer_id',
             'use_qfield': False,
+            'extra_qfield_layers': [],
             'template_project_folder': '/path/to/template'
         }
         self.assertEqual(self.dialog._original_values, expected_original_values)
@@ -438,6 +442,7 @@ class TestSettingsDialog(unittest.TestCase):
             call('objects_level_field', ''),
             call('features_layer', ''),
             call('use_qfield', False),
+            call('extra_qfield_layers', []),
             call('template_project_folder', '/path/to/template')
         ]
         self.mock_settings_manager.set_value.assert_has_calls(expected_calls)

@@ -4,7 +4,7 @@ This document describes the architecture of the ArcheoSync QGIS plugin, focusing
 
 ## Overview
 
-The plugin follows SOLID principles and clean architecture to ensure maintainability, testability, and extensibility. The current version includes 324 tests with 324 passing and 1 skipped, demonstrating robust code quality and comprehensive coverage.
+The plugin follows SOLID principles and clean architecture to ensure maintainability, testability, and extensibility. The current version includes 325 tests with 325 passing and 1 skipped, demonstrating robust code quality and comprehensive coverage.
 
 ## SOLID Principles Implementation
 
@@ -68,7 +68,7 @@ archeosync/
 │   ├── settings_dialog.py
 │   ├── import_data_dialog.py
 │   └── prepare_recording_dialog.py
-├── test/                   # Test suite (324 tests)
+├── test/                   # Test suite (325 tests)
 │   ├── test_core_interfaces.py
 │   ├── test_services.py
 │   ├── test_ui_components.py
@@ -143,6 +143,7 @@ Interface for QField integration:
     objects_layer_id: str,
     features_layer_id: Optional[str],
     background_layer_id: Optional[str],
+    extra_layers: Optional[List[str]] = None,
     destination_folder: str,
     project_name: str
 ) -> bool`
@@ -152,8 +153,11 @@ Interface for QField integration:
     objects_layer_id: str,
     features_layer_id: Optional[str],
     background_layer_id: Optional[str],
+    extra_layers: Optional[List[str]] = None,
     destination_folder: str,
-    project_name: str
+    project_name: str,
+    add_variables: bool = True,
+    next_values: Dict[str, str] = None
 ) -> bool`
 
 ## Service Implementations
@@ -181,12 +185,13 @@ QGIS-specific implementation for layer operations including:
 ### QGISQFieldService
 QGIS-specific implementation for QField integration including:
 - Automatic empty layer creation ("Objects", "Features")
-- Layer configuration for offline editing
+- Layer configuration for offline editing with extra layers support
 - Project packaging with area of interest
 - Automatic cleanup of temporary layers
-- Project variable injection for field preparation
+- Project variable injection for field preparation (optional)
 - QField project import with data.gpkg processing
 - Layer merging from multiple completed projects
+- Consolidated method design eliminating code duplication
 
 ### CSVImportService
 QGIS-specific implementation for CSV import operations including:
@@ -247,7 +252,7 @@ Test real QGIS environment integration.
 
 ## Benefits
 
-1. **Testability**: All components can be unit tested with mocks (324 tests, 324 passing, 1 skipped)
+1. **Testability**: All components can be unit tested with mocks (325 tests, 325 passing, 1 skipped)
 2. **Maintainability**: Clear separation of concerns
 3. **Extensibility**: Easy to add new features through interfaces
 4. **Reliability**: Comprehensive validation and error handling
@@ -288,7 +293,24 @@ The packaging process includes:
 - **Memory Management**: Proper cleanup of QGIS objects to prevent memory leaks
 - **Error Recovery**: Graceful handling of QGIS object deletion issues
 
-## Latest Features (v0.6.0)
+## Latest Features (v0.7.0)
+
+### QField Service Consolidation
+- **Method Consolidation**: Eliminated redundant `package_for_qfield_with_data_and_variables` method
+- **Enhanced API**: Updated `package_for_qfield_with_data` with optional parameters:
+  - `add_variables`: Controls whether to add project variables (default: True)
+  - `next_values`: Required when `add_variables=True` for field preparation
+  - `extra_layers`: Support for additional read-only layers in QField projects
+- **Code Quality**: Reduced duplication and improved maintainability
+- **Backward Compatibility**: All existing functionality preserved
+
+### Extra Layers Support
+- **Configuration Dialog**: Added multi-select widget for extra vector layers
+- **Read-Only Layers**: Selected extra layers are included as read-only in QField projects
+- **Recording Areas Integration**: Recording areas layer is always included and locked
+- **User-Friendly Interface**: Checkbox selection with clear labeling
+
+## Previous Features (v0.6.0)
 
 ### Complete Import System
 - **CSV Import Service**: Comprehensive CSV import with validation and column mapping
