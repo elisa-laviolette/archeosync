@@ -568,4 +568,67 @@ class ICSVImportService(ABC):
         Returns:
             ValidationResult indicating if import was successful and any error messages
         """
+        pass
+
+
+class IRasterProcessingService(ABC):
+    """
+    Interface for raster processing operations.
+    
+    This interface defines the contract for raster processing services that can
+    clip raster layers to polygon geometries with configurable offsets. It is
+    designed for archaeological recording scenarios where background imagery
+    needs to be limited to specific recording areas.
+    
+    The interface requires implementations to:
+    - Clip raster layers to polygon geometries
+    - Support configurable buffer offsets
+    - Handle coordinate system transformations
+    - Provide GDAL availability checking
+    - Return file paths for clipped outputs
+    """
+    
+    @abstractmethod
+    def clip_raster_to_feature(self, 
+                              raster_layer_id: str,
+                              feature_geometry: Any,
+                              offset_meters: float = 0.2,
+                              output_path: Optional[str] = None) -> Optional[str]:
+        """
+        Clip a raster layer to a feature geometry with an offset.
+        
+        This method should clip a raster layer to the boundary of a polygon feature,
+        optionally adding a buffer zone around the feature. The clipped raster
+        should be saved as a GeoTIFF file.
+        
+        Args:
+            raster_layer_id: ID of the raster layer to clip (must exist in QGIS project)
+            feature_geometry: QgsGeometry of the polygon feature to clip to
+            offset_meters: Offset in meters to expand the clipping area (default: 0.2)
+            output_path: Optional output path for the clipped raster (auto-generated if None)
+            
+        Returns:
+            Path to the clipped raster file (GeoTIFF), or None if operation failed
+            
+        Note:
+            Implementations should handle coordinate system transformations
+            and temporary file cleanup automatically.
+        """
+        pass
+    
+    @abstractmethod
+    def is_gdal_available(self) -> bool:
+        """
+        Check if GDAL command line tools are available.
+        
+        Verifies that the required GDAL command-line tools (gdalwarp, ogr2ogr)
+        are available in the system PATH for raster processing operations.
+        
+        Returns:
+            True if both gdalwarp and ogr2ogr are available, False otherwise
+            
+        Note:
+            This method should attempt to run version commands for both tools
+            to verify their availability and proper installation.
+        """
         pass 

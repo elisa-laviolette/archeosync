@@ -12,6 +12,7 @@ from .configuration_validator import ArcheoSyncConfigurationValidator
 from .layer_service import QGISLayerService
 from .qfield_service import QGISQFieldService
 from .csv_import_service import CSVImportService
+from .raster_processing_service import QGISRasterProcessingService
 
 __all__ = [
     'QGISSettingsManager',

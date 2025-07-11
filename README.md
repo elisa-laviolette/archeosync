@@ -12,6 +12,7 @@ A QGIS plugin for archaeologists to prepare data for field work and import it ba
 - **QField Integration**: Seamless integration with QField for mobile data collection
 - **Layer Management**: Automatic layer creation and configuration for field work
 - **Background Image Selection**: Intelligent selection of overlapping raster layers for each recording area
+- **Raster Processing**: Automatic clipping of background images to recording areas with configurable offsets
 - **Smart Field Validation**: Automatic detection and validation of object numbering and level fields
 - **Empty Layer Creation**: Automatic creation of empty "Objects" and "Features" layers for offline editing
 - **CSV Import Service**: Comprehensive CSV import with column mapping and validation
@@ -53,6 +54,15 @@ A QGIS plugin for archaeologists to prepare data for field work and import it ba
 5. Click OK to create QField projects for each selected recording area
 
 **Project Naming**: When a level is defined, QField project names will be the display name of the recording area followed by '_' and the content of the Next level column. For example: "Test Area_A" or "Excavation Site_Level 1". If no level is defined, only the recording area name is used.
+
+**Background Image Processing**: When a background image is selected, the system will automatically clip the raster to the recording area boundary with a configurable offset (default: 20 cm). This ensures the background image extends slightly beyond the recording area for better context in the field. The original raster remains unchanged, and the clipped version is used only for the QField project.
+
+The raster processing service uses GDAL for high-quality clipping operations and handles:
+- Coordinate system transformations
+- Temporary file management
+- Buffer zone creation around recording areas
+- GeoTIFF output format for maximum compatibility
+- Automatic cleanup of temporary files
 
 ### Import Data
 
@@ -105,7 +115,7 @@ The plugin follows clean architecture principles with:
 make test
 ```
 
-The project includes 347 tests with 347 passing and 1 skipped (QGIS-specific translation test).
+The project includes 357 tests with 357 passing and 1 skipped (QGIS-specific translation test).
 
 ### Project Structure
 
@@ -113,7 +123,7 @@ The project includes 347 tests with 347 passing and 1 skipped (QGIS-specific tra
   - `core/`: Core interfaces and abstractions
   - `services/`: Service implementations
   - `ui/`: User interface components
-  - `test/`: Test files (324 tests)
+  - `test/`: Test files (357 tests)
 
 ### Key Services
 
@@ -121,12 +131,20 @@ The project includes 347 tests with 347 passing and 1 skipped (QGIS-specific tra
 - **QGISFileSystemService**: File system operations with Qt integration and archive functionality
 - **QGISLayerService**: Layer operations including spatial analysis
 - **QGISQFieldService**: QField integration and project packaging with automatic archiving
+- **QGISRasterProcessingService**: GDAL-based raster clipping with coordinate system handling
 - **CSVImportService**: CSV import with column mapping, validation, and automatic archiving
 - **ArcheoSyncConfigurationValidator**: Comprehensive validation system including archive folder validation
 
 ## Recent Updates
 
-### Version 0.8.0 (Latest)
+### Version 0.9.0 (Latest)
+- **Raster Processing Service**: Added GDAL-based raster clipping with configurable offsets
+- **Background Image Clipping**: Automatic clipping of background images to recording area boundaries
+- **Coordinate System Handling**: Automatic CRS transformations and validation
+- **Temporary File Management**: Intelligent cleanup of temporary files during processing
+- **Test Coverage**: Expanded to 357 tests with comprehensive coverage
+
+### Version 0.8.0
 - **Archive Folder Management**: Added configuration for CSV and QField project archive folders
 - **Automatic Archiving**: Imported files and projects are automatically moved to archive folders after successful import
 - **Enhanced File System Service**: Added move operations for files and directories

@@ -41,7 +41,8 @@ from .services import (
     ArcheoSyncConfigurationValidator,
     QGISLayerService,
     QGISQFieldService,
-    CSVImportService
+    CSVImportService,
+    QGISRasterProcessingService
 )
 
 
@@ -111,8 +112,16 @@ class ArcheoSyncPlugin:
         # Initialize layer service
         self._layer_service = QGISLayerService()
 
+        # Initialize raster processing service FIRST
+        self._raster_processing_service = QGISRasterProcessingService()
+
         # Initialize QField service
-        self._qfield_service = QGISQFieldService(self._settings_manager, self._layer_service, self._file_system_service)
+        self._qfield_service = QGISQFieldService(
+            self._settings_manager, 
+            self._layer_service, 
+            self._file_system_service,
+            self._raster_processing_service
+        )
         
         # Initialize CSV import service
         self._csv_import_service = CSVImportService(self._iface, self._file_system_service, self._settings_manager)

@@ -56,7 +56,7 @@ class QGISQFieldService(IQFieldService):
     """
     QGIS-specific implementation of QField operations using QFieldSync's libqfieldsync.
     """
-    def __init__(self, settings_manager: ISettingsManager, layer_service: ILayerService, file_system_service: Optional[Any] = None):
+    def __init__(self, settings_manager: ISettingsManager, layer_service: ILayerService, file_system_service: Optional[Any] = None, raster_processing_service: Optional[Any] = None):
         """
         Initialize the QField service.
         
@@ -64,10 +64,12 @@ class QGISQFieldService(IQFieldService):
             settings_manager: Service for managing settings
             layer_service: Service for layer operations
             file_system_service: Service for file system operations (optional)
+            raster_processing_service: Service for raster processing operations (optional)
         """
         self._settings_manager = settings_manager
         self._layer_service = layer_service
         self._file_system_service = file_system_service
+        self._raster_processing_service = raster_processing_service
         
         # Check if QFieldSync is available
         self._qfieldsync_available = self._check_qfieldsync_availability()
@@ -584,6 +586,9 @@ class QGISQFieldService(IQFieldService):
             # Store created empty layers to remove later
             created_empty_layers = []
             
+            # Store clipped raster layer to remove later
+            clipped_raster_layer_id = None
+            
             try:
                 # Create empty objects layer for offline editing
                 empty_objects_layer_id = self._layer_service.create_empty_layer_copy(
@@ -608,6 +613,40 @@ class QGISQFieldService(IQFieldService):
                         print(f"Created empty features layer: {empty_features_layer_id}")
                     else:
                         print("Warning: Failed to create empty features layer")
+                
+                # Process background raster if specified
+                if background_layer_id:
+                    # Create geometry from WKT for raster processing
+                    from qgis.core import QgsGeometry
+                    # Create geometry from WKT and convert 3D to 2D if needed
+                    wkt = feature_data.get('geometry_wkt', '')
+                    if ' Z ' in wkt:
+                        # Convert 3D geometry to 2D by removing Z coordinates
+                        wkt_2d = wkt.replace(' Z ', ' ').replace(' Z(', ' (').replace(' Z)', ' )')
+                        # Remove Z coordinates from coordinate tuples
+                        import re
+                        wkt_2d = re.sub(r'(\d+\.\d+)\s+(\d+\.\d+)\s+\d+\.\d+', r'\1 \2', wkt_2d)
+                        print(f"[DEBUG] Converted 3D WKT to 2D: {wkt_2d}")
+                        feature_geometry = QgsGeometry.fromWkt(wkt_2d)
+                    else:
+                        feature_geometry = QgsGeometry.fromWkt(wkt)
+                    
+                    # Note: QgsGeometry doesn't have CRS, but we'll handle this in the raster processing service
+                    if feature_geometry is not None and not feature_geometry.isNull():
+                        print(f"[DEBUG] Geometry created successfully, will use project CRS for processing")
+                    
+                    if feature_geometry is not None and not feature_geometry.isNull():
+                        clipped_raster_layer_id = self._process_background_raster(
+                            background_layer_id=background_layer_id,
+                            feature_geometry=feature_geometry,
+                            project_name=project_name
+                        )
+                        if clipped_raster_layer_id:
+                            print(f"Successfully processed background raster: {clipped_raster_layer_id}")
+                        else:
+                            print("Warning: Failed to process background raster")
+                    else:
+                        print("Warning: Could not create geometry from WKT for raster processing")
                 
                 # Configure QFieldSync layer settings for all layers
                 for layer in original_project.mapLayers().values():
@@ -669,7 +708,12 @@ class QGISQFieldService(IQFieldService):
                             layer_source.is_feature_deletion_locked = True
                         # 5. Background raster: COPY (read-only) if selected
                         elif background_layer_id and layer.id() == background_layer_id:
-                            print(f"DEBUG: Setting layer '{layer.name()}' to COPY (background)")
+                            print(f"DEBUG: Setting layer '{layer.name()}' to REMOVE (original background)")
+                            layer_source.action = SyncAction.REMOVE
+                            layer_source.cloud_action = SyncAction.REMOVE
+                        # 5b. Clipped background raster: COPY (read-only) if available
+                        elif clipped_raster_layer_id and layer.id() == clipped_raster_layer_id:
+                            print(f"DEBUG: Setting layer '{layer.name()}' to COPY (clipped background)")
                             layer_source.action = SyncAction.COPY
                             layer_source.cloud_action = SyncAction.COPY
                             layer_source.is_feature_addition_locked = True
@@ -774,6 +818,10 @@ class QGISQFieldService(IQFieldService):
                             print(f"Warning: Could not remove empty layer: {layer_id}")
                     except Exception as e:
                         print(f"Error removing empty layer {layer_id}: {str(e)}")
+                
+                # Remove the clipped raster layer from the main QGIS project
+                if clipped_raster_layer_id:
+                    self._cleanup_clipped_raster(clipped_raster_layer_id)
                         
         except Exception as e:
             print(f"Error packaging QField project for {project_name}: {str(e)}")
@@ -876,3 +924,83 @@ class QGISQFieldService(IQFieldService):
             print(f"Error adding project variables to QField project: {str(e)}")
             import traceback
             traceback.print_exc()
+    
+    def _process_background_raster(self, 
+                                  background_layer_id: str,
+                                  feature_geometry: Any,
+                                  project_name: str) -> Optional[str]:
+        """
+        Process background raster by clipping it to the recording area with offset.
+        
+        Args:
+            background_layer_id: ID of the background raster layer
+            feature_geometry: QgsGeometry of the recording area feature
+            project_name: Name of the project for naming the clipped raster
+            
+        Returns:
+            ID of the clipped raster layer, or None if processing failed
+        """
+        try:
+            if not self._raster_processing_service:
+                print("Warning: Raster processing service not available")
+                return None
+            
+            # Check if GDAL is available
+            if not self._raster_processing_service.is_gdal_available():
+                print("Warning: GDAL command line tools not available")
+                return None
+            
+            # Get raster clipping offset from settings
+            offset_meters = self._settings_manager.get_value('raster_clipping_offset', 0.2)
+            print(f"[DEBUG] Clipping raster: background_layer_id={background_layer_id}, offset_meters={offset_meters}")
+            
+            # Create clipped raster
+            clipped_raster_path = self._raster_processing_service.clip_raster_to_feature(
+                raster_layer_id=background_layer_id,
+                feature_geometry=feature_geometry,
+                offset_meters=offset_meters
+            )
+            print(f"[DEBUG] Clipped raster path returned: {clipped_raster_path}")
+            if clipped_raster_path and os.path.exists(clipped_raster_path):
+                print(f"[DEBUG] Clipped raster file exists: {clipped_raster_path}")
+            else:
+                print(f"[DEBUG] Clipped raster file does NOT exist: {clipped_raster_path}")
+            
+            if not clipped_raster_path:
+                print("Error: Failed to clip raster")
+                return None
+            
+            # Load the clipped raster into QGIS
+            clipped_layer_name = f"{project_name}_Background"
+            clipped_layer = QgsRasterLayer(clipped_raster_path, clipped_layer_name, "gdal")
+            print(f"[DEBUG] Created QgsRasterLayer: valid={clipped_layer.isValid()}, name={clipped_layer.name()}, source={clipped_layer.source()}")
+            
+            if not clipped_layer.isValid():
+                print(f"Error: Failed to load clipped raster: {clipped_raster_path}")
+                return None
+            
+            # Add the clipped layer to the project
+            QgsProject.instance().addMapLayer(clipped_layer)
+            print(f"[DEBUG] Added clipped raster layer to project: id={clipped_layer.id()}, name={clipped_layer.name()}")
+            
+            return clipped_layer.id()
+            
+        except Exception as e:
+            print(f"Error processing background raster: {str(e)}")
+            return None
+    
+    def _cleanup_clipped_raster(self, clipped_layer_id: str) -> None:
+        """
+        Remove the clipped raster layer from the QGIS project.
+        
+        Args:
+            clipped_layer_id: ID of the clipped raster layer to remove
+        """
+        try:
+            if clipped_layer_id and self._layer_service:
+                if self._layer_service.remove_layer_from_project(clipped_layer_id):
+                    print(f"Successfully removed clipped raster layer: {clipped_layer_id}")
+                else:
+                    print(f"Warning: Could not remove clipped raster layer: {clipped_layer_id}")
+        except Exception as e:
+            print(f"Error removing clipped raster layer: {str(e)}")

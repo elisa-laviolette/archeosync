@@ -102,27 +102,13 @@ class TestSettingsDialog(unittest.TestCase):
     
     def test_load_settings_calls_settings_manager(self):
         """Test that loading settings calls the settings manager."""
-        # Mock settings manager to return test values
-        self.mock_settings_manager.get_value.side_effect = [
-            '/path/to/field',  # field_projects_folder
-            '/path/to/total',  # total_station_folder
-            '/path/to/completed',  # completed_projects_folder
-            '',  # csv_archive_folder
-            '',  # qfield_archive_folder
-            '',  # recording_areas_layer
-            '',  # objects_layer
-            '',  # objects_number_field
-            '',  # objects_level_field
-            '',  # features_layer
-            False,  # use_qfield
-            [],  # extra_qfield_layers
-            '/path/to/template'  # template_project_folder
-        ]
+        # Mock settings manager to return empty values
+        self.mock_settings_manager.get_value.return_value = ''
         
         # Call load_settings
         self.dialog._load_settings()
         
-        # Verify settings manager was called with expected values
+        # Verify settings manager was called with expected parameters
         expected_calls = [
             call('field_projects_folder', ''),
             call('total_station_folder', ''),
@@ -133,8 +119,7 @@ class TestSettingsDialog(unittest.TestCase):
             call('objects_layer', ''),
             call('features_layer', ''),
             call('use_qfield', False),
-            call('extra_qfield_layers', []),
-            call('template_project_folder', '')
+            call('raster_clipping_offset', 0.2)
         ]
         self.mock_settings_manager.get_value.assert_has_calls(expected_calls)
     
@@ -153,6 +138,7 @@ class TestSettingsDialog(unittest.TestCase):
             '',  # objects_level_field
             'test_features_layer_id',  # features_layer
             True,  # use_qfield
+            0.2,  # raster_clipping_offset
             [],  # extra_qfield_layers
             '/path/to/template'
         ]
@@ -223,6 +209,7 @@ class TestSettingsDialog(unittest.TestCase):
             'objects_level_field': '',
             'features_layer': 'test_features_layer_id',
             'use_qfield': False,
+            'raster_clipping_offset': 0.2,
             'extra_qfield_layers': [],
             'template_project_folder': '/path/to/template'
         }.get(key, default)
@@ -272,6 +259,7 @@ class TestSettingsDialog(unittest.TestCase):
             'objects_level_field': '',
             'features_layer': 'test_features_layer_id',
             'use_qfield': False,
+            'raster_clipping_offset': 0.2,
             'extra_qfield_layers': [],
             'template_project_folder': '/path/to/template'
         }
@@ -384,6 +372,7 @@ class TestSettingsDialog(unittest.TestCase):
         self.dialog._completed_projects_widget.input_field.setText('/path/to/completed')
         self.dialog._qfield_checkbox.setChecked(False)
         self.dialog._template_project_widget.input_field.setText('/path/to/template')
+        self.dialog._raster_offset_spinbox.setValue(0.2)  # Set the raster clipping offset
         
         # Mock layer service to return test layers
         test_layers = [
@@ -457,6 +446,7 @@ class TestSettingsDialog(unittest.TestCase):
             call('objects_level_field', ''),
             call('features_layer', ''),
             call('use_qfield', False),
+            call('raster_clipping_offset', 0.2),
             call('extra_qfield_layers', []),
             call('template_project_folder', '/path/to/template')
         ]

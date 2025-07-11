@@ -179,6 +179,10 @@ class SettingsDialog(QtWidgets.QDialog):
         self._qfield_checkbox = QtWidgets.QCheckBox("Use QField for field data collection")
         settings_layout.addRow("QField Integration:", self._qfield_checkbox)
         
+        # Raster clipping offset for QField projects
+        self._raster_offset_widget = self._create_raster_offset_widget()
+        settings_layout.addRow("Raster Clipping Offset:", self._raster_offset_widget)
+        
         # Extra layers for QField projects
         self._extra_layers_widget = self._create_extra_layers_widget()
         settings_layout.addRow("Extra QField Layers:", self._extra_layers_widget)
@@ -301,6 +305,37 @@ class SettingsDialog(QtWidgets.QDialog):
         
         # Store reference to refresh button
         widget.refresh_button = refresh_button
+        
+        return widget
+    
+    def _create_raster_offset_widget(self) -> QtWidgets.QWidget:
+        """Create a widget for configuring raster clipping offset."""
+        widget = QtWidgets.QWidget()
+        layout = QtWidgets.QHBoxLayout(widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Description label
+        description_label = QtWidgets.QLabel(
+            "Offset in meters to expand the clipping area around recording areas when creating QField projects. "
+            "This ensures the background image extends slightly beyond the recording area boundary."
+        )
+        description_label.setWordWrap(True)
+        description_label.setStyleSheet("color: gray; font-size: 11px;")
+        layout.addWidget(description_label)
+        
+        # Spacer
+        layout.addStretch()
+        
+        # Spin box for offset value
+        self._raster_offset_spinbox = QtWidgets.QDoubleSpinBox()
+        self._raster_offset_spinbox.setMinimum(0.0)
+        self._raster_offset_spinbox.setMaximum(100.0)
+        self._raster_offset_spinbox.setSingleStep(0.1)
+        self._raster_offset_spinbox.setDecimals(2)
+        self._raster_offset_spinbox.setSuffix(" m")
+        self._raster_offset_spinbox.setValue(0.2)  # Default 20 cm
+        self._raster_offset_spinbox.setMinimumWidth(100)
+        layout.addWidget(self._raster_offset_spinbox)
         
         return widget
     
@@ -609,6 +644,10 @@ class SettingsDialog(QtWidgets.QDialog):
             use_qfield = self._settings_manager.get_value('use_qfield', False)
             self._qfield_checkbox.setChecked(bool(use_qfield))
             
+            # Load raster clipping offset
+            raster_offset = self._settings_manager.get_value('raster_clipping_offset', 0.2)
+            self._raster_offset_spinbox.setValue(float(raster_offset))
+            
             # Load extra layers for QField
             extra_layers = self._settings_manager.get_value('extra_qfield_layers', [])
             self._refresh_extra_layers_list()  # Populate the list
@@ -638,6 +677,7 @@ class SettingsDialog(QtWidgets.QDialog):
                 'objects_level_field': self._settings_manager.get_value('objects_level_field', ''),
                 'features_layer': features_layer_id,
                 'use_qfield': bool(use_qfield),
+                'raster_clipping_offset': float(raster_offset),
                 'extra_qfield_layers': extra_layers,
                 'template_project_folder': template_project_path
             }
@@ -661,6 +701,7 @@ class SettingsDialog(QtWidgets.QDialog):
                 'objects_level_field': self._level_field_combo.currentData(),
                 'features_layer': self._features_widget.combo_box.currentData(),
                 'use_qfield': self._qfield_checkbox.isChecked(),
+                'raster_clipping_offset': self._raster_offset_spinbox.value(),
                 'extra_qfield_layers': self._get_selected_extra_layers(),
                 'template_project_folder': self._template_project_widget.input_field.text()
             }
@@ -704,6 +745,9 @@ class SettingsDialog(QtWidgets.QDialog):
             )
             self._qfield_checkbox.setChecked(
                 self._original_values.get('use_qfield', False)
+            )
+            self._raster_offset_spinbox.setValue(
+                self._original_values.get('raster_clipping_offset', 0.2)
             )
             self._template_project_widget.input_field.setText(
                 self._original_values.get('template_project_folder', '')

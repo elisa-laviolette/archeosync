@@ -2,6 +2,34 @@
 
 All notable changes to the ArcheoSync QGIS plugin will be documented in this file.
 
+## [0.9.0] - 2025-07-11
+
+### New Features
+
+- **Raster Clipping for QField Projects**: Added automatic background image clipping to recording areas when creating QField projects
+  - Configurable offset (default: 20 cm) to expand clipping area beyond recording area boundary
+  - Uses GDAL tools (gdalwarp) for precise raster clipping with -cutline and -crop_to_cutline options
+  - Original raster remains unchanged; clipped version is used only for QField projects
+  - Automatic cleanup of temporary clipped rasters after project creation
+  - Settings dialog includes new "Raster Clipping Offset" configuration option
+  - Comprehensive error handling and GDAL availability checking
+
+### Technical Improvements
+
+- **Raster Processing Service**: New service for handling GDAL-based raster operations
+  - GDAL command line tool integration (gdalwarp, ogr2ogr)
+  - Temporary file management and cleanup
+  - Coordinate system handling and WKT to GeoJSON conversion
+  - Comprehensive test coverage for all raster processing operations
+- **Enhanced QField Service**: Integrated raster processing into QField project creation workflow
+  - Automatic raster clipping before project packaging
+  - Layer configuration to use clipped raster instead of original
+  - Proper cleanup of temporary layers and files
+- **Settings Management**: Added raster clipping offset configuration
+  - New setting: `raster_clipping_offset` (default: 0.2 meters)
+  - Settings dialog includes user-friendly configuration widget
+  - Proper validation and persistence of offset values
+
 ## [0.8.0] - 2025-07-11
 
 ### New Features
