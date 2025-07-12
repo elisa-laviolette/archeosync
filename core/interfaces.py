@@ -631,4 +631,18 @@ class IRasterProcessingService(ABC):
             This method should attempt to run version commands for both tools
             to verify their availability and proper installation.
         """
+        pass
+    
+    @abstractmethod
+    def get_gdal_debug_info(self) -> str:
+        """
+        Get detailed debugging information about GDAL tool availability.
+        
+        Returns:
+            String containing detailed information about GDAL tool locations and availability
+            
+        Note:
+            This method should provide comprehensive information about where
+            GDAL tools were searched and their availability status.
+        """
         pass 

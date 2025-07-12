@@ -1162,6 +1162,12 @@ class QGISQFieldService(IQFieldService):
                         project_file, feature_data, next_values
                     )
                 
+                # Ensure raster layer is visible in the QField project
+                if success and clipped_raster_layer_id:
+                    self._ensure_raster_visibility_in_qfield_project(
+                        project_file, clipped_raster_layer_id
+                    )
+                
                 return success
                 
             finally:
@@ -1319,6 +1325,15 @@ class QGISQFieldService(IQFieldService):
             # Check if GDAL is available
             if not self._raster_processing_service.is_gdal_available():
                 print("Warning: GDAL command line tools not available")
+                print("This will prevent background image clipping for QField projects.")
+                print("To enable raster clipping, ensure gdalwarp and ogr2ogr are available.")
+                
+                # Provide debugging information if available
+                if hasattr(self._raster_processing_service, 'get_gdal_debug_info'):
+                    debug_info = self._raster_processing_service.get_gdal_debug_info()
+                    print("\nGDAL Debug Information:")
+                    print(debug_info)
+                
                 return None
             
             # Get raster clipping offset from settings
@@ -1354,11 +1369,85 @@ class QGISQFieldService(IQFieldService):
             QgsProject.instance().addMapLayer(clipped_layer)
             print(f"[DEBUG] Added clipped raster layer to project: id={clipped_layer.id()}, name={clipped_layer.name()}")
             
+            # Ensure the layer is visible in the layer tree
+            try:
+                from qgis.core import QgsLayerTreeLayer
+                layer_tree_root = QgsProject.instance().layerTreeRoot()
+                
+                # Find the layer node in the tree
+                layer_node = layer_tree_root.findLayer(clipped_layer.id())
+                if layer_node:
+                    # Set the layer as visible
+                    layer_node.setItemVisibilityChecked(True)
+                    print(f"[DEBUG] Set raster layer visibility to True: {clipped_layer.name()}")
+                    
+                    # Move the layer to the bottom of the tree
+                    try:
+                        # Clone the node and insert at the bottom
+                        layer_node_clone = layer_node.clone()
+                        layer_tree_root.addChildNode(layer_node_clone)
+                        # Remove the original node
+                        layer_node.parent().removeChildNode(layer_node)
+                        print(f"[DEBUG] Moved raster layer to bottom of tree: {clipped_layer.name()}")
+                    except Exception as e:
+                        print(f"[DEBUG] Could not move layer to bottom: {str(e)}")
+                else:
+                    print(f"[DEBUG] Could not find layer node in tree for: {clipped_layer.name()}")
+            except Exception as e:
+                print(f"[DEBUG] Could not set layer visibility: {str(e)}")
+            
+            # Set QFieldSync-specific property to ensure visibility in QField project
+            try:
+                # Set a custom property that QFieldSync might use to determine visibility
+                clipped_layer.setCustomProperty("QFieldSync/visible", True)
+                print(f"[DEBUG] Set QFieldSync visible property for: {clipped_layer.name()}")
+            except Exception as e:
+                print(f"[DEBUG] Could not set QFieldSync visible property: {str(e)}")
+            
             return clipped_layer.id()
             
         except Exception as e:
             print(f"Error processing background raster: {str(e)}")
             return None
+    
+    def _ensure_raster_visibility_in_qfield_project(self, project_file: str, raster_layer_id: str) -> None:
+        """
+        Ensure the raster layer is visible in the QField project file.
+        
+        Args:
+            project_file: Path to the QField project file
+            raster_layer_id: ID of the raster layer to make visible
+        """
+        try:
+            # Load the QField project
+            qfield_project = QgsProject()
+            if not qfield_project.read(project_file):
+                print(f"Warning: Could not read QField project: {project_file}")
+                return
+            
+            # Find the raster layer in the project
+            raster_layer = qfield_project.mapLayer(raster_layer_id)
+            if not raster_layer:
+                print(f"Warning: Could not find raster layer {raster_layer_id} in QField project")
+                return
+            
+            # Ensure the layer is visible in the layer tree
+            layer_tree_root = qfield_project.layerTreeRoot()
+            layer_node = layer_tree_root.findLayer(raster_layer_id)
+            if layer_node:
+                layer_node.setItemVisibilityChecked(True)
+                print(f"[DEBUG] Set raster layer visibility in QField project: {raster_layer.name()}")
+            else:
+                print(f"[DEBUG] Could not find layer node in QField project for: {raster_layer.name()}")
+            
+            # Save the updated project
+            if not qfield_project.write(project_file):
+                print(f"Warning: Could not save updated QField project: {project_file}")
+            else:
+                print(f"[DEBUG] Successfully updated QField project with visible raster layer")
+                
+        except Exception as e:
+            print(f"Error ensuring raster visibility in QField project: {str(e)}")
     
     def _cleanup_clipped_raster(self, clipped_layer_id: str) -> None:
         """

@@ -42,7 +42,7 @@ The service automatically:
 import os
 import tempfile
 import subprocess
-from typing import Optional, Any
+from typing import Optional, Any, List
 from qgis.core import QgsRasterLayer, QgsGeometry, QgsProject
 
 try:
@@ -308,8 +308,6 @@ class QGISRasterProcessingService(IRasterProcessingService):
                 print(f"Cutline projection file does not exist: {prj_file}")
                 return False
             
-
-            
             # Detect actual layer name in shapefile
             try:
                 from osgeo import ogr
@@ -320,9 +318,15 @@ class QGISRasterProcessingService(IRasterProcessingService):
                 print(f"Could not detect cutline layer name, defaulting to 'temp_clip': {e}")
                 layer_name = 'temp_clip'
             
+            # Get gdalwarp path
+            gdalwarp_path = self._get_gdal_tool_path('gdalwarp')
+            if not gdalwarp_path:
+                print("Error: gdalwarp not found")
+                return False
+            
             # Build gdalwarp command with explicit SRS and detected cutline layer name
             cmd = [
-                'gdalwarp',
+                gdalwarp_path,
                 '-s_srs', raster_crs_authid,
                 '-t_srs', raster_crs_authid,
                 '-cutline', cutline_shapefile,
@@ -337,7 +341,8 @@ class QGISRasterProcessingService(IRasterProcessingService):
                 cmd,
                 capture_output=True,
                 text=True,
-                check=False
+                check=False,
+                timeout=300  # 5 minute timeout
             )
             
             if result.returncode != 0:
@@ -346,6 +351,9 @@ class QGISRasterProcessingService(IRasterProcessingService):
             
             return True
             
+        except subprocess.TimeoutExpired:
+            print("GDAL warp operation timed out")
+            return False
         except Exception as e:
             print(f"Error executing gdalwarp: {str(e)}")
             return False
@@ -373,6 +381,12 @@ class QGISRasterProcessingService(IRasterProcessingService):
             Requires ogr2ogr command-line tool to be available in the system PATH.
         """
         try:
+            # Get ogr2ogr path
+            ogr2ogr_path = self._get_gdal_tool_path('ogr2ogr')
+            if not ogr2ogr_path:
+                print("Error: ogr2ogr not found")
+                return False
+            
             # Create GeoJSON content
             geojson_content = f'''{{
                 "type": "FeatureCollection",
@@ -399,7 +413,7 @@ class QGISRasterProcessingService(IRasterProcessingService):
                 
                 # Build ogr2ogr command
                 cmd = [
-                    'ogr2ogr',
+                    ogr2ogr_path,
                     '-f', 'ESRI Shapefile',
                     '-t_srs', crs,
                     output_shapefile,
@@ -411,7 +425,8 @@ class QGISRasterProcessingService(IRasterProcessingService):
                     cmd,
                     capture_output=True,
                     text=True,
-                    check=False
+                    check=False,
+                    timeout=60  # 1 minute timeout
                 )
                 
                 if result.returncode != 0:
@@ -425,6 +440,9 @@ class QGISRasterProcessingService(IRasterProcessingService):
                 if os.path.exists(temp_geojson):
                     os.remove(temp_geojson)
                     
+        except subprocess.TimeoutExpired:
+            print("ogr2ogr operation timed out")
+            return False
         except Exception as e:
             print(f"Error executing ogr2ogr: {str(e)}")
             return False
@@ -496,8 +514,9 @@ class QGISRasterProcessingService(IRasterProcessingService):
         """
         Check if GDAL command line tools are available.
         
-        Verifies that both gdalwarp and ogr2ogr command-line tools are available
-        in the system PATH. These tools are required for raster clipping operations.
+        Verifies that both gdalwarp and ogr2ogr command-line tools are available.
+        This method searches for GDAL tools in common QGIS installation paths
+        and falls back to system PATH.
         
         Returns:
             True if both gdalwarp and ogr2ogr are available, False otherwise
@@ -507,26 +526,272 @@ class QGISRasterProcessingService(IRasterProcessingService):
             their availability and proper installation.
         """
         try:
-            # Check gdalwarp
-            result = subprocess.run(
-                ['gdalwarp', '--version'],
-                capture_output=True,
-                text=True,
-                check=False
-            )
+            # Get potential GDAL tool paths
+            gdal_paths = self._get_gdal_tool_paths()
             
-            if result.returncode != 0:
+            # Check gdalwarp
+            gdalwarp_available = self._check_gdal_tool('gdalwarp', gdal_paths)
+            if not gdalwarp_available:
+                print("Warning: gdalwarp not found in any of the searched paths")
                 return False
             
             # Check ogr2ogr
+            ogr2ogr_available = self._check_gdal_tool('ogr2ogr', gdal_paths)
+            if not ogr2ogr_available:
+                print("Warning: ogr2ogr not found in any of the searched paths")
+                return False
+            
+            return True
+            
+        except Exception as e:
+            print(f"Error checking GDAL availability: {str(e)}")
+            return False
+    
+    def _get_gdal_tool_paths(self) -> List[str]:
+        """
+        Get potential paths where GDAL tools might be located.
+        
+        Returns:
+            List of potential paths to search for GDAL tools
+        """
+        paths = []
+        
+        # Add current PATH
+        paths.extend(os.environ.get('PATH', '').split(os.pathsep))
+        
+        # Platform-specific paths
+        import platform
+        system = platform.system()
+        
+        if system == "Darwin":  # macOS
+            # Common QGIS installation paths on macOS
+            qgis_paths = [
+                '/Applications/QGIS.app/Contents/MacOS',
+                '/Applications/QGIS.app/Contents/Frameworks',
+                '/Applications/QGIS.app/Contents/Resources',
+                '/Applications/QGIS.app/Contents/MacOS/bin',
+                '/Applications/QGIS.app/Contents/Frameworks/bin',
+                '/Applications/QGIS.app/Contents/Resources/bin',
+            ]
+            
+            # Common GDAL installation paths on macOS
+            gdal_paths = [
+                '/Applications/Postgres.app/Contents/Versions/latest/bin',
+                '/usr/local/bin',
+                '/opt/homebrew/bin',
+                '/opt/local/bin',
+                '/usr/bin',
+            ]
+            
+        elif system == "Windows":
+            # Common QGIS installation paths on Windows
+            qgis_paths = [
+                'C:\\Program Files\\QGIS*/apps\\qgis\\bin',
+                'C:\\Program Files\\QGIS*/apps\\qgis-ltr\\bin',
+                'C:\\OSGeo4W*/bin',
+                'C:\\OSGeo4W*/apps\\qgis\\bin',
+            ]
+            
+            # Common GDAL installation paths on Windows
+            gdal_paths = [
+                'C:\\Program Files\\GDAL\\bin',
+                'C:\\OSGeo4W*/bin',
+            ]
+            
+        else:  # Linux
+            # Common QGIS installation paths on Linux
+            qgis_paths = [
+                '/usr/bin',
+                '/usr/local/bin',
+                '/opt/qgis/bin',
+                '/usr/share/qgis/bin',
+            ]
+            
+            # Common GDAL installation paths on Linux
+            gdal_paths = [
+                '/usr/bin',
+                '/usr/local/bin',
+                '/opt/gdal/bin',
+            ]
+        
+        # Add QGIS and GDAL paths
+        paths.extend(qgis_paths)
+        paths.extend(gdal_paths)
+        
+        # Remove duplicates while preserving order
+        seen = set()
+        unique_paths = []
+        for path in paths:
+            if path and path not in seen:
+                seen.add(path)
+                unique_paths.append(path)
+        
+        return unique_paths
+    
+    def _check_gdal_tool(self, tool_name: str, search_paths: List[str]) -> bool:
+        """
+        Check if a specific GDAL tool is available in the given paths.
+        
+        Args:
+            tool_name: Name of the GDAL tool (e.g., 'gdalwarp', 'ogr2ogr')
+            search_paths: List of paths to search for the tool
+            
+        Returns:
+            True if the tool is available and working, False otherwise
+        """
+        # First try the tool name directly (uses PATH)
+        try:
             result = subprocess.run(
-                ['ogr2ogr', '--version'],
+                [tool_name, '--version'],
                 capture_output=True,
                 text=True,
-                check=False
+                check=False,
+                timeout=10
             )
+            if result.returncode == 0:
+                return True
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+            pass
+        
+        # Try specific paths
+        for path in search_paths:
+            if not path or not os.path.exists(path):
+                continue
+                
+            tool_path = os.path.join(path, tool_name)
+            if os.path.exists(tool_path) and os.access(tool_path, os.X_OK):
+                try:
+                    result = subprocess.run(
+                        [tool_path, '--version'],
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                        timeout=10
+                    )
+                    if result.returncode == 0:
+                        print(f"Found {tool_name} at: {tool_path}")
+                        return True
+                except (subprocess.TimeoutExpired, OSError):
+                    continue
+        
+        return False 
+    
+    def _get_gdal_tool_path(self, tool_name: str) -> Optional[str]:
+        """
+        Get the full path to a GDAL tool.
+        
+        Args:
+            tool_name: Name of the GDAL tool (e.g., 'gdalwarp', 'ogr2ogr')
             
-            return result.returncode == 0
+        Returns:
+            Full path to the tool if found, None otherwise
+        """
+        # First try the tool name directly (uses PATH)
+        try:
+            result = subprocess.run(
+                [tool_name, '--version'],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=10
+            )
+            if result.returncode == 0:
+                return tool_name
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+            pass
+        
+        # Try specific paths
+        gdal_paths = self._get_gdal_tool_paths()
+        for path in gdal_paths:
+            if not path or not os.path.exists(path):
+                continue
+                
+            tool_path = os.path.join(path, tool_name)
+            if os.path.exists(tool_path) and os.access(tool_path, os.X_OK):
+                try:
+                    result = subprocess.run(
+                        [tool_path, '--version'],
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                        timeout=10
+                    )
+                    if result.returncode == 0:
+                        return tool_path
+                except (subprocess.TimeoutExpired, OSError):
+                    continue
+        
+        return None 
+    
+    def get_gdal_debug_info(self) -> str:
+        """
+        Get detailed debugging information about GDAL tool availability.
+        
+        Returns:
+            String containing detailed information about GDAL tool locations and availability
+        """
+        info = []
+        info.append("=== GDAL Tool Debug Information ===")
+        
+        # Check PATH
+        path_env = os.environ.get('PATH', '')
+        info.append(f"PATH environment variable: {path_env}")
+        
+        # Get all potential paths
+        gdal_paths = self._get_gdal_tool_paths()
+        info.append(f"Total paths to search: {len(gdal_paths)}")
+        
+        # Check each tool
+        for tool_name in ['gdalwarp', 'ogr2ogr']:
+            info.append(f"\n--- {tool_name} ---")
             
-        except Exception:
-            return False 
+            # Check direct PATH access
+            try:
+                result = subprocess.run(
+                    [tool_name, '--version'],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=5
+                )
+                if result.returncode == 0:
+                    info.append(f"✓ Found in PATH: {tool_name}")
+                    info.append(f"  Version output: {result.stdout.strip()}")
+                else:
+                    info.append(f"✗ Not found in PATH: {tool_name}")
+            except Exception as e:
+                info.append(f"✗ Error checking PATH for {tool_name}: {str(e)}")
+            
+            # Check specific paths
+            found_in_paths = []
+            for path in gdal_paths:
+                if not path or not os.path.exists(path):
+                    continue
+                    
+                tool_path = os.path.join(path, tool_name)
+                if os.path.exists(tool_path):
+                    if os.access(tool_path, os.X_OK):
+                        try:
+                            result = subprocess.run(
+                                [tool_path, '--version'],
+                                capture_output=True,
+                                text=True,
+                                check=False,
+                                timeout=5
+                            )
+                            if result.returncode == 0:
+                                found_in_paths.append(f"  ✓ {tool_path}")
+                            else:
+                                found_in_paths.append(f"  ✗ {tool_path} (execution failed)")
+                        except Exception as e:
+                            found_in_paths.append(f"  ✗ {tool_path} (error: {str(e)})")
+                    else:
+                        found_in_paths.append(f"  ✗ {tool_path} (not executable)")
+            
+            if found_in_paths:
+                info.append("Found in specific paths:")
+                info.extend(found_in_paths)
+            else:
+                info.append("Not found in any specific paths")
+        
+        return "\n".join(info) 
