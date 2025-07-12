@@ -444,7 +444,9 @@ class QGISQFieldService(IQFieldService):
                     export_title,
                     recording_area_feature.id() if hasattr(recording_area_feature, 'id') else None,
                     recording_areas_layer_id,
-                    extra_layers
+                    extra_layers,
+                    objects_layer_id,
+                    features_layer_id
                 )
                 
                 return success
@@ -482,7 +484,7 @@ class QGISQFieldService(IQFieldService):
             traceback.print_exc()
             return False
 
-    def _package_with_offline_converter(self, project, project_file, area_of_interest, area_of_interest_crs, attachment_dirs, offliner, export_type, dirs_to_copy, export_title, selected_feature_id=None, recording_areas_layer_id=None, extra_layers=None) -> bool:
+    def _package_with_offline_converter(self, project, project_file, area_of_interest, area_of_interest_crs, attachment_dirs, offliner, export_type, dirs_to_copy, export_title, selected_feature_id=None, recording_areas_layer_id=None, extra_layers=None, objects_layer_id=None, features_layer_id=None) -> bool:
         """
         Use QFieldSync's OfflineConverter to package the project.
         """
@@ -504,11 +506,18 @@ class QGISQFieldService(IQFieldService):
             # Store references to original layers that will be used directly in QField project
             original_layers_to_clear = {}
             print(f"DEBUG: Creating original_layers_to_clear dictionary")
-            for layer in project.mapLayers().values():
-                print(f"DEBUG: Checking layer: {layer.name()} (type: {type(layer)})")
-                if layer.name() in ["Objects", "Features"]:
-                    original_layers_to_clear[layer.name()] = layer
-                    print(f"DEBUG: Added {layer.name()} to original_layers_to_clear")
+            
+            # Find the objects and features layers by their IDs
+            objects_layer = project.mapLayer(objects_layer_id) if objects_layer_id else None
+            features_layer = project.mapLayer(features_layer_id) if features_layer_id else None
+            
+            if objects_layer:
+                original_layers_to_clear[objects_layer.name()] = objects_layer
+                print(f"DEBUG: Added objects layer '{objects_layer.name()}' (ID: {objects_layer_id}) to original_layers_to_clear")
+            
+            if features_layer:
+                original_layers_to_clear[features_layer.name()] = features_layer
+                print(f"DEBUG: Added features layer '{features_layer.name()}' (ID: {features_layer_id}) to original_layers_to_clear")
             
             print(f"DEBUG: original_layers_to_clear keys: {list(original_layers_to_clear.keys())}")
             print(f"DEBUG: original_layers_to_clear type: {type(original_layers_to_clear)}")
@@ -593,11 +602,28 @@ class QGISQFieldService(IQFieldService):
             for layer in qfield_project.mapLayers().values():
                 if isinstance(layer, QgsVectorLayer):
                     layer_name = layer.name()
-                    print(f"DEBUG: Checking layer: {layer_name}")
+                    layer_id = layer.id()
+                    print(f"DEBUG: Checking layer: {layer_name} (ID: {layer_id})")
                     
-                    # Check if this is one of our original layers
+                    # Check if this is one of our original layers by name or by checking if it's an offline layer
+                    should_clear = False
+                    clear_reason = ""
+                    
+                    # First, check by exact name match
                     if layer_name in original_layers_to_clear:
-                        print(f"DEBUG: Found original layer to clear: {layer_name}")
+                        should_clear = True
+                        clear_reason = "exact name match"
+                    # Second, check if this is an offline layer (which would be our objects/features layers)
+                    elif layer.customProperty("qfieldsync/is_offline_editable"):
+                        should_clear = True
+                        clear_reason = "offline editable layer"
+                    # Third, check by layer name patterns (case-insensitive)
+                    elif any(name.lower() in layer_name.lower() for name in ["objects", "objets", "features", "fugaces"]):
+                        should_clear = True
+                        clear_reason = "name pattern match"
+                    
+                    if should_clear:
+                        print(f"DEBUG: Found layer to clear: {layer_name} (reason: {clear_reason})")
                         
                         # Start editing
                         layer.startEditing()
@@ -621,7 +647,7 @@ class QGISQFieldService(IQFieldService):
                             print(f"DEBUG: Failed to commit changes to {layer_name}")
                             layer.rollBack()
                     else:
-                        print(f"DEBUG: Skipping layer {layer_name} (not in original_layers_to_clear)")
+                        print(f"DEBUG: Skipping layer {layer_name} (not identified for clearing)")
             
             # Save the updated project
             print(f"DEBUG: Saving updated QField project...")
@@ -1125,7 +1151,9 @@ class QGISQFieldService(IQFieldService):
                     export_title,
                     feature_data.get('id', None),
                     recording_areas_layer_id,
-                    extra_layers
+                    extra_layers,
+                    objects_layer_id,
+                    features_layer_id
                 )
                 
                 if success and add_variables:
