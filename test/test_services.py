@@ -1156,7 +1156,7 @@ class TestQGISLayerService(unittest.TestCase):
         with patch.object(self.layer_service, 'get_layer_fields', return_value=field_info):
             # Test numeric string
             result = self.layer_service.calculate_next_level('5', 'level_field', 'objects_layer_id')
-            self.assertEqual(result, '6')
+            self.assertEqual(result, '6')  # Should increment numerically
             
             # Test mixed content
             result = self.layer_service.calculate_next_level('Level A', 'level_field', 'objects_layer_id')
@@ -1222,7 +1222,7 @@ class TestQGISLayerService(unittest.TestCase):
             
             # Test with mixed content
             result = self.layer_service.calculate_next_level('A1', 'level_field', 'objects_layer_id')
-            self.assertEqual(result, 'A11')  # Should append '1'
+            self.assertEqual(result, 'A2')  # Should increment to 'A2'
 
 
 class TestQGISTranslationService(unittest.TestCase):

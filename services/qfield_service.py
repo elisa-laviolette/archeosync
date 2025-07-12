@@ -37,6 +37,7 @@ import os
 from typing import Optional, Any, Dict, List
 from qgis.core import QgsProject, QgsVectorLayer, QgsRasterLayer, QgsFeature, QgsGeometry, QgsWkbTypes
 from qgis.PyQt.QtWidgets import QMessageBox
+from qgis.PyQt.QtGui import QColor
 
 try:
     from ..core.interfaces import IQFieldService, ISettingsManager, ILayerService, ValidationResult
@@ -326,29 +327,15 @@ class QGISQFieldService(IQFieldService):
             created_empty_layers = []
             
             try:
-                # Create empty objects layer for offline editing
-                empty_objects_layer_id = self._layer_service.create_empty_layer_copy(
-                    objects_layer_id, 
-                    "Objects"
-                )
-                if empty_objects_layer_id:
-                    created_empty_layers.append(empty_objects_layer_id)
-                    print(f"Created empty objects layer: {empty_objects_layer_id}")
-                else:
-                    print("Warning: Failed to create empty objects layer")
+                # Use original layers directly for offline editing (no need to create copies)
+                empty_objects_layer_id = objects_layer_id
+                print(f"Using original objects layer directly: {empty_objects_layer_id}")
                 
-                # Create empty features layer for offline editing if features layer is configured
+                # Use original features layer directly if features layer is configured
                 empty_features_layer_id = None
                 if features_layer_id:
-                    empty_features_layer_id = self._layer_service.create_empty_layer_copy(
-                        features_layer_id, 
-                        "Features"
-                    )
-                    if empty_features_layer_id:
-                        created_empty_layers.append(empty_features_layer_id)
-                        print(f"Created empty features layer: {empty_features_layer_id}")
-                    else:
-                        print("Warning: Failed to create empty features layer")
+                    empty_features_layer_id = features_layer_id
+                    print(f"Using original features layer directly: {empty_features_layer_id}")
                 
                 # Configure QFieldSync layer settings for all layers
                 for layer in original_project.mapLayers().values():
@@ -474,6 +461,8 @@ class QGISQFieldService(IQFieldService):
                         print(f"Warning: Could not restore layer configuration for {layer_id}: {str(e)}")
                 
                 # Remove the created empty layers from the main QGIS project
+                # Note: These layers must remain in the project during QFieldSync packaging
+                # They will be removed after the packaging is complete
                 for layer_id in created_empty_layers:
                     try:
                         if self._layer_service.remove_layer_from_project(layer_id):
@@ -495,8 +484,40 @@ class QGISQFieldService(IQFieldService):
         Use QFieldSync's OfflineConverter to package the project.
         """
         try:
+            print(f"DEBUG: Starting _package_with_offline_converter")
+            print(f"DEBUG: project type: {type(project)}")
+            print(f"DEBUG: project_file type: {type(project_file)}")
+            print(f"DEBUG: area_of_interest type: {type(area_of_interest)}")
+            print(f"DEBUG: area_of_interest_crs type: {type(area_of_interest_crs)}")
+            print(f"DEBUG: attachment_dirs type: {type(attachment_dirs)}")
+            print(f"DEBUG: offliner type: {type(offliner)}")
+            print(f"DEBUG: export_type type: {type(export_type)}")
+            print(f"DEBUG: dirs_to_copy type: {type(dirs_to_copy)}")
+            print(f"DEBUG: export_title type: {type(export_title)}")
+            
+            # Store references to original layers that will be used directly in QField project
+            original_layers_to_clear = {}
+            print(f"DEBUG: Creating original_layers_to_clear dictionary")
+            for layer in project.mapLayers().values():
+                print(f"DEBUG: Checking layer: {layer.name()} (type: {type(layer)})")
+                if layer.name() in ["Objects", "Features"]:
+                    original_layers_to_clear[layer.name()] = layer
+                    print(f"DEBUG: Added {layer.name()} to original_layers_to_clear")
+            
+            print(f"DEBUG: original_layers_to_clear keys: {list(original_layers_to_clear.keys())}")
+            print(f"DEBUG: original_layers_to_clear type: {type(original_layers_to_clear)}")
+            
+            # Verify original layers are found
+            for layer_name, layer in original_layers_to_clear.items():
+                print(f"DEBUG: Found original layer for {layer_name}")
+                if layer.renderer():
+                    print(f"DEBUG: {layer_name} has renderer: {type(layer.renderer())}")
+                else:
+                    print(f"DEBUG: {layer_name} has no renderer")
+            
             # Create the converter with proper parameters
             # Following the QFieldSync pattern from package_dialog.py
+            print(f"DEBUG: Creating OfflineConverter")
             converter = OfflineConverter(
                 project,
                 project_file,
@@ -505,23 +526,339 @@ class QGISQFieldService(IQFieldService):
                 attachment_dirs,
                 offliner,
                 export_type,
+                create_basemap=True,
                 dirs_to_copy=dirs_to_copy,
-                export_title=export_title,
+                export_title=export_title
             )
             
-            # Convert the project
-            converter.convert()
-            return True
+            # Run the conversion
+            print(f"DEBUG: Running converter.convert()")
+            success = converter.convert()
+            print(f"DEBUG: converter.convert() returned: {success}")
+            print(f"DEBUG: converter.convert() type: {type(success)}")
+            if success is None:
+                print(f"DEBUG: converter.convert() returned None, treating as success")
+                success = True
             
-        except PackagingCanceledException:
-            print("Packaging was canceled.")
-            return False
+            if success:
+                # Clear data from original layers in the QField project
+                print(f"DEBUG: Calling _clear_data_from_original_layers")
+                self._clear_data_from_original_layers(project_file, original_layers_to_clear)
+            else:
+                print(f"DEBUG: Converter.convert() returned False, skipping data clearing")
+            
+            return success
+            
         except Exception as e:
-            print(f"Error in OfflineConverter: {str(e)}")
-            print(f"Error type: {type(e)}")
+            print(f"Error in _package_with_offline_converter: {str(e)}")
             import traceback
             traceback.print_exc()
             return False
+    
+    def _clear_data_from_original_layers(self, project_file: str, original_layers_to_clear: Dict[str, QgsVectorLayer]) -> None:
+        """
+        Clear data from original layers in the QField project while preserving symbology.
+        This method removes all features from the original layers that were used directly
+        in the QField project, keeping their symbology, form configuration, and field properties.
+        """
+        try:
+            print(f"DEBUG: Starting data clearing from original layers")
+            print(f"DEBUG: Project file: {project_file}")
+            print(f"DEBUG: Original layers to clear: {list(original_layers_to_clear.keys())}")
+            
+            # Load the QField project
+            qfield_project = QgsProject()
+            if not qfield_project.read(project_file):
+                print(f"DEBUG: Could not read QField project file: {project_file}")
+                return
+            
+            print(f"DEBUG: Successfully loaded QField project with {len(qfield_project.mapLayers())} layers")
+            
+            # Find and clear data from the original layers in the project
+            for layer in qfield_project.mapLayers().values():
+                if isinstance(layer, QgsVectorLayer):
+                    layer_name = layer.name()
+                    print(f"DEBUG: Checking layer: {layer_name}")
+                    
+                    # Check if this is one of our original layers
+                    if layer_name in original_layers_to_clear:
+                        print(f"DEBUG: Found original layer to clear: {layer_name}")
+                        
+                        # Start editing
+                        layer.startEditing()
+                        
+                        # Get all feature IDs
+                        feature_ids = [f.id() for f in layer.getFeatures()]
+                        print(f"DEBUG: Found {len(feature_ids)} features to delete in {layer_name}")
+                        
+                        # Delete all features
+                        if feature_ids:
+                            success = layer.deleteFeatures(feature_ids)
+                            if success:
+                                print(f"DEBUG: Successfully deleted {len(feature_ids)} features from {layer_name}")
+                            else:
+                                print(f"DEBUG: Failed to delete features from {layer_name}")
+                        
+                        # Commit changes
+                        if layer.commitChanges():
+                            print(f"DEBUG: Successfully committed changes to {layer_name}")
+                        else:
+                            print(f"DEBUG: Failed to commit changes to {layer_name}")
+                            layer.rollBack()
+                    else:
+                        print(f"DEBUG: Skipping layer {layer_name} (not in original_layers_to_clear)")
+            
+            # Save the updated project
+            print(f"DEBUG: Saving updated QField project...")
+            if qfield_project.write(project_file):
+                print(f"DEBUG: Successfully saved updated QField project")
+            else:
+                print(f"DEBUG: Failed to save updated QField project")
+            
+        except Exception as e:
+            print(f"DEBUG: Error clearing data from original layers: {str(e)}")
+            import traceback
+            traceback.print_exc()
+    
+    def _apply_symbology_to_project_file(self, project_file: str, symbology_data: Dict[str, Dict[str, Any]]) -> None:
+        """
+        Apply symbology directly to the project file by loading it and updating the layers.
+        This is an alternative approach to ensure symbology is preserved.
+        """
+        try:
+            print(f"DEBUG: Starting project file symbology application")
+            print(f"DEBUG: Project file: {project_file}")
+            
+            # Load the QField project
+            qfield_project = QgsProject()
+            if not qfield_project.read(project_file):
+                print(f"DEBUG: Could not read QField project file: {project_file}")
+                return
+            
+            print(f"DEBUG: Successfully loaded QField project with {len(qfield_project.mapLayers())} layers")
+            
+            # Find and update the offline layers in the project
+            for layer in qfield_project.mapLayers().values():
+                if isinstance(layer, QgsVectorLayer):
+                    layer_name = layer.name().lower()
+                    print(f"DEBUG: Checking layer: {layer.name()} (lowercase: {layer_name})")
+                    
+                    # Check if this is an Objects or Features layer
+                    if layer_name.startswith("objects") and "Objects" in symbology_data:
+                        print(f"DEBUG: Applying symbology to project Objects layer: {layer.name()}")
+                        self._apply_symbology_from_data(layer, symbology_data["Objects"])
+                    elif layer_name.startswith("features") and "Features" in symbology_data:
+                        print(f"DEBUG: Applying symbology to project Features layer: {layer.name()}")
+                        self._apply_symbology_from_data(layer, symbology_data["Features"])
+            
+            # Save the updated project
+            print(f"DEBUG: Saving updated project file...")
+            if qfield_project.write(project_file):
+                print(f"DEBUG: Successfully saved updated project file")
+            else:
+                print(f"DEBUG: Failed to save updated project file")
+                
+        except Exception as e:
+            print(f"DEBUG: Error applying symbology to project file: {str(e)}")
+            import traceback
+            traceback.print_exc()
+    
+    def _extract_layer_symbology(self, layer: QgsVectorLayer) -> Dict[str, Any]:
+        """
+        Extract symbology information from a layer and store it in a format that can be preserved.
+        This avoids issues with C++ object deletion.
+        """
+        try:
+            symbology_data = {}
+            
+            # Extract renderer information
+            if layer.renderer():
+                renderer = layer.renderer()
+                symbology_data['renderer_type'] = renderer.type()
+                
+                # For single symbol renderer, extract symbol information
+                if renderer.type() == 'singleSymbol':
+                    symbol = renderer.symbol()
+                    if symbol:
+                        symbology_data['symbol'] = {
+                            'type': symbol.symbolLayer(0).layerType() if symbol.symbolLayerCount() > 0 else 'SimpleMarker',
+                            'color': symbol.color().name(),
+                            'outline_color': symbol.symbolLayer(0).strokeColor().name() if symbol.symbolLayerCount() > 0 else '',
+                            'outline_width': symbol.symbolLayer(0).strokeWidth() if symbol.symbolLayerCount() > 0 else 0,
+                            'size': symbol.symbolLayer(0).size() if symbol.symbolLayerCount() > 0 else 1
+                        }
+            
+            # Extract form configuration
+            form_config = layer.editFormConfig()
+            symbology_data['form_config'] = {
+                'layout': form_config.layout(),
+                'suppress_form': form_config.suppress()
+            }
+            
+            # Extract field configurations
+            fields_data = {}
+            for i in range(layer.fields().count()):
+                field = layer.fields().field(i)
+                field_data = {
+                    'name': field.name(),
+                    'type': field.type(),
+                    'type_name': field.typeName(),
+                    'length': field.length(),
+                    'precision': field.precision(),
+                    'comment': field.comment(),
+                    'alias': field.alias()
+                }
+                
+                # Extract editor widget setup
+                editor_widget = layer.editorWidgetSetup(i)
+                if editor_widget.type() != 'Hidden':
+                    field_data['editor_widget'] = {
+                        'type': editor_widget.type(),
+                        'config': editor_widget.config()
+                    }
+                
+                # Extract default value definition
+                default_value = layer.defaultValueDefinition(i)
+                if default_value:
+                    field_data['default_value'] = {
+                        'expression': default_value.expression(),
+                        'apply_on_update': default_value.applyOnUpdate()
+                    }
+                
+                fields_data[field.name()] = field_data
+            
+            symbology_data['fields'] = fields_data
+            
+            print(f"DEBUG: Extracted symbology data for {layer.name()}")
+            return symbology_data
+            
+        except Exception as e:
+            print(f"DEBUG: Error extracting symbology from {layer.name()}: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return {}
+
+    def _apply_symbology_from_data(self, target_layer: QgsVectorLayer, symbology_data: Dict[str, Any]) -> None:
+        """
+        Apply symbology from extracted data to a target layer.
+        This avoids issues with C++ object deletion.
+        """
+        try:
+            print(f"DEBUG: Applying symbology data to {target_layer.name()}")
+            
+            # Apply renderer
+            if 'renderer_type' in symbology_data and symbology_data['renderer_type'] == 'singleSymbol':
+                if 'symbol' in symbology_data:
+                    symbol_data = symbology_data['symbol']
+                    
+                    # Create symbol based on type
+                    if symbol_data['type'] == 'SimpleFill':
+                        from qgis.core import QgsSimpleFillSymbolLayer, QgsFillSymbol
+                        symbol_layer = QgsSimpleFillSymbolLayer()
+                        symbol_layer.setColor(QColor(symbol_data['color']))
+                        symbol_layer.setStrokeColor(QColor(symbol_data['outline_color']))
+                        symbol_layer.setStrokeWidth(symbol_data['outline_width'])
+                        symbol = QgsFillSymbol([symbol_layer])
+                    elif symbol_data['type'] == 'SimpleMarker':
+                        from qgis.core import QgsSimpleMarkerSymbolLayer, QgsMarkerSymbol
+                        symbol_layer = QgsSimpleMarkerSymbolLayer()
+                        symbol_layer.setColor(QColor(symbol_data['color']))
+                        symbol_layer.setStrokeColor(QColor(symbol_data['outline_color']))
+                        symbol_layer.setStrokeWidth(symbol_data['outline_width'])
+                        symbol_layer.setSize(symbol_data['size'])
+                        symbol = QgsMarkerSymbol([symbol_layer])
+                    else:
+                        # Default to simple fill for polygons
+                        from qgis.core import QgsSimpleFillSymbolLayer, QgsFillSymbol
+                        symbol_layer = QgsSimpleFillSymbolLayer()
+                        symbol_layer.setColor(QColor(symbol_data['color']))
+                        symbol = QgsFillSymbol([symbol_layer])
+                    
+                    # Create renderer and apply
+                    from qgis.core import QgsSingleSymbolRenderer
+                    renderer = QgsSingleSymbolRenderer(symbol)
+                    target_layer.setRenderer(renderer)
+                    print(f"DEBUG: Applied renderer to {target_layer.name()}")
+            
+            # Apply form configuration
+            if 'form_config' in symbology_data:
+                form_config = target_layer.editFormConfig()
+                form_config.setLayout(symbology_data['form_config']['layout'])
+                form_config.setSuppress(symbology_data['form_config']['suppress_form'])
+                target_layer.setEditFormConfig(form_config)
+                print(f"DEBUG: Applied form configuration to {target_layer.name()}")
+            
+            # Apply field configurations
+            if 'fields' in symbology_data:
+                target_fields = target_layer.fields()
+                for field_name, field_data in symbology_data['fields'].items():
+                    field_idx = target_fields.indexFromName(field_name)
+                    if field_idx >= 0:
+                        # Apply editor widget setup
+                        if 'editor_widget' in field_data:
+                            from qgis.core import QgsEditorWidgetSetup
+                            widget_setup = QgsEditorWidgetSetup(
+                                field_data['editor_widget']['type'],
+                                field_data['editor_widget']['config']
+                            )
+                            target_layer.setEditorWidgetSetup(field_idx, widget_setup)
+                        
+                        # Apply default value definition
+                        if 'default_value' in field_data:
+                            from qgis.core import QgsDefaultValue
+                            default_value = QgsDefaultValue(
+                                field_data['default_value']['expression'],
+                                field_data['default_value']['apply_on_update']
+                            )
+                            target_layer.setDefaultValueDefinition(field_idx, default_value)
+                
+                print(f"DEBUG: Applied field configurations to {target_layer.name()}")
+            
+            print(f"DEBUG: Successfully applied symbology data to {target_layer.name()}")
+            
+        except Exception as e:
+            print(f"DEBUG: Error applying symbology data to {target_layer.name()}: {str(e)}")
+            import traceback
+            traceback.print_exc()
+
+    def _apply_symbology_to_layer(self, target_layer: QgsVectorLayer, source_layer: QgsVectorLayer) -> None:
+        """
+        Apply symbology from a source layer to a target layer.
+        This includes renderer, form configuration, and field properties.
+        """
+        try:
+            print(f"DEBUG: Applying symbology from {source_layer.name()} to {target_layer.name()}")
+            
+            # Copy renderer
+            if hasattr(source_layer, 'renderer') and source_layer.renderer():
+                target_layer.setRenderer(source_layer.renderer().clone())
+                print(f"DEBUG: Copied renderer from {source_layer.name()}")
+            else:
+                print(f"DEBUG: Source layer {source_layer.name()} has no renderer, skipping.")
+            
+            # Copy form configuration
+            if hasattr(source_layer, 'editFormConfig') and source_layer.editFormConfig():
+                target_layer.setEditFormConfig(source_layer.editFormConfig().clone())
+                print(f"DEBUG: Copied form config from {source_layer.name()}")
+            else:
+                print(f"DEBUG: Source layer {source_layer.name()} has no form config, skipping.")
+            
+            # Copy fields
+            target_layer.startEditing()
+            for field in source_layer.fields():
+                if not target_layer.fields().indexFromName(field.name()) >= 0:
+                    target_layer.addField(field)
+                    print(f"DEBUG: Added field {field.name()} to {target_layer.name()}")
+                else:
+                    print(f"DEBUG: Field {field.name()} already exists in {target_layer.name()}, skipping.")
+            
+            target_layer.commitChanges()
+            print(f"DEBUG: Copied fields from {source_layer.name()} to {target_layer.name()}")
+            
+        except Exception as e:
+            print(f"DEBUG: Error applying symbology to {target_layer.name()}: {str(e)}")
+            import traceback
+            traceback.print_exc()
     
     def package_for_qfield_with_data(self, 
                                    feature_data: Dict[str, Any],
@@ -590,29 +927,15 @@ class QGISQFieldService(IQFieldService):
             clipped_raster_layer_id = None
             
             try:
-                # Create empty objects layer for offline editing
-                empty_objects_layer_id = self._layer_service.create_empty_layer_copy(
-                    objects_layer_id, 
-                    "Objects"
-                )
-                if empty_objects_layer_id:
-                    created_empty_layers.append(empty_objects_layer_id)
-                    print(f"Created empty objects layer: {empty_objects_layer_id}")
-                else:
-                    print("Warning: Failed to create empty objects layer")
+                # Use original layers directly for offline editing (no need to create copies)
+                empty_objects_layer_id = objects_layer_id
+                print(f"Using original objects layer directly: {empty_objects_layer_id}")
                 
-                # Create empty features layer for offline editing if features layer is configured
+                # Use original features layer directly if features layer is configured
                 empty_features_layer_id = None
                 if features_layer_id:
-                    empty_features_layer_id = self._layer_service.create_empty_layer_copy(
-                        features_layer_id, 
-                        "Features"
-                    )
-                    if empty_features_layer_id:
-                        created_empty_layers.append(empty_features_layer_id)
-                        print(f"Created empty features layer: {empty_features_layer_id}")
-                    else:
-                        print("Warning: Failed to create empty features layer")
+                    empty_features_layer_id = features_layer_id
+                    print(f"Using original features layer directly: {empty_features_layer_id}")
                 
                 # Process background raster if specified
                 if background_layer_id:
@@ -810,6 +1133,8 @@ class QGISQFieldService(IQFieldService):
                         print(f"Warning: Could not restore layer configuration for {layer_id}: {str(e)}")
                 
                 # Remove the created empty layers from the main QGIS project
+                # Note: These layers must remain in the project during QFieldSync packaging
+                # They will be removed after the packaging is complete
                 for layer_id in created_empty_layers:
                     try:
                         if self._layer_service.remove_layer_from_project(layer_id):

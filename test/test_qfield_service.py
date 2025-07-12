@@ -97,7 +97,7 @@ class TestQFieldService:
     @patch('services.qfield_service.ExportType')
     @patch('services.qfield_service.QgisCoreOffliner')
     def test_package_for_qfield_with_empty_layers(self, mock_offliner, mock_export_type, mock_converter):
-        """Test QField packaging with empty layers creation."""
+        """Test QField packaging with original layers used directly."""
         # Mock ExportType
         mock_export_type.Cable = "Cable"
         
@@ -138,7 +138,6 @@ class TestQFieldService:
              patch('os.path.exists', return_value=False), \
              patch('os.makedirs'), \
              patch('os.path.join', side_effect=lambda *args: '/'.join(args)):
-            
             # Test packaging
             result = self.qfield_service.package_for_qfield(
                 recording_area_feature=mock_feature,
@@ -149,18 +148,18 @@ class TestQFieldService:
                 destination_folder="/test/destination",
                 project_name="TestProject"
             )
-            
-            # Verify empty layers were created
-            self.layer_service.create_empty_layer_copy.assert_called()
-            
-            # Verify empty layers were removed
-            self.layer_service.remove_layer_from_project.assert_called()
+            # Assert process completes successfully
+            assert result is True
+            # Assert create_empty_layer_copy is NOT called
+            self.layer_service.create_empty_layer_copy.assert_not_called()
+            # Assert remove_layer_from_project is NOT called
+            self.layer_service.remove_layer_from_project.assert_not_called()
 
     @patch('services.qfield_service.OfflineConverter')
     @patch('services.qfield_service.ExportType')
     @patch('services.qfield_service.QgisCoreOffliner')
     def test_package_for_qfield_without_features_layer(self, mock_offliner, mock_export_type, mock_converter):
-        """Test QField packaging when features layer is not configured."""
+        """Test QField packaging when features layer is not configured, using original objects layer directly."""
         # Mock ExportType
         mock_export_type.Cable = "Cable"
         
@@ -201,22 +200,22 @@ class TestQFieldService:
              patch('os.path.exists', return_value=False), \
              patch('os.makedirs'), \
              patch('os.path.join', side_effect=lambda *args: '/'.join(args)):
-            
-            # Test packaging without features layer
+            # Test packaging
             result = self.qfield_service.package_for_qfield(
                 recording_area_feature=mock_feature,
                 recording_areas_layer_id="recording_layer_id",
                 objects_layer_id="objects_layer_id",
-                features_layer_id=None,  # No features layer
+                features_layer_id=None,
                 background_layer_id=None,
                 destination_folder="/test/destination",
                 project_name="TestProject"
             )
-            
-            # Verify only objects layer was created (not features)
-            create_calls = self.layer_service.create_empty_layer_copy.call_args_list
-            assert len(create_calls) == 1  # Only objects layer
-            assert create_calls[0][0][1] == "Objects"  # Check layer name
+            # Assert process completes successfully
+            assert result is True
+            # Assert create_empty_layer_copy is NOT called
+            self.layer_service.create_empty_layer_copy.assert_not_called()
+            # Assert remove_layer_from_project is NOT called
+            self.layer_service.remove_layer_from_project.assert_not_called()
 
     def test_package_for_qfield_qfieldsync_not_available(self):
         """Test QField packaging when QFieldSync is not available."""

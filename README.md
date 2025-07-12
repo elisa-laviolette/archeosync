@@ -48,7 +48,11 @@ A QGIS plugin for archaeologists to prepare data for field work and import it ba
 3. The dialog will show:
    - **Recording Areas**: Names from layer display expressions, sorted alphabetically
    - **Next Object Number**: Editable column with automatic calculation based on existing data
-   - **Next Level**: Editable column with intelligent increment logic and case preservation
+   - **Next Level**: Editable column with intelligent increment logic:
+  - Letter + number patterns (e.g., 'A1' → 'A2', 'B3' → 'B4')
+  - Pure numeric strings increment numerically (e.g., '5' → '6')
+  - Mixed content appends '1' (e.g., 'Level A' → 'Level A1')
+  - Case preservation maintained throughout
    - **Background Image**: Dropdown selection of overlapping raster layers for each area
 4. Configure the next values for objects and features
 5. Click OK to create QField projects for each selected recording area
