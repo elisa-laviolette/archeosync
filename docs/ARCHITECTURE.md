@@ -4,7 +4,7 @@ This document describes the architecture of the ArcheoSync QGIS plugin, focusing
 
 ## Overview
 
-The plugin follows SOLID principles and clean architecture to ensure maintainability, testability, and extensibility. The current version includes 325 tests with 325 passing and 1 skipped, demonstrating robust code quality and comprehensive coverage.
+The plugin follows SOLID principles and clean architecture to ensure maintainability, testability, and extensibility. The current version includes 351 tests with 351 passing and 8 skipped, demonstrating robust code quality and comprehensive coverage.
 
 ## SOLID Principles Implementation
 
@@ -68,7 +68,7 @@ archeosync/
 │   ├── settings_dialog.py
 │   ├── import_data_dialog.py
 │   └── prepare_recording_dialog.py
-├── test/                   # Test suite (325 tests)
+├── test/                   # Test suite (351 tests)
 │   ├── test_core_interfaces.py
 │   ├── test_services.py
 │   ├── test_ui_components.py
@@ -198,6 +198,11 @@ QGIS-specific implementation for QField integration including:
 - Layer merging from multiple completed projects
 - Consolidated method design eliminating code duplication
 - **Automatic Archiving**: Moves imported QField projects to configured archive folder after successful import
+- **Intelligent Data Filtering**: Automatically filters QField projects to include only relevant data:
+  - **Recording Area Filtering**: Keeps only the selected recording area feature in the recording areas layer
+  - **Related Extra Layers Filtering**: For extra layers with relations to the recording area layer, keeps only features related to the selected recording area
+  - **Relation-Based Filtering**: Uses QGIS relations to identify and preserve related features across layers
+  - **Automatic Project Updates**: Saves filtered projects with clean, focused datasets for field use
 
 ### CSVImportService
 QGIS-specific implementation for CSV import operations including:
@@ -263,7 +268,7 @@ Test real QGIS environment integration.
 
 ## Benefits
 
-1. **Testability**: All components can be unit tested with mocks (325 tests, 325 passing, 1 skipped)
+1. **Testability**: All components can be unit tested with mocks (351 tests, 351 passing, 8 skipped)
 2. **Maintainability**: Clear separation of concerns
 3. **Extensibility**: Easy to add new features through interfaces
 4. **Reliability**: Comprehensive validation and error handling
@@ -297,14 +302,83 @@ The packaging process includes:
 4. **Project Variables**: Injects next values for field preparation
 5. **Export**: Creates QField-compatible project files
 
+### Intelligent Data Filtering
+The filtering process ensures QField projects contain only relevant data:
+1. **Recording Area Filtering**: Identifies and keeps only the selected recording area feature
+2. **Relation Analysis**: Examines QGIS relations between layers to identify related features
+3. **Extra Layer Filtering**: For extra layers with relations to recording areas, keeps only features related to the selected recording area
+4. **Data Cleanup**: Removes unrelated features to create focused, efficient field projects
+5. **Project Persistence**: Saves filtered projects with clean datasets
+
 ## Performance Considerations
 
 - **Spatial Analysis**: Efficient spatial intersection checking using QGIS geometry operations
 - **Layer Caching**: Intelligent caching of layer information to reduce repeated lookups
 - **Memory Management**: Proper cleanup of QGIS objects to prevent memory leaks
 - **Error Recovery**: Graceful handling of QGIS object deletion issues
+- **Relation Processing**: Efficient relation-based filtering using QGIS relation manager
 
-## Latest Features (v0.8.0)
+## Latest Features (v0.10.0)
+
+### Intelligent QField Data Filtering
+- **Recording Area Filtering**: Automatically filters recording areas layer to keep only the selected feature
+  - Identifies the correct recording area layer in QField projects
+  - Removes all features except the selected recording area
+  - Preserves project structure and layer configuration
+- **Related Extra Layers Filtering**: Filters extra layers based on QGIS relations
+  - Analyzes QGIS relations between extra layers and recording areas layer
+  - Keeps only features related to the selected recording area
+  - Uses relation field mappings to identify related features
+  - Supports multiple relation types and field configurations
+- **Automatic Project Updates**: Saves filtered projects with clean datasets
+  - Updates project files with filtered data
+  - Maintains layer structure and styling
+  - Ensures data integrity and consistency
+- **Comprehensive Error Handling**: Robust error handling for filtering operations
+  - Graceful handling of missing layers or features
+  - Detailed error reporting and logging
+  - Fallback behavior when filtering fails
+
+### Enhanced Test Coverage
+- **Filtering Tests**: Comprehensive test suite for new filtering functionality
+  - Tests for recording area layer filtering
+  - Tests for related extra layers filtering with relations
+  - Tests for filtering when no relations exist
+  - Tests for error handling and edge cases
+  - Integration tests with packaging workflow
+- **Mock Improvements**: Enhanced mocking for QGIS components
+  - Proper QgsVectorLayer mocking with spec
+  - QgsProject mocking with correct return values
+  - Relation manager mocking with dictionary structure
+  - Comprehensive test coverage for all filtering scenarios
+
+## Previous Features (v0.9.0)
+
+### Raster Clipping for QField Projects
+- **Automatic Background Image Clipping**: Added automatic background image clipping to recording areas when creating QField projects
+  - Configurable offset (default: 20 cm) to expand clipping area beyond recording area boundary
+  - Uses GDAL tools (gdalwarp) for precise raster clipping with -cutline and -crop_to_cutline options
+  - Original raster remains unchanged; clipped version is used only for QField projects
+  - Automatic cleanup of temporary clipped rasters after project creation
+  - Settings dialog includes new "Raster Clipping Offset" configuration option
+  - Comprehensive error handling and GDAL availability checking
+
+### Technical Improvements
+- **Raster Processing Service**: New service for handling GDAL-based raster operations
+  - GDAL command line tool integration (gdalwarp, ogr2ogr)
+  - Temporary file management and cleanup
+  - Coordinate system handling and WKT to GeoJSON conversion
+  - Comprehensive test coverage for all raster processing operations
+- **Enhanced QField Service**: Integrated raster processing into QField project creation workflow
+  - Automatic raster clipping before project packaging
+  - Layer configuration to use clipped raster instead of original
+  - Proper cleanup of temporary layers and files
+- **Settings Management**: Added raster clipping offset configuration
+  - New setting: `raster_clipping_offset` (default: 0.2 meters)
+  - Settings dialog includes user-friendly configuration widget
+  - Proper validation and persistence of offset values
+
+## Previous Features (v0.8.0)
 
 ### Archive Folder Management
 - **CSV Archive Folder**: Configure dedicated folder for archiving imported CSV files
@@ -315,6 +389,14 @@ The packaging process includes:
 - **File System Integration**: Enhanced file system service with move operations for files and directories
 - **Error Handling**: Graceful handling of archive operations with user feedback
 
+## Previous Features (v0.7.0)
+
+### Extra Layers Support
+- **Configuration Dialog**: Added multi-select widget for extra vector layers
+- **Read-Only Layers**: Selected extra layers are included as read-only in QField projects
+- **Recording Areas Integration**: Recording areas layer is always included and locked
+- **User-Friendly Interface**: Checkbox selection with clear labeling
+
 ### QField Service Consolidation
 - **Method Consolidation**: Eliminated redundant `package_for_qfield_with_data_and_variables` method
 - **Enhanced API**: Updated `package_for_qfield_with_data` with optional parameters:
@@ -323,12 +405,6 @@ The packaging process includes:
   - `extra_layers`: Support for additional read-only layers in QField projects
 - **Code Quality**: Reduced duplication and improved maintainability
 - **Backward Compatibility**: All existing functionality preserved
-
-### Extra Layers Support
-- **Configuration Dialog**: Added multi-select widget for extra vector layers
-- **Read-Only Layers**: Selected extra layers are included as read-only in QField projects
-- **Recording Areas Integration**: Recording areas layer is always included and locked
-- **User-Friendly Interface**: Checkbox selection with clear labeling
 
 ## Previous Features (v0.6.0)
 

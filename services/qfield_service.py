@@ -441,7 +441,10 @@ class QGISQFieldService(IQFieldService):
                     offliner,
                     ExportType.Cable,
                     dirs_to_copy,
-                    export_title
+                    export_title,
+                    recording_area_feature.id() if hasattr(recording_area_feature, 'id') else None,
+                    recording_areas_layer_id,
+                    extra_layers
                 )
                 
                 return success
@@ -479,7 +482,7 @@ class QGISQFieldService(IQFieldService):
             traceback.print_exc()
             return False
 
-    def _package_with_offline_converter(self, project, project_file, area_of_interest, area_of_interest_crs, attachment_dirs, offliner, export_type, dirs_to_copy, export_title) -> bool:
+    def _package_with_offline_converter(self, project, project_file, area_of_interest, area_of_interest_crs, attachment_dirs, offliner, export_type, dirs_to_copy, export_title, selected_feature_id=None, recording_areas_layer_id=None, extra_layers=None) -> bool:
         """
         Use QFieldSync's OfflineConverter to package the project.
         """
@@ -494,6 +497,9 @@ class QGISQFieldService(IQFieldService):
             print(f"DEBUG: export_type type: {type(export_type)}")
             print(f"DEBUG: dirs_to_copy type: {type(dirs_to_copy)}")
             print(f"DEBUG: export_title type: {type(export_title)}")
+            print(f"DEBUG: selected_feature_id: {selected_feature_id}")
+            print(f"DEBUG: recording_areas_layer_id: {recording_areas_layer_id}")
+            print(f"DEBUG: extra_layers: {extra_layers}")
             
             # Store references to original layers that will be used directly in QField project
             original_layers_to_clear = {}
@@ -544,6 +550,15 @@ class QGISQFieldService(IQFieldService):
                 # Clear data from original layers in the QField project
                 print(f"DEBUG: Calling _clear_data_from_original_layers")
                 self._clear_data_from_original_layers(project_file, original_layers_to_clear)
+                
+                # Filter recording area layer to only include the selected feature
+                if selected_feature_id is not None and recording_areas_layer_id is not None:
+                    print(f"DEBUG: Calling _filter_recording_area_layer")
+                    self._filter_recording_area_layer(project_file, selected_feature_id, recording_areas_layer_id)
+                # Filter extra layers if needed
+                if selected_feature_id is not None and recording_areas_layer_id is not None and extra_layers:
+                    print(f"DEBUG: Calling _filter_related_extra_layers")
+                    self._filter_related_extra_layers(project_file, selected_feature_id, recording_areas_layer_id, extra_layers)
             else:
                 print(f"DEBUG: Converter.convert() returned False, skipping data clearing")
             
@@ -1107,7 +1122,10 @@ class QGISQFieldService(IQFieldService):
                     offliner,
                     ExportType.Cable,
                     dirs_to_copy,
-                    export_title
+                    export_title,
+                    feature_data.get('id', None),
+                    recording_areas_layer_id,
+                    extra_layers
                 )
                 
                 if success and add_variables:
@@ -1329,3 +1347,118 @@ class QGISQFieldService(IQFieldService):
                     print(f"Warning: Could not remove clipped raster layer: {clipped_layer_id}")
         except Exception as e:
             print(f"Error removing clipped raster layer: {str(e)}")
+
+    def _filter_recording_area_layer(self, project_file: str, selected_feature_id: Any, recording_areas_layer_id: str) -> None:
+        """
+        Filter the recording area layer in the QField project to only include the selected feature.
+        
+        Args:
+            project_file: Path to the QField project file
+            selected_feature_id: ID of the selected recording area feature
+            recording_areas_layer_id: ID of the recording areas layer
+        """
+        try:
+            # Load the QField project
+            qfield_project = QgsProject()
+            if not qfield_project.read(project_file):
+                return
+            
+            # Find the recording areas layer in the project
+            recording_layer = None
+            for layer in qfield_project.mapLayers().values():
+                if isinstance(layer, QgsVectorLayer):
+                    # The layer ID in the QField project might be different from the original
+                    # So we'll look for a layer that contains recording area features
+                    if layer.featureCount() > 0:
+                        # Check if this layer has features that match our recording area pattern
+                        # We'll assume it's the recording area layer if it has the right number of features
+                        # and we can find our selected feature in it
+                        for feature in layer.getFeatures():
+                            if feature.id() == selected_feature_id:
+                                recording_layer = layer
+                                break
+                        if recording_layer:
+                            break
+            
+            if not recording_layer:
+                return
+            
+            # Start editing
+            recording_layer.startEditing()
+            
+            # Get all feature IDs except the selected one
+            features_to_delete = []
+            for feature in recording_layer.getFeatures():
+                if feature.id() != selected_feature_id:
+                    features_to_delete.append(feature.id())
+            
+            # Delete all features except the selected one
+            if features_to_delete:
+                recording_layer.deleteFeatures(features_to_delete)
+            
+            # Commit changes
+            if not recording_layer.commitChanges():
+                recording_layer.rollBack()
+            
+            # Save the updated project
+            qfield_project.write(project_file)
+            
+        except Exception as e:
+            # Silently handle errors to avoid disrupting the packaging process
+            pass
+
+    def _filter_related_extra_layers(self, project_file: str, selected_feature_id: Any, recording_areas_layer_id: str, extra_layer_ids: Optional[List[str]]) -> None:
+        """
+        For each extra layer that has a relation to the recording area layer, filter it to only keep features related to the selected recording area.
+        Args:
+            project_file: Path to the QField project file
+            selected_feature_id: ID of the selected recording area feature
+            recording_areas_layer_id: ID of the recording areas layer
+            extra_layer_ids: List of extra layer IDs to check and filter
+        """
+        if not extra_layer_ids:
+            return
+        try:
+            from qgis.core import QgsProject, QgsVectorLayer
+            qfield_project = QgsProject()
+            if not qfield_project.read(project_file):
+                return
+            # Find the recording area feature in the QField project
+            recording_layer = qfield_project.mapLayer(recording_areas_layer_id)
+            if not recording_layer or not isinstance(recording_layer, QgsVectorLayer):
+                return
+            selected_feature = None
+            for feature in recording_layer.getFeatures():
+                if feature.id() == selected_feature_id:
+                    selected_feature = feature
+                    break
+            if not selected_feature:
+                return
+            # For each extra layer, check for relation and filter
+            project_relations = qfield_project.relationManager().relations().values()
+            for extra_layer_id in extra_layer_ids:
+                extra_layer = qfield_project.mapLayer(extra_layer_id)
+                if not extra_layer or not isinstance(extra_layer, QgsVectorLayer):
+                    continue
+                # Find relation where extra layer is referencing and recording area is referenced
+                for relation in project_relations:
+                    if (relation.referencingLayerId() == extra_layer_id and
+                        relation.referencedLayerId() == recording_areas_layer_id):
+                        # Get related features
+                        related_features = relation.getRelatedFeatures(selected_feature)
+                        related_ids = set(f.id() for f in related_features)
+                        # Start editing
+                        extra_layer.startEditing()
+                        # Delete features not related
+                        to_delete = [f.id() for f in extra_layer.getFeatures() if f.id() not in related_ids]
+                        if to_delete:
+                            extra_layer.deleteFeatures(to_delete)
+                        # Commit changes
+                        if not extra_layer.commitChanges():
+                            extra_layer.rollBack()
+                        break  # Only one relation per extra layer
+            # Save the updated project
+            qfield_project.write(project_file)
+        except Exception as e:
+            # Silently handle errors to avoid disrupting the packaging process
+            pass

@@ -527,7 +527,6 @@ class SettingsDialog(QtWidgets.QDialog):
             item = self._extra_layers_list.item(i)
             if item.checkState() == Qt.Checked and item.data(Qt.UserRole) != recording_areas_layer_id:
                 selected_layers.append(item.data(Qt.UserRole))
-        print(f"DEBUG: Selected extra layers: {selected_layers}")
         return selected_layers
     
     def _on_objects_layer_changed(self) -> None:

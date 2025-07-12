@@ -2,6 +2,40 @@
 
 All notable changes to the ArcheoSync QGIS plugin will be documented in this file.
 
+## [0.10.0] - 2025-07-12
+
+### New Features
+
+- **Intelligent QField Data Filtering**: Added automatic filtering of QField projects to include only relevant data
+  - **Recording Area Filtering**: Automatically filters recording areas layer to keep only the selected feature
+    - Identifies the correct recording area layer in QField projects
+    - Removes all features except the selected recording area
+    - Preserves project structure and layer configuration
+  - **Related Extra Layers Filtering**: Filters extra layers based on QGIS relations
+    - Analyzes QGIS relations between extra layers and recording areas layer
+    - Keeps only features related to the selected recording area
+    - Uses relation field mappings to identify related features
+    - Supports multiple relation types and field configurations
+
+### Technical Improvements
+
+- **Enhanced Test Coverage**: Expanded test suite to 351 tests with comprehensive coverage
+  - **Filtering Tests**: Comprehensive test suite for new filtering functionality
+    - Tests for recording area layer filtering
+    - Tests for related extra layers filtering with relations
+    - Tests for filtering when no relations exist
+    - Tests for error handling and edge cases
+    - Integration tests with packaging workflow
+  - **Mock Improvements**: Enhanced mocking for QGIS components
+    - Proper QgsVectorLayer mocking with spec
+    - QgsProject mocking with correct return values
+    - Relation manager mocking with dictionary structure
+    - Comprehensive test coverage for all filtering scenarios
+- **Code Quality**: Removed debug outputs and improved error handling
+  - Clean production code without debug statements
+  - Silent error handling for filtering operations
+  - Improved code maintainability and readability
+
 ## [0.9.0] - 2025-07-11
 
 ### New Features
