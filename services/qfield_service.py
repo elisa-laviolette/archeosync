@@ -1337,7 +1337,15 @@ class QGISQFieldService(IQFieldService):
                 return None
             
             # Get raster clipping offset from settings
-            offset_meters = self._settings_manager.get_value('raster_clipping_offset', 0.2)
+            # Get offset_meters from settings and ensure it's a float
+            offset_meters_raw = self._settings_manager.get_value('raster_clipping_offset', 0.2)
+            try:
+                offset_meters = float(offset_meters_raw)
+                print(f"[DEBUG] Converted offset_meters from {type(offset_meters_raw)} to float: {offset_meters}")
+            except (ValueError, TypeError) as e:
+                print(f"[DEBUG] Error converting offset_meters to float: {e}, using default 0.2")
+                offset_meters = 0.2
+            
             print(f"[DEBUG] Clipping raster: background_layer_id={background_layer_id}, offset_meters={offset_meters}")
             
             # Create clipped raster

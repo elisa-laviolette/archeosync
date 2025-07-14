@@ -205,40 +205,83 @@ class QGISRasterProcessingService(IRasterProcessingService):
             should be cleaned up after use.
         """
         try:
+            print(f"[DEBUG] Starting _create_temp_shapefile with geometry type: {type(geometry)}")
+            print(f"[DEBUG] offset_meters type: {type(offset_meters)}, value: {offset_meters}")
+            
+            # Ensure offset_meters is a float
+            try:
+                offset_meters = float(offset_meters)
+                print(f"[DEBUG] Converted offset_meters to float: {offset_meters}")
+            except (ValueError, TypeError) as e:
+                print(f"[DEBUG] Error converting offset_meters to float: {e}, using 0.0")
+                offset_meters = 0.0
+            
             # Create buffered geometry if offset is specified
             if offset_meters > 0:
                 buffered_geometry = geometry.buffer(offset_meters, 5)  # 5 segments for smooth buffer
+                print(f"[DEBUG] Created buffered geometry: {type(buffered_geometry)}")
             else:
                 buffered_geometry = geometry
+                print(f"[DEBUG] Using original geometry: {type(buffered_geometry)}")
             
+            print(f"[DEBUG] Checking if geometry is multipart...")
             # Ensure the polygon is explicitly closed
             if buffered_geometry.isMultipart():
-                polygons = buffered_geometry.asMultiPolygon()
-                print(f"[DEBUG] Multipart geometry - polygons count: {len(polygons)}")
-                for i, poly in enumerate(polygons):
-                    print(f"[DEBUG] Polygon {i} - poly type: {type(poly)}, poly length: {len(poly) if poly else 0}")
-                    # Safety check: ensure poly[0] exists and has at least 2 points
-                    if poly and len(poly) > 0 and len(poly[0]) >= 2:
-                        print(f"[DEBUG] Polygon {i} - poly[0] length: {len(poly[0])}")
-                        # Compare coordinates properly by converting to strings or using QgsPointXY methods
+                print(f"[DEBUG] Processing multipart geometry...")
+                try:
+                    polygons = buffered_geometry.asMultiPolygon()
+                    print(f"[DEBUG] Got multipolygon data: {type(polygons)}, length: {len(polygons) if hasattr(polygons, '__len__') else 'no len'}")
+                    
+                    for i, poly in enumerate(polygons):
+                        print(f"[DEBUG] Processing polygon {i}: {type(poly)}")
+                        # Safety check: ensure poly is a list/tuple and has content
+                        if isinstance(poly, (list, tuple)) and len(poly) > 0:
+                            print(f"[DEBUG] Polygon {i} has {len(poly)} rings")
+                            # Check if the first ring has enough points
+                            if len(poly[0]) >= 2:
+                                print(f"[DEBUG] Polygon {i} ring 0 has {len(poly[0])} points")
+                                # Compare coordinates properly by converting to strings or using QgsPointXY methods
+                                first_point = poly[0][0]
+                                last_point = poly[0][-1]
+                                print(f"[DEBUG] Polygon {i} - first_point type: {type(first_point)}, last_point type: {type(last_point)}")
+                                if hasattr(first_point, 'x') and hasattr(last_point, 'x'):
+                                    if (first_point.x() != last_point.x() or first_point.y() != last_point.y()):
+                                        poly[0].append(first_point)
+                                        polygons[i] = poly
+                                        print(f"[DEBUG] Polygon {i} - closed the ring")
+                            else:
+                                print(f"[DEBUG] Polygon {i} ring 0 has insufficient points: {len(poly[0])}")
+                        else:
+                            print(f"[DEBUG] Polygon {i} is not a valid list/tuple or is empty")
+                    
+                    closed_geometry = QgsGeometry.fromMultiPolygonXY(polygons)
+                    print(f"[DEBUG] Created multipolygon geometry successfully")
+                except Exception as e:
+                    print(f"[DEBUG] Error processing multipart geometry: {str(e)}")
+                    raise
+            else:
+                print(f"[DEBUG] Processing single polygon...")
+                try:
+                    poly = buffered_geometry.asPolygon()
+                    print(f"[DEBUG] Got polygon data: {type(poly)}, length: {len(poly) if hasattr(poly, '__len__') else 'no len'}")
+                    
+                    if isinstance(poly, (list, tuple)) and len(poly) > 0 and len(poly[0]) >= 2:
+                        print(f"[DEBUG] Single polygon has {len(poly)} rings, first ring has {len(poly[0])} points")
                         first_point = poly[0][0]
                         last_point = poly[0][-1]
-                        print(f"[DEBUG] Polygon {i} - first_point type: {type(first_point)}, last_point type: {type(last_point)}")
-                        if (first_point.x() != last_point.x() or first_point.y() != last_point.y()):
-                            poly[0].append(first_point)
-                            polygons[i] = poly
-                closed_geometry = QgsGeometry.fromMultiPolygonXY(polygons)
-            else:
-                poly = buffered_geometry.asPolygon()
-                print(f"[DEBUG] Single polygon - poly type: {type(poly)}, poly length: {len(poly) if poly else 0}")
-                if poly and len(poly) > 0 and len(poly[0]) >= 2:
-                    print(f"[DEBUG] Single polygon - poly[0] length: {len(poly[0])}")
-                    first_point = poly[0][0]
-                    last_point = poly[0][-1]
-                    print(f"[DEBUG] Single polygon - first_point type: {type(first_point)}, last_point type: {type(last_point)}")
-                    if (first_point.x() != last_point.x() or first_point.y() != last_point.y()):
-                        poly[0].append(first_point)
-                closed_geometry = QgsGeometry.fromPolygonXY(poly)
+                        print(f"[DEBUG] Single polygon - first_point type: {type(first_point)}, last_point type: {type(last_point)}")
+                        if hasattr(first_point, 'x') and hasattr(last_point, 'x'):
+                            if (first_point.x() != last_point.x() or first_point.y() != last_point.y()):
+                                poly[0].append(first_point)
+                                print(f"[DEBUG] Single polygon - closed the ring")
+                    else:
+                        print(f"[DEBUG] Single polygon is not valid or has insufficient points")
+                    
+                    closed_geometry = QgsGeometry.fromPolygonXY(poly)
+                    print(f"[DEBUG] Created single polygon geometry successfully")
+                except Exception as e:
+                    print(f"[DEBUG] Error processing single polygon: {str(e)}")
+                    raise
             
             # Create temporary shapefile using QGIS native methods
             temp_fd, temp_path = tempfile.mkstemp(suffix='.shp', prefix='clip_')
