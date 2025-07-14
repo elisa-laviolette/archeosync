@@ -306,4 +306,132 @@ class TestRasterProcessingService:
              patch.object(self.raster_service, '_execute_gdalwarp', return_value=True), \
              patch.object(self.raster_service, '_cleanup_temp_shapefile'):
             result = self.raster_service.clip_raster_to_feature('valid_id', mock_geometry, 0.2, '/temp/clipped.tif')
-            assert result == '/temp/clipped.tif' 
+            assert result == '/temp/clipped.tif'
+
+    def test_create_temp_shapefile_coordinate_comparison_fix(self):
+        """Test that the coordinate comparison fix works correctly for both single and multipart polygons."""
+        from qgis.core import QgsRasterLayer, QgsPointXY, QgsGeometry
+        from unittest.mock import Mock, patch
+
+        # Create mock raster layer
+        mock_raster_layer = Mock(spec=QgsRasterLayer)
+        mock_raster_layer.source.return_value = '/path/to/raster.tif'
+        mock_raster_layer.crs.return_value = Mock()
+        mock_raster_layer.crs.return_value.authid.return_value = 'EPSG:4326'
+
+        # Create mock project
+        mock_project = Mock()
+        mock_project.mapLayer.return_value = mock_raster_layer
+
+        # Test 1: Single polygon with unclosed coordinates
+        mock_geometry_single = Mock()
+        mock_geometry_single.isNull.return_value = False
+        mock_geometry_single.isMultipart.return_value = False
+        
+        # Create mock polygon with unclosed coordinates
+        mock_polygon = [[QgsPointXY(0, 0), QgsPointXY(1, 0), QgsPointXY(1, 1), QgsPointXY(0, 1)]]
+        mock_geometry_single.asPolygon.return_value = mock_polygon
+        mock_geometry_single.buffer.return_value = mock_geometry_single
+
+        # Test 2: Multipart polygon with unclosed coordinates
+        mock_geometry_multipart = Mock()
+        mock_geometry_multipart.isNull.return_value = False
+        mock_geometry_multipart.isMultipart.return_value = True
+        
+        # Create mock multipolygon with unclosed coordinates
+        mock_multipolygon = [[[QgsPointXY(0, 0), QgsPointXY(1, 0), QgsPointXY(1, 1), QgsPointXY(0, 1)]]]
+        mock_geometry_multipart.asMultiPolygon.return_value = mock_multipolygon
+        mock_geometry_multipart.buffer.return_value = mock_geometry_multipart
+
+        # Mock QGIS components
+        mock_layer = Mock()
+        mock_layer.dataProvider.return_value.addAttributes.return_value = True
+        mock_layer.dataProvider.return_value.addFeatures.return_value = (True, [])
+        mock_layer.updateFields.return_value = None
+
+        mock_feature = Mock()
+        mock_feature.setGeometry.return_value = None
+        mock_feature.setAttributes.return_value = None
+
+        mock_fields = Mock()
+        mock_fields.append.return_value = None
+
+        # Mock QgsVectorFileWriter
+        mock_writer_result = (0, None)  # NoError
+
+        with patch('qgis.core.QgsProject.instance', return_value=mock_project), \
+             patch('qgis.core.QgsVectorLayer', return_value=mock_layer), \
+             patch('qgis.core.QgsFeature', return_value=mock_feature), \
+             patch('qgis.core.QgsFields', return_value=mock_fields), \
+             patch('qgis.core.QgsVectorFileWriter.writeAsVectorFormat', return_value=mock_writer_result), \
+             patch('tempfile.mkstemp', return_value=(None, '/temp/test.shp')), \
+             patch('os.close'), \
+             patch('os.path.exists', return_value=True):
+
+            # Test single polygon
+            result_single = self.raster_service._create_temp_shapefile(
+                mock_geometry_single, 0.2, mock_raster_layer.crs()
+            )
+            assert result_single is not None
+
+            # Test multipart polygon
+            result_multipart = self.raster_service._create_temp_shapefile(
+                mock_geometry_multipart, 0.2, mock_raster_layer.crs()
+            )
+            assert result_multipart is not None
+
+    def test_create_temp_shapefile_with_closed_coordinates(self):
+        """Test that the coordinate comparison fix handles already closed coordinates correctly."""
+        from qgis.core import QgsRasterLayer, QgsPointXY, QgsGeometry
+        from unittest.mock import Mock, patch
+
+        # Create mock raster layer
+        mock_raster_layer = Mock(spec=QgsRasterLayer)
+        mock_raster_layer.source.return_value = '/path/to/raster.tif'
+        mock_raster_layer.crs.return_value = Mock()
+        mock_raster_layer.crs.return_value.authid.return_value = 'EPSG:4326'
+
+        # Create mock project
+        mock_project = Mock()
+        mock_project.mapLayer.return_value = mock_raster_layer
+
+        # Test single polygon with already closed coordinates
+        mock_geometry_single = Mock()
+        mock_geometry_single.isNull.return_value = False
+        mock_geometry_single.isMultipart.return_value = False
+        
+        # Create mock polygon with already closed coordinates (first and last points are the same)
+        mock_polygon = [[QgsPointXY(0, 0), QgsPointXY(1, 0), QgsPointXY(1, 1), QgsPointXY(0, 1), QgsPointXY(0, 0)]]
+        mock_geometry_single.asPolygon.return_value = mock_polygon
+        mock_geometry_single.buffer.return_value = mock_geometry_single
+
+        # Mock QGIS components
+        mock_layer = Mock()
+        mock_layer.dataProvider.return_value.addAttributes.return_value = True
+        mock_layer.dataProvider.return_value.addFeatures.return_value = (True, [])
+        mock_layer.updateFields.return_value = None
+
+        mock_feature = Mock()
+        mock_feature.setGeometry.return_value = None
+        mock_feature.setAttributes.return_value = None
+
+        mock_fields = Mock()
+        mock_fields.append.return_value = None
+
+        # Mock QgsVectorFileWriter
+        mock_writer_result = (0, None)  # NoError
+
+        with patch('qgis.core.QgsProject.instance', return_value=mock_project), \
+             patch('qgis.core.QgsVectorLayer', return_value=mock_layer), \
+             patch('qgis.core.QgsFeature', return_value=mock_feature), \
+             patch('qgis.core.QgsFields', return_value=mock_fields), \
+             patch('qgis.core.QgsVectorFileWriter.writeAsVectorFormat', return_value=mock_writer_result), \
+             patch('tempfile.mkstemp', return_value=(None, '/temp/test.shp')), \
+             patch('os.close'), \
+             patch('os.path.exists', return_value=True):
+
+            # Test single polygon with closed coordinates
+            result = self.raster_service._create_temp_shapefile(
+                mock_geometry_single, 0.2, mock_raster_layer.crs()
+            )
+            assert result is not None 

@@ -2,6 +2,23 @@
 
 All notable changes to the ArcheoSync QGIS plugin will be documented in this file.
 
+## [0.10.1] - 2025-07-14
+
+### Bug Fixes
+
+- **Raster Clipping Coordinate Comparison**: Fixed critical error in temporary shapefile creation during raster clipping
+  - **Root Cause**: QgsPointXY objects were being compared directly with `!=` operator, causing type comparison errors
+  - **Solution**: Implemented proper coordinate comparison using `.x()` and `.y()` methods for QgsPointXY objects
+  - **Impact**: Resolves "'>' not supported between instances of 'str' and 'int'" error when preparing recordings with background images
+  - **Compatibility**: Works with both single and multipart polygons, handles both closed and unclosed coordinate sequences
+  - **Testing**: Added comprehensive tests for coordinate comparison scenarios to prevent regression
+
+### Technical Improvements
+
+- **Enhanced Error Handling**: Improved robustness of polygon coordinate processing in raster clipping operations
+- **Test Coverage**: Added specific tests for coordinate comparison fix with both single and multipart polygons
+- **Code Quality**: More explicit and type-safe coordinate comparison logic
+
 ## [0.10.0] - 2025-07-12
 
 ### New Features
@@ -19,7 +36,7 @@ All notable changes to the ArcheoSync QGIS plugin will be documented in this fil
 
 ### Technical Improvements
 
-- **Enhanced Test Coverage**: Expanded test suite to 351 tests with comprehensive coverage
+- **Enhanced Test Coverage**: Expanded test suite to 357 tests with comprehensive coverage
   - **Filtering Tests**: Comprehensive test suite for new filtering functionality
     - Tests for recording area layer filtering
     - Tests for related extra layers filtering with relations

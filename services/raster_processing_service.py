@@ -214,15 +214,30 @@ class QGISRasterProcessingService(IRasterProcessingService):
             # Ensure the polygon is explicitly closed
             if buffered_geometry.isMultipart():
                 polygons = buffered_geometry.asMultiPolygon()
+                print(f"[DEBUG] Multipart geometry - polygons count: {len(polygons)}")
                 for i, poly in enumerate(polygons):
-                    if poly[0][0] != poly[0][-1]:
-                        poly[0].append(poly[0][0])
-                        polygons[i] = poly
+                    print(f"[DEBUG] Polygon {i} - poly type: {type(poly)}, poly length: {len(poly) if poly else 0}")
+                    # Safety check: ensure poly[0] exists and has at least 2 points
+                    if poly and len(poly) > 0 and len(poly[0]) >= 2:
+                        print(f"[DEBUG] Polygon {i} - poly[0] length: {len(poly[0])}")
+                        # Compare coordinates properly by converting to strings or using QgsPointXY methods
+                        first_point = poly[0][0]
+                        last_point = poly[0][-1]
+                        print(f"[DEBUG] Polygon {i} - first_point type: {type(first_point)}, last_point type: {type(last_point)}")
+                        if (first_point.x() != last_point.x() or first_point.y() != last_point.y()):
+                            poly[0].append(first_point)
+                            polygons[i] = poly
                 closed_geometry = QgsGeometry.fromMultiPolygonXY(polygons)
             else:
                 poly = buffered_geometry.asPolygon()
-                if poly and poly[0][0] != poly[0][-1]:
-                    poly[0].append(poly[0][0])
+                print(f"[DEBUG] Single polygon - poly type: {type(poly)}, poly length: {len(poly) if poly else 0}")
+                if poly and len(poly) > 0 and len(poly[0]) >= 2:
+                    print(f"[DEBUG] Single polygon - poly[0] length: {len(poly[0])}")
+                    first_point = poly[0][0]
+                    last_point = poly[0][-1]
+                    print(f"[DEBUG] Single polygon - first_point type: {type(first_point)}, last_point type: {type(last_point)}")
+                    if (first_point.x() != last_point.x() or first_point.y() != last_point.y()):
+                        poly[0].append(first_point)
                 closed_geometry = QgsGeometry.fromPolygonXY(poly)
             
             # Create temporary shapefile using QGIS native methods
@@ -271,6 +286,11 @@ class QGISRasterProcessingService(IRasterProcessingService):
                 
         except Exception as e:
             print(f"Error creating temporary shapefile: {str(e)}")
+            print(f"Geometry type: {type(geometry)}")
+            print(f"Geometry is null: {geometry.isNull() if hasattr(geometry, 'isNull') else 'N/A'}")
+            print(f"Geometry is valid: {geometry.isValid() if hasattr(geometry, 'isValid') else 'N/A'}")
+            if hasattr(geometry, 'asWkt'):
+                print(f"Geometry WKT: {geometry.asWkt()[:100]}...")  # First 100 chars
             return None
     
     def _execute_gdalwarp(self, 
