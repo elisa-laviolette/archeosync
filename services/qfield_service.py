@@ -617,10 +617,10 @@ class QGISQFieldService(IQFieldService):
                     elif layer.customProperty("qfieldsync/is_offline_editable"):
                         should_clear = True
                         clear_reason = "offline editable layer"
-                    # Third, check by layer name patterns (case-insensitive)
-                    elif any(name.lower() in layer_name.lower() for name in ["objects", "objets", "features", "fugaces"]):
+                    # Third, check by layer name patterns (case-insensitive) - only exact matches for layer names
+                    elif layer_name.lower() in ["objects", "objets", "features", "fugaces"]:
                         should_clear = True
-                        clear_reason = "name pattern match"
+                        clear_reason = "exact layer name match"
                     
                     if should_clear:
                         print(f"DEBUG: Found layer to clear: {layer_name} (reason: {clear_reason})")

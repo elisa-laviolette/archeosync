@@ -16,6 +16,7 @@ import pytest
 import sys
 import os
 from unittest.mock import Mock, patch, MagicMock
+import unittest
 
 # Try to import QGIS modules, skip tests if not available
 try:
@@ -1243,3 +1244,94 @@ class TestQFieldService:
                 "recording_layer_id",
                 ["extra_layer_1", "extra_layer_2"]
             ) 
+
+    @patch('services.qfield_service.QgisCoreOffliner', return_value=MagicMock())
+    @patch('services.qfield_service.OfflineConverter', return_value=MagicMock())
+    @patch('services.qfield_service.ExportType')
+    def test_extra_layers_not_cleared_when_containing_objets_in_name(self, mock_export_type, mock_offliner, mock_converter):
+        """Test that extra layers with 'objets' in their name are not incorrectly cleared."""
+        # Mock ExportType
+        mock_export_type.Cable = "Cable"
+        
+        # Mock the necessary components
+        mock_settings_manager = MagicMock()
+        mock_layer_service = MagicMock()
+        mock_file_system_service = MagicMock()
+        mock_raster_processing_service = MagicMock()
+        
+        service = QGISQFieldService(
+            mock_settings_manager, 
+            mock_layer_service, 
+            mock_file_system_service, 
+            mock_raster_processing_service
+        )
+        
+        # Set QFieldSync availability directly
+        service._qfieldsync_available = True
+        
+        # Mock the _clear_data_from_original_layers method to capture what layers are cleared
+        cleared_layers = []
+        def mock_clear_data(project_file, original_layers_to_clear):
+            nonlocal cleared_layers
+            cleared_layers.extend(original_layers_to_clear.keys())
+            return None
+        
+        with patch.object(service, '_clear_data_from_original_layers', side_effect=mock_clear_data):
+            # Mock other dependencies
+            with patch('os.path.exists', return_value=True):
+                with patch('os.makedirs'):
+                    with patch('qgis.core.QgsProject.instance') as mock_project:
+                        # Mock project layers
+                        mock_layer1 = MagicMock()
+                        mock_layer1.name.return_value = 'Objets'
+                        mock_layer1.id.return_value = 'objets_layer_id'
+                        
+                        mock_layer2 = MagicMock()
+                        mock_layer2.name.return_value = 'Fugaces'
+                        mock_layer2.id.return_value = 'fugaces_layer_id'
+                        
+                        mock_layer3 = MagicMock()
+                        mock_layer3.name.return_value = "Types d'objets"
+                        mock_layer3.id.return_value = 'types_objets_layer_id'
+                        
+                        # Mock the mapLayer method to return the correct layer by ID
+                        def mock_map_layer(layer_id):
+                            if layer_id == 'objets_layer_id':
+                                return mock_layer1
+                            elif layer_id == 'fugaces_layer_id':
+                                return mock_layer2
+                            elif layer_id == 'types_objets_layer_id':
+                                return mock_layer3
+                            return None
+                        
+                        mock_project.return_value.mapLayers.return_value = {
+                            'objets_layer_id': mock_layer1,
+                            'fugaces_layer_id': mock_layer2,
+                            'types_objets_layer_id': mock_layer3
+                        }
+                        mock_project.return_value.mapLayer = mock_map_layer
+                        
+                        # Call the method that should trigger the clearing logic
+                        result = service.package_for_qfield_with_data(
+                            feature_data={'id': 1, 'geometry_wkt': 'POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))', 'attributes': [1, 'test'], 'display_name': 'Test Feature'},
+                            recording_areas_layer_id='recording_areas_layer_id',
+                            objects_layer_id='objets_layer_id',
+                            features_layer_id='fugaces_layer_id',
+                            background_layer_id=None,
+                            extra_layers=['types_objets_layer_id'],
+                            destination_folder='/tmp/test',
+                            project_name='test_project',
+                            add_variables=False  # Disable variables to avoid the next_values requirement
+                        )
+                        
+                        # Verify that the extra layer is NOT in the cleared layers list
+                        # The extra layer should be copied with its data intact, not cleared
+                        assert "Types d'objets" not in cleared_layers, f"Extra layer 'Types d'objets' should not be cleared, but was found in cleared_layers: {cleared_layers}"
+                        
+                        # Verify that only the actual objects and features layers are cleared
+                        expected_cleared_layers = ['Objets', 'Fugaces']  # These are the actual layer names
+                        for layer_name in expected_cleared_layers:
+                            assert layer_name in cleared_layers, f"Expected layer '{layer_name}' to be cleared, but it was not found in cleared_layers: {cleared_layers}"
+                        
+                        # Verify the method succeeded
+                        assert result 
