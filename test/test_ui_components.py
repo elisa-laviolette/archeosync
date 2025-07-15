@@ -84,8 +84,7 @@ class TestSettingsDialog(unittest.TestCase):
         self.assertIsNotNone(self.dialog._total_station_widget)
         self.assertIsNotNone(self.dialog._completed_projects_widget)
         self.assertIsNotNone(self.dialog._recording_areas_widget)
-        self.assertIsNotNone(self.dialog._qfield_checkbox)
-        self.assertIsNotNone(self.dialog._template_project_widget)
+
         self.assertIsNotNone(self.dialog._button_box)
         
         # Check that widget components exist
@@ -97,8 +96,7 @@ class TestSettingsDialog(unittest.TestCase):
         self.assertIsNotNone(self.dialog._completed_projects_widget.browse_button)
         self.assertIsNotNone(self.dialog._recording_areas_widget.combo_box)
         self.assertIsNotNone(self.dialog._recording_areas_widget.refresh_button)
-        self.assertIsNotNone(self.dialog._template_project_widget.input_field)
-        self.assertIsNotNone(self.dialog._template_project_widget.browse_button)
+
     
     def test_load_settings_calls_settings_manager(self):
         """Test that loading settings calls the settings manager."""
@@ -114,11 +112,10 @@ class TestSettingsDialog(unittest.TestCase):
             call('total_station_folder', ''),
             call('completed_projects_folder', ''),
             call('csv_archive_folder', ''),
-            call('qfield_archive_folder', ''),
             call('recording_areas_layer', ''),
             call('objects_layer', ''),
             call('features_layer', ''),
-            call('use_qfield', False),
+
             call('raster_clipping_offset', 0.2)
         ]
         self.mock_settings_manager.get_value.assert_has_calls(expected_calls)
@@ -131,16 +128,13 @@ class TestSettingsDialog(unittest.TestCase):
             '/path/to/total',
             '/path/to/completed',
             '',  # csv_archive_folder
-            '',  # qfield_archive_folder
             'test_layer_id',  # recording_areas_layer
             'test_objects_layer_id',  # objects_layer
             '',  # objects_number_field
             '',  # objects_level_field
             'test_features_layer_id',  # features_layer
-            True,  # use_qfield
             0.2,  # raster_clipping_offset
-            [],  # extra_qfield_layers
-            '/path/to/template'
+            [],  # extra_field_layers
         ]
         
         # Mock layer service to return test layers
@@ -179,8 +173,7 @@ class TestSettingsDialog(unittest.TestCase):
         self.assertEqual(self.dialog._field_projects_widget.input_field.text(), '/path/to/field')
         self.assertEqual(self.dialog._total_station_widget.input_field.text(), '/path/to/total')
         self.assertEqual(self.dialog._completed_projects_widget.input_field.text(), '/path/to/completed')
-        self.assertTrue(self.dialog._qfield_checkbox.isChecked())
-        self.assertEqual(self.dialog._template_project_widget.input_field.text(), '/path/to/template')
+
         
         # Verify recording areas layer was selected
         combo_box = self.dialog._recording_areas_widget.combo_box
@@ -202,16 +195,13 @@ class TestSettingsDialog(unittest.TestCase):
             'total_station_folder': '/path/to/total',
             'completed_projects_folder': '/path/to/completed',
             'csv_archive_folder': '',
-            'qfield_archive_folder': '',
             'recording_areas_layer': 'test_layer_id',
             'objects_layer': 'test_objects_layer_id',
             'objects_number_field': '',
             'objects_level_field': '',
             'features_layer': 'test_features_layer_id',
-            'use_qfield': False,
             'raster_clipping_offset': 0.2,
-            'extra_qfield_layers': [],
-            'template_project_folder': '/path/to/template'
+            'extra_field_layers': []
         }.get(key, default)
         
         # Mock layer service to return test layers
@@ -252,16 +242,13 @@ class TestSettingsDialog(unittest.TestCase):
             'total_station_folder': '/path/to/total',
             'completed_projects_folder': '/path/to/completed',
             'csv_archive_folder': '',
-            'qfield_archive_folder': '',
             'recording_areas_layer': 'test_layer_id',
             'objects_layer': 'test_objects_layer_id',
             'objects_number_field': '',
             'objects_level_field': '',
             'features_layer': 'test_features_layer_id',
-            'use_qfield': False,
             'raster_clipping_offset': 0.2,
-            'extra_qfield_layers': [],
-            'template_project_folder': '/path/to/template'
+            'extra_field_layers': []
         }
         self.assertEqual(self.dialog._original_values, expected_original_values)
     
@@ -298,32 +285,7 @@ class TestSettingsDialog(unittest.TestCase):
         # Verify input field was not changed
         self.assertEqual(input_field.text(), '/initial/path')
     
-    def test_update_ui_state_shows_template_widget_when_qfield_unchecked(self):
-        """Test that UI state updates correctly when QField is unchecked."""
-        # Set QField checkbox to unchecked
-        self.dialog._qfield_checkbox.setChecked(False)
-        
-        # Call update_ui_state
-        self.dialog._update_ui_state()
-        
-        # Verify template project widgets are visible
-        # Note: The widgets might be hidden initially, so we check the logic rather than visibility
-        use_qfield = self.dialog._qfield_checkbox.isChecked()
-        should_be_visible = not use_qfield
-        self.assertFalse(use_qfield)  # QField should be unchecked
-        self.assertTrue(should_be_visible)  # Template should be visible
-    
-    def test_update_ui_state_hides_template_widget_when_qfield_checked(self):
-        """Test that UI state updates correctly when QField is checked."""
-        # Set QField checkbox to checked
-        self.dialog._qfield_checkbox.setChecked(True)
-        
-        # Call update_ui_state
-        self.dialog._update_ui_state()
-        
-        # Verify template project widgets are hidden
-        self.assertFalse(self.dialog._template_project_label.isVisible())
-        self.assertFalse(self.dialog._template_project_widget.isVisible())
+
     
     def test_save_and_accept_validates_settings(self):
         """Test that saving settings validates the configuration."""
@@ -331,8 +293,6 @@ class TestSettingsDialog(unittest.TestCase):
         self.dialog._field_projects_widget.input_field.setText('/path/to/field')
         self.dialog._total_station_widget.input_field.setText('/path/to/total')
         self.dialog._completed_projects_widget.input_field.setText('/path/to/completed')
-        self.dialog._qfield_checkbox.setChecked(False)
-        self.dialog._template_project_widget.input_field.setText('/path/to/template')
         
         # Mock validation to return errors
         validation_results = {
@@ -370,8 +330,6 @@ class TestSettingsDialog(unittest.TestCase):
         self.dialog._field_projects_widget.input_field.setText('/path/to/field')
         self.dialog._total_station_widget.input_field.setText('/path/to/total')
         self.dialog._completed_projects_widget.input_field.setText('/path/to/completed')
-        self.dialog._qfield_checkbox.setChecked(False)
-        self.dialog._template_project_widget.input_field.setText('/path/to/template')
         self.dialog._raster_offset_spinbox.setValue(0.2)  # Set the raster clipping offset
         
         # Mock layer service to return test layers
@@ -439,16 +397,13 @@ class TestSettingsDialog(unittest.TestCase):
             call('total_station_folder', '/path/to/total'),
             call('completed_projects_folder', '/path/to/completed'),
             call('csv_archive_folder', ''),
-            call('qfield_archive_folder', ''),
             call('recording_areas_layer', ''),
             call('objects_layer', 'test_objects_layer_id'),  # Now mandatory, so has a value
             call('objects_number_field', ''),
             call('objects_level_field', ''),
             call('features_layer', ''),
-            call('use_qfield', False),
             call('raster_clipping_offset', 0.2),
-            call('extra_qfield_layers', []),
-            call('template_project_folder', '/path/to/template')
+            call('extra_field_layers', [])
         ]
         self.mock_settings_manager.set_value.assert_has_calls(expected_calls)
         
@@ -464,17 +419,13 @@ class TestSettingsDialog(unittest.TestCase):
             'completed_projects_folder': '/original/completed',
             'recording_areas_layer': 'original_layer_id',
             'objects_layer': 'original_objects_layer_id',
-            'features_layer': 'original_features_layer_id',
-            'use_qfield': True,
-            'template_project_folder': '/original/template'
+            'features_layer': 'original_features_layer_id'
         }
         
         # Change UI values
         self.dialog._field_projects_widget.input_field.setText('/changed/field')
         self.dialog._total_station_widget.input_field.setText('/changed/total')
         self.dialog._completed_projects_widget.input_field.setText('/changed/completed')
-        self.dialog._qfield_checkbox.setChecked(False)
-        self.dialog._template_project_widget.input_field.setText('/changed/template')
         
         # Mock QMessageBox to avoid showing actual dialog
         with patch('ui.settings_dialog.QtWidgets.QMessageBox') as mock_message_box:
@@ -487,8 +438,6 @@ class TestSettingsDialog(unittest.TestCase):
             self.assertEqual(self.dialog._field_projects_widget.input_field.text(), '/original/field')
             self.assertEqual(self.dialog._total_station_widget.input_field.text(), '/original/total')
             self.assertEqual(self.dialog._completed_projects_widget.input_field.text(), '/original/completed')
-            self.assertTrue(self.dialog._qfield_checkbox.isChecked())
-            self.assertEqual(self.dialog._template_project_widget.input_field.text(), '/original/template')
             
             # Verify settings manager was reverted
             expected_calls = [
@@ -497,9 +446,7 @@ class TestSettingsDialog(unittest.TestCase):
                 call('completed_projects_folder', '/original/completed'),
                 call('recording_areas_layer', 'original_layer_id'),
                 call('objects_layer', 'original_objects_layer_id'),
-                call('features_layer', 'original_features_layer_id'),
-                call('use_qfield', True),
-                call('template_project_folder', '/original/template')
+                call('features_layer', 'original_features_layer_id')
             ]
             self.mock_settings_manager.set_value.assert_has_calls(expected_calls)
     

@@ -5,20 +5,20 @@ A QGIS plugin for archaeologists to prepare data for field work and import it ba
 ## Features
 
 - **Configuration Management**: Set up folders for field projects, total station data, and completed projects
-- **Archive Management**: Configure archive folders for imported CSV files and QField projects
-- **Prepare Recording**: Create QField projects for selected recording areas with proper layer configuration
+- **Archive Management**: Configure archive folders for imported CSV files and field projects
+- **Prepare Recording**: Create field projects for selected recording areas with proper layer configuration
 - **Import Data**: Import CSV files from total station data and completed field projects
 - **Automatic Archiving**: Imported files and projects are automatically moved to archive folders after successful import
-- **QField Integration**: Seamless integration with QField for mobile data collection
+- **Mobile Integration**: Seamless integration with mobile data collection tools
 - **Layer Management**: Automatic layer creation and configuration for field work
 - **Background Image Selection**: Intelligent selection of overlapping raster layers for each recording area
 - **Raster Processing**: Automatic clipping of background images to recording areas with configurable offsets
 - **Smart Field Validation**: Automatic detection and validation of object numbering and level fields
 - **Empty Layer Creation**: Automatic creation of empty "Objects" and "Features" layers for offline editing
 - **CSV Import Service**: Comprehensive CSV import with column mapping and validation
-- **QField Project Import**: Import completed QField projects and merge Objects/Features layers
+- **Field Project Import**: Import completed field projects and merge Objects/Features layers
 - **Column Mapping Dialog**: Interactive column mapping for CSV files with different structures
-- **Intelligent Data Filtering**: Automatic filtering of QField projects to include only relevant data:
+- **Intelligent Data Filtering**: Automatic filtering of field projects to include only relevant data:
   - **Recording Area Filtering**: Keeps only the selected recording area feature
   - **Related Extra Layers Filtering**: Filters extra layers based on QGIS relations
   - **Relation-Based Filtering**: Uses QGIS relations to identify and preserve related features
@@ -38,13 +38,12 @@ A QGIS plugin for archaeologists to prepare data for field work and import it ba
    - **Field Projects Destination**: Where new field projects will be created
    - **Total Station CSV Files**: Folder containing CSV files from total station data
    - **Completed Field Projects**: Folder containing completed field projects (with .qgs files)
-   - **Template QGIS Project**: Template project for field work (optional if using QField)
-   - **CSV Archive Folder**: Folder where imported CSV files will be moved after successful import
-   - **QField Archive Folder**: Folder where imported QField projects will be moved after successful import
+     - **Template QGIS Project**: Template project for field work
+  - **CSV Archive Folder**: Folder where imported CSV files will be moved after successful import
+  - **Field Project Archive Folder**: Folder where imported field projects will be moved after successful import
 3. Select the appropriate layers for recording areas, objects, and features
 4. Configure field mappings for objects layer (number and level fields)
-5. Choose whether to use QField integration
-6. **Extra Layers for QField**: Select additional vector layers to include as read-only in QField projects
+5. **Extra Layers for Field Projects**: Select additional vector layers to include in field projects
 
 ### Prepare Recording
 
@@ -60,17 +59,17 @@ A QGIS plugin for archaeologists to prepare data for field work and import it ba
   - Case preservation maintained throughout
    - **Background Image**: Dropdown selection of overlapping raster layers for each area
 4. Configure the next values for objects and features
-5. Click OK to create QField projects for each selected recording area
+5. Click OK to create QGIS field projects for each selected recording area
 
-**Project Naming**: When a level is defined, QField project names will be the display name of the recording area followed by '_' and the content of the Next level column. For example: "Test Area_A" or "Excavation Site_Level 1". If no level is defined, only the recording area name is used.
+**Project Naming**: When a level is defined, field project names will be the display name of the recording area followed by '_' and the content of the Next level column. For example: "Test Area_A" or "Excavation Site_Level 1". If no level is defined, only the recording area name is used.
 
-**Background Image Processing**: When a background image is selected, the system will automatically clip the raster to the recording area boundary with a configurable offset (default: 20 cm). This ensures the background image extends slightly beyond the recording area for better context in the field. The original raster remains unchanged, and the clipped version is used only for the QField project.
+**Background Image Processing**: When a background image is selected, the system will automatically clip the raster to the recording area boundary with a configurable offset (default: 20 cm). This ensures the background image extends slightly beyond the recording area for better context in the field. The original raster remains unchanged, and the clipped version is used only for the field project.
 
-**Intelligent Data Filtering**: When creating QField projects, the system automatically filters the data to include only relevant information:
+**Intelligent Data Filtering**: When creating field projects, the system automatically filters the data to include only relevant information:
 - **Recording Area Filtering**: Only the selected recording area feature is kept in the recording areas layer
 - **Related Extra Layers Filtering**: For extra layers with QGIS relations to the recording areas layer, only features related to the selected recording area are kept
 - **Relation-Based Filtering**: Uses QGIS relation manager to identify related features across layers
-- **Clean Datasets**: Creates focused, efficient QField projects with only the necessary data for field work
+- **Clean Datasets**: Creates focused, efficient field projects with only the necessary data for field work
 
 The raster processing service uses GDAL for high-quality clipping operations and handles:
 - Coordinate system transformations
@@ -97,12 +96,12 @@ The raster processing service uses GDAL for high-quality clipping operations and
 - **Automatic Archiving**: Moves imported CSV files to the configured archive folder after successful import
 - **Error Handling**: Comprehensive error handling with user-friendly messages
 
-#### QField Project Import Features
-- **Data.gpkg Processing**: Automatically processes data.gpkg files from QField projects
+#### Field Project Import Features
+- **Data.gpkg Processing**: Automatically processes data.gpkg files from field projects
 - **Layer Merging**: Merges Objects and Features layers from multiple projects
 - **Layer Creation**: Creates new "New Objects" and "New Features" layers in the project
 - **Feature Collection**: Collects all features from completed field recordings
-- **Automatic Archiving**: Moves imported QField projects to the configured archive folder after successful import
+- **Automatic Archiving**: Moves imported field projects to the configured archive folder after successful import
 - **Validation**: Validates project structure and data integrity
 
 ## Architecture
@@ -130,7 +129,7 @@ The plugin follows clean architecture principles with:
 make test
 ```
 
-The project includes 351 tests with 351 passing and 8 skipped (QGIS-specific tests).
+The project includes 357 tests with 357 passing and 8 skipped (QGIS-specific tests).
 
 ### Project Structure
 
@@ -138,27 +137,37 @@ The project includes 351 tests with 351 passing and 8 skipped (QGIS-specific tes
   - `core/`: Core interfaces and abstractions
   - `services/`: Service implementations
   - `ui/`: User interface components
-  - `test/`: Test files (351 tests)
+  - `test/`: Test files (357 tests)
 
 ### Key Services
 
 - **QGISSettingsManager**: QGIS-specific settings management
 - **QGISFileSystemService**: File system operations with Qt integration and archive functionality
 - **QGISLayerService**: Layer operations including spatial analysis
-- **QGISQFieldService**: QField integration and project packaging with automatic archiving and intelligent filtering
+- **QGISProjectCreationService**: Field project creation and packaging with automatic archiving and intelligent filtering
 - **QGISRasterProcessingService**: GDAL-based raster clipping with coordinate system handling
 - **CSVImportService**: CSV import with column mapping, validation, and automatic archiving
 - **ArcheoSyncConfigurationValidator**: Comprehensive validation system including archive folder validation
 
 ## Recent Updates
 
-### Version 0.10.0 (Latest)
-- **Intelligent QField Data Filtering**: Added automatic filtering of QField projects to include only relevant data
+### Version 0.10.1 (Latest)
+- **Raster Clipping Coordinate Comparison Fix**: Fixed critical error in temporary shapefile creation during raster clipping
+  - **Root Cause**: QgsPointXY objects were being compared directly with `!=` operator, causing type comparison errors
+  - **Solution**: Implemented proper coordinate comparison using `.x()` and `.y()` methods for QgsPointXY objects
+  - **Impact**: Resolves "'>' not supported between instances of 'str' and 'int'" error when preparing recordings with background images
+  - **Compatibility**: Works with both single and multipart polygons, handles both closed and unclosed coordinate sequences
+  - **Testing**: Added comprehensive tests for coordinate comparison scenarios to prevent regression
+- **Enhanced Error Handling**: Improved robustness of polygon coordinate processing in raster clipping operations
+- **Test Coverage**: Expanded to 357 tests with comprehensive coverage
+
+### Version 0.10.0
+- **Intelligent Field Project Data Filtering**: Added automatic filtering of field projects to include only relevant data
   - **Recording Area Filtering**: Automatically keeps only the selected recording area feature
   - **Related Extra Layers Filtering**: Filters extra layers based on QGIS relations to recording areas
   - **Relation-Based Filtering**: Uses QGIS relation manager to identify and preserve related features
-  - **Clean Datasets**: Creates focused, efficient QField projects for field work
-- **Enhanced Test Coverage**: Expanded to 351 tests with comprehensive filtering test coverage
+  - **Clean Datasets**: Creates focused, efficient field projects for field work
+- **Enhanced Test Coverage**: Expanded to 357 tests with comprehensive filtering test coverage
 - **Code Quality**: Removed debug outputs and improved error handling for production readiness
 
 ### Version 0.9.0
@@ -169,24 +178,24 @@ The project includes 351 tests with 351 passing and 8 skipped (QGIS-specific tes
 - **Test Coverage**: Expanded to 351 tests with comprehensive coverage
 
 ### Version 0.8.0
-- **Archive Folder Management**: Added configuration for CSV and QField project archive folders
+- **Archive Folder Management**: Added configuration for CSV and field project archive folders
 - **Automatic Archiving**: Imported files and projects are automatically moved to archive folders after successful import
 - **Enhanced File System Service**: Added move operations for files and directories
 - **Configuration Validation**: Real-time validation of archive folder paths
 - **Test Coverage**: Expanded to 347 tests with comprehensive coverage
 
 ### Version 0.7.0
-- **QField Service Consolidation**: Eliminated redundant methods and improved API design
-- **Extra Layers Support**: Added support for additional read-only layers in QField projects
+- **Project Creation Service Consolidation**: Eliminated redundant methods and improved API design
+- **Extra Layers Support**: Added support for additional read-only layers in field projects
 - **Enhanced Configuration**: Multi-select widget for extra vector layers
 
 ### Version 0.6.0
-- **Complete Import System**: Comprehensive CSV import and QField project import functionality
+- **Complete Import System**: Comprehensive CSV import and field project import functionality
 - **Column Mapping Dialog**: Interactive UI for CSV column mapping
-- **QField Integration Enhancements**: Complete project packaging with empty layer creation
+- **Project Creation Enhancements**: Complete project packaging with empty layer creation
 
 ### Version 0.5.0
-- **QField Integration**: Complete QField project packaging with empty layer creation
+- **Project Creation Integration**: Complete field project packaging with empty layer creation
 - **Background Image Support**: Intelligent raster layer selection for recording areas
 - **Enhanced UI**: Improved user experience with better validation and error handling
 - **Test Coverage**: Expanded to 324 tests with comprehensive coverage
@@ -194,7 +203,7 @@ The project includes 351 tests with 351 passing and 8 skipped (QGIS-specific tes
 ### Version 0.4.0
 - **Background Image Selection**: Added spatial analysis for overlapping raster layers
 - **Raster Layer Support**: Extended layer service with spatial intersection detection
-- **QField Service**: Implemented comprehensive project packaging
+- **Project Creation Service**: Implemented comprehensive project packaging
 
 ### Version 0.3.0
 - **Objects/Features Layer Support**: Added polygon/multipolygon geometry support

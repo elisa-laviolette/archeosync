@@ -124,8 +124,6 @@ class TestSettingsDialog:
         assert hasattr(self.dialog, '_total_station_widget')
         assert hasattr(self.dialog, '_completed_projects_widget')
         assert hasattr(self.dialog, '_recording_areas_widget')
-        assert hasattr(self.dialog, '_qfield_checkbox')
-        assert hasattr(self.dialog, '_template_project_widget')
 
     def test_field_projects_input_properties(self):
         assert self.dialog._field_projects_widget.input_field.isReadOnly() is True
@@ -145,13 +143,7 @@ class TestSettingsDialog:
         assert self.dialog._recording_areas_widget.combo_box.count() > 0
         assert self.dialog._recording_areas_widget.combo_box.itemText(0) == "-- Select a polygon layer --"
 
-    def test_qfield_checkbox_properties(self):
-        assert self.dialog._qfield_checkbox.text() == "Use QField for field data collection"
-        assert self.dialog._qfield_checkbox.isChecked() is False
 
-    def test_template_project_input_properties(self):
-        assert self.dialog._template_project_widget.input_field.isReadOnly() is True
-        assert self.dialog._template_project_widget.input_field.placeholderText() == "Select folder containing template QGIS project..."
 
     def test_refresh_layer_list(self):
         """Test refreshing the layer list."""

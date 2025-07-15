@@ -22,6 +22,7 @@ Usage:
 """
 
 from typing import List, Optional, Dict, Any
+import os
 from qgis.core import QgsProject, QgsVectorLayer, QgsRasterLayer, QgsExpression, QgsExpressionContext, QgsExpressionContextUtils, QgsFields, QgsField, QgsFeature, QgsGeometry
 
 try:
@@ -726,40 +727,76 @@ class QGISLayerService(ILayerService):
             True if QML style copying was successful, False otherwise
         """
         try:
-            # Get the source layer's style file path
-            source_style_path = source_layer.styleURI()
+            print(f"[DEBUG] Starting QML style copy from {source_layer.name()} to {target_layer.name()}")
             
-            if source_style_path and source_style_path.endswith('.qml'):
-                # Try to load the QML style file
-                if source_layer.loadNamedStyle(source_style_path)[0]:
-                    # If successful, apply the same style to the target layer
-                    if target_layer.loadNamedStyle(source_style_path)[0]:
-                        print(f"Copied QML style from {source_style_path} to {target_layer.name()}")
+            # Method 1: Try to copy the actual QML file content
+            source_style_path = source_layer.styleURI()
+            if source_style_path and source_style_path.endswith('.qml') and os.path.exists(source_style_path):
+                print(f"[DEBUG] Found QML style file: {source_style_path}")
+                
+                # Read the QML content
+                try:
+                    with open(source_style_path, 'r', encoding='utf-8') as f:
+                        qml_content = f.read()
+                    print(f"[DEBUG] Successfully read QML content ({len(qml_content)} characters)")
+                    
+                    # Create target QML file path
+                    target_style_path = os.path.join(os.path.dirname(target_layer.source()), f"{target_layer.name()}.qml")
+                    print(f"[DEBUG] Target QML path: {target_style_path}")
+                    
+                    # Write QML content to target file
+                    with open(target_style_path, 'w', encoding='utf-8') as f:
+                        f.write(qml_content)
+                    print(f"[DEBUG] Successfully wrote QML file: {target_style_path}")
+                    
+                    # Load the QML style into the target layer
+                    if target_layer.loadNamedStyle(target_style_path)[0]:
+                        print(f"Successfully loaded QML style from {target_style_path} to {target_layer.name()}")
+                        target_layer.triggerRepaint()
                         return True
                     else:
-                        print(f"Could not import QML style to {target_layer.name()}")
-                else:
-                    print(f"Could not load QML style from {source_style_path}")
+                        print(f"Failed to load QML style into target layer")
+                        
+                except Exception as e:
+                    print(f"[DEBUG] Error reading/writing QML file: {str(e)}")
             
-            # Try to export current style to QML and then import it
+            # Method 2: Use QGIS's built-in style copying (more reliable)
+            print(f"[DEBUG] Trying QGIS built-in style copying")
             import tempfile
-            import os
             
-            # Create a temporary QML file
+            # Create temporary file for style export
             with tempfile.NamedTemporaryFile(suffix='.qml', delete=False) as temp_file:
                 temp_qml_path = temp_file.name
             
             try:
                 # Export source layer style to temporary QML file
-                if source_layer.saveNamedStyle(temp_qml_path)[0]:
-                    # Import the style to target layer
-                    if target_layer.loadNamedStyle(temp_qml_path)[0]:
-                        print(f"Exported and imported style from {source_layer.name()} to {target_layer.name()}")
+                export_result = source_layer.saveNamedStyle(temp_qml_path)
+                if export_result[0]:
+                    print(f"[DEBUG] Successfully exported style to temporary file: {temp_qml_path}")
+                    
+                    # Read the exported QML content
+                    with open(temp_qml_path, 'r', encoding='utf-8') as f:
+                        exported_qml_content = f.read()
+                    print(f"[DEBUG] Exported QML content length: {len(exported_qml_content)} characters")
+                    
+                    # Create target QML file path
+                    target_style_path = os.path.join(os.path.dirname(target_layer.source()), f"{target_layer.name()}.qml")
+                    
+                    # Write the exported QML content to target file
+                    with open(target_style_path, 'w', encoding='utf-8') as f:
+                        f.write(exported_qml_content)
+                    print(f"[DEBUG] Successfully wrote exported QML to: {target_style_path}")
+                    
+                    # Load the style into the target layer
+                    if target_layer.loadNamedStyle(target_style_path)[0]:
+                        print(f"Successfully copied complete style from {source_layer.name()} to {target_layer.name()}")
+                        target_layer.triggerRepaint()
                         return True
                     else:
-                        print(f"Could not import style to {target_layer.name()}")
+                        print(f"Failed to load exported style into target layer")
                 else:
-                    print(f"Could not export style from {source_layer.name()}")
+                    print(f"Failed to export style from source layer")
+                    
             finally:
                 # Clean up temporary file
                 try:
@@ -767,27 +804,45 @@ class QGISLayerService(ILayerService):
                 except:
                     pass
             
-            # Additional: Try to copy style using QGIS's built-in style copying
+            # Method 3: Direct renderer and form copying as fallback
+            print(f"[DEBUG] Using direct renderer and form copying as fallback")
+            success = False
+            
+            # Copy renderer
+            if hasattr(source_layer, 'renderer') and hasattr(target_layer, 'setRenderer'):
+                try:
+                    target_layer.setRenderer(source_layer.renderer().clone())
+                    print(f"[DEBUG] Successfully copied renderer")
+                    success = True
+                except Exception as e:
+                    print(f"[DEBUG] Error copying renderer: {str(e)}")
+            
+            # Copy form configuration
+            if hasattr(source_layer, 'editFormConfig'):
+                try:
+                    target_layer.setEditFormConfig(source_layer.editFormConfig())
+                    print(f"[DEBUG] Successfully copied form configuration")
+                    success = True
+                except Exception as e:
+                    print(f"[DEBUG] Error copying form configuration: {str(e)}")
+            
+            # Copy field configurations
             try:
-                # Use QGIS's style copying mechanism which includes all form configurations
-                style_result = source_layer.saveNamedStyle(tempfile.mktemp(suffix='.qml'))
-                if style_result[0]:
-                    temp_style_path = style_result[1]
-                    try:
-                        if target_layer.loadNamedStyle(temp_style_path)[0]:
-                            print(f"Copied complete style including forms from {source_layer.name()} to {target_layer.name()}")
-                            return True
-                    finally:
-                        # Clean up temporary file
-                        try:
-                            os.unlink(temp_style_path)
-                        except:
-                            pass
+                self._copy_field_configurations(source_layer, target_layer)
+                print(f"[DEBUG] Successfully copied field configurations")
+                success = True
             except Exception as e:
-                print(f"Warning: Could not copy style using QGIS mechanism: {str(e)}")
+                print(f"[DEBUG] Error copying field configurations: {str(e)}")
+            
+            if success:
+                target_layer.triggerRepaint()
+                print(f"Used fallback method to copy styles from {source_layer.name()} to {target_layer.name()}")
+                return True
                         
         except Exception as e:
-            print(f"Warning: Could not copy QML style: {str(e)}")
+            print(f"Error in QML style copying: {str(e)}")
+            import traceback
+            traceback.print_exc()
         
         return False
     

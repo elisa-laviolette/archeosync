@@ -1374,15 +1374,7 @@ class TestArcheoSyncConfigurationValidator(unittest.TestCase):
         errors = self.validator.validate_total_station_folder('/path/to/folder')
         self.assertEqual(len(errors), 0)  # No CSV files required, folder just needs to exist
     
-    def test_validate_template_project_folder_no_qgis_files(self):
-        """Test validation of template project folder with no QGIS files."""
-        self.file_system_service.path_exists.return_value = True
-        self.file_system_service.is_directory.return_value = True
-        self.file_system_service.list_files.return_value = []
-        
-        errors = self.validator.validate_template_project_folder('/path/to/folder')
-        self.assertEqual(len(errors), 1)
-        self.assertIn('No QGIS project files (.qgz or .qgs) found in template folder', errors[0])
+
     
     def test_validate_recording_areas_layer_empty_layer_id(self):
         """Test validation of empty recording areas layer ID."""
@@ -1531,46 +1523,7 @@ class TestArcheoSyncConfigurationValidator(unittest.TestCase):
         errors = self.validator.validate_csv_archive_folder('/test/path')
         self.assertEqual(len(errors), 0)
     
-    def test_validate_qfield_archive_folder_empty_path(self):
-        """Test validation of empty QField archive folder path."""
-        errors = self.validator.validate_qfield_archive_folder('')
-        self.assertEqual(len(errors), 0)  # Empty path is valid (optional)
-    
-    def test_validate_qfield_archive_folder_not_exists(self):
-        """Test validation of QField archive folder that does not exist."""
-        self.file_system_service.path_exists.return_value = False
-        
-        errors = self.validator.validate_qfield_archive_folder('/test/path')
-        self.assertEqual(len(errors), 1)
-        self.assertIn('QField archive folder does not exist', errors[0])
-    
-    def test_validate_qfield_archive_folder_not_directory(self):
-        """Test validation of QField archive folder that is not a directory."""
-        self.file_system_service.path_exists.return_value = True
-        self.file_system_service.is_directory.return_value = False
-        
-        errors = self.validator.validate_qfield_archive_folder('/test/path')
-        self.assertEqual(len(errors), 1)
-        self.assertIn('QField archive path is not a directory', errors[0])
-    
-    def test_validate_qfield_archive_folder_not_writable(self):
-        """Test validation of QField archive folder that is not writable."""
-        self.file_system_service.path_exists.return_value = True
-        self.file_system_service.is_directory.return_value = True
-        self.file_system_service.is_writable.return_value = False
-        
-        errors = self.validator.validate_qfield_archive_folder('/test/path')
-        self.assertEqual(len(errors), 1)
-        self.assertIn('QField archive folder is not writable', errors[0])
-    
-    def test_validate_qfield_archive_folder_valid(self):
-        """Test validation of valid QField archive folder."""
-        self.file_system_service.path_exists.return_value = True
-        self.file_system_service.is_directory.return_value = True
-        self.file_system_service.is_writable.return_value = True
-        
-        errors = self.validator.validate_qfield_archive_folder('/test/path')
-        self.assertEqual(len(errors), 0)
+
     
     def test_validate_all_settings(self):
         """Test validation of all settings at once."""
@@ -1599,15 +1552,13 @@ class TestArcheoSyncConfigurationValidator(unittest.TestCase):
         # Mock no relationships
         self.layer_service.get_layer_relationships.return_value = []
         
-        settings_without_qfield = {
+        settings = {
             'field_projects_folder': '/valid/path',
             'total_station_folder': '/valid/path',
-            'completed_projects_folder': '/valid/path',
-            'template_project_folder': '/valid/path',
-            'use_qfield': False
+            'completed_projects_folder': '/valid/path'
         }
         
-        results = self.validator.validate_all_settings(settings_without_qfield)
+        results = self.validator.validate_all_settings(settings)
         
         # Debug: print all results to see what's failing
         print(f"Validation results: {results}")
@@ -1615,31 +1566,8 @@ class TestArcheoSyncConfigurationValidator(unittest.TestCase):
         self.assertIn('field_projects_folder', results)
         self.assertIn('total_station_folder', results)
         self.assertIn('completed_projects_folder', results)
-        self.assertIn('template_project_folder', results)
         
         # All validations should pass
-        for field_name, field_errors in results.items():
-            if field_errors:  # If there are errors, print them
-                print(f"Errors in {field_name}: {field_errors}")
-            self.assertEqual(len(field_errors), 0, f"Field {field_name} has errors: {field_errors}")
-        
-        # Test with QField enabled (template folder not required) - no layers to avoid relationship validation
-        settings_with_qfield = {
-            'field_projects_folder': '/valid/path',
-            'total_station_folder': '/valid/path',
-            'completed_projects_folder': '/valid/path',
-            'template_project_folder': '',  # Empty when QField is used
-            'use_qfield': True
-        }
-        
-        results = self.validator.validate_all_settings(settings_with_qfield)
-        
-        self.assertIn('field_projects_folder', results)
-        self.assertIn('total_station_folder', results)
-        self.assertIn('completed_projects_folder', results)
-        self.assertIn('template_project_folder', results)
-        
-        # All validations should pass, including empty template folder when QField is used
         for field_name, field_errors in results.items():
             if field_errors:  # If there are errors, print them
                 print(f"Errors in {field_name}: {field_errors}")
@@ -1675,33 +1603,7 @@ class TestArcheoSyncConfigurationValidator(unittest.TestCase):
         self.assertTrue(any('total_station_folder: Path does not exist' in error for error in all_errors))
         self.assertTrue(any('total_station_folder: Path is not readable' in error for error in all_errors))
 
-    def test_validate_template_project_folder_conditional_on_qfield(self):
-        """Test that template project folder validation is conditional on QField setting."""
-        # Mock file system service
-        self.file_system_service.path_exists.return_value = True
-        self.file_system_service.is_directory.return_value = True
-        self.file_system_service.list_files.return_value = ['test.qgz']
-        
-        # Test with QField disabled - template folder should be required
-        settings_without_qfield = {
-            'template_project_folder': '',
-            'use_qfield': False
-        }
-        
-        results = self.validator.validate_all_settings(settings_without_qfield)
-        self.assertIn('template_project_folder', results)
-        self.assertGreater(len(results['template_project_folder']), 0)
-        self.assertIn('Template project folder path is required', results['template_project_folder'][0])
-        
-        # Test with QField enabled - template folder should not be required
-        settings_with_qfield = {
-            'template_project_folder': '',
-            'use_qfield': True
-        }
-        
-        results = self.validator.validate_all_settings(settings_with_qfield)
-        self.assertIn('template_project_folder', results)
-        self.assertEqual(len(results['template_project_folder']), 0)
+
 
     def test_validate_objects_layer_fields_no_layer_selected(self):
         """Test field validation when no layer is selected."""

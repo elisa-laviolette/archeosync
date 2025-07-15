@@ -212,15 +212,7 @@ class IConfigurationValidator(ABC):
         """Validate CSV archive folder configuration."""
         pass
     
-    @abstractmethod
-    def validate_qfield_archive_folder(self, path: str) -> List[str]:
-        """Validate QField archive folder configuration."""
-        pass
-    
-    @abstractmethod
-    def validate_template_project_folder(self, path: str) -> List[str]:
-        """Validate template project folder configuration."""
-        pass
+
     
     @abstractmethod
     def validate_recording_areas_layer(self, layer_id: str) -> List[str]:
@@ -438,91 +430,39 @@ class ILayerService(ABC):
         pass
 
 
-class IQFieldService(ABC):
-    """Interface for QField operations."""
-    
-    @abstractmethod
-    def is_qfield_enabled(self) -> bool:
-        """Check if QField integration is enabled in settings."""
-        pass
-    
-    @abstractmethod
-    def package_for_qfield(self, 
-                          recording_area_feature: Any,
-                          recording_areas_layer_id: str,
-                          objects_layer_id: str,
-                          features_layer_id: Optional[str],
-                          background_layer_id: Optional[str],
-                          extra_layers: Optional[List[str]] = None,
-                          destination_folder: str = "",
-                          project_name: str = "") -> bool:
-        """
-        Package a QField project for a specific recording area.
-        
-        Args:
-            recording_area_feature: The feature representing the recording area
-            recording_areas_layer_id: ID of the recording areas layer
-            objects_layer_id: ID of the objects layer
-            features_layer_id: ID of the features layer (optional)
-            background_layer_id: ID of the background image layer (optional)
-            extra_layers: List of additional layer IDs to include as read-only (optional)
-            destination_folder: Folder where to save the QField project
-            project_name: Name for the QField project
-            
-        Returns:
-            True if packaging was successful, False otherwise
-        """
-        pass
-    
-    @abstractmethod
-    def package_for_qfield_with_data(self, 
-                                   feature_data: Dict[str, Any],
-                                   recording_areas_layer_id: str,
-                                   objects_layer_id: str,
-                                   features_layer_id: Optional[str],
-                                   background_layer_id: Optional[str],
-                                   extra_layers: Optional[List[str]] = None,
-                                   destination_folder: str = "",
-                                   project_name: str = "",
-                                   add_variables: bool = True,
-                                   next_values: Dict[str, str] = None) -> bool:
-        """
-        Package a QField project for a specific recording area using extracted feature data.
-        
-        Args:
-            feature_data: Dictionary containing feature data (id, geometry_wkt, attributes)
-            recording_areas_layer_id: ID of the recording areas layer
-            objects_layer_id: ID of the objects layer
-            features_layer_id: ID of the features layer (optional)
-            background_layer_id: ID of the background image layer (optional)
-            extra_layers: List of additional layer IDs to include as read-only (optional)
-            destination_folder: Folder where to save the QField project
-            project_name: Name for the QField project
-            add_variables: Whether to add project variables (next_number, next_level, recording_area_name)
-            next_values: Dictionary containing next_number, next_level, and background_image values (required if add_variables=True)
-            
-        Returns:
-            True if packaging was successful, False otherwise
-        """
-        pass
-    
 
+
+
+class IProjectCreationService(ABC):
+    """Interface for QGIS project creation operations."""
     
     @abstractmethod
-    def get_qfieldsync_plugin(self) -> Optional[Any]:
-        """Get the QFieldSync plugin instance if available."""
-        pass
-    
-    @abstractmethod
-    def import_qfield_projects(self, project_paths: List[str]) -> ValidationResult:
+    def create_field_project(self,
+                           feature_data: Dict[str, Any],
+                           recording_areas_layer_id: str,
+                           objects_layer_id: str,
+                           features_layer_id: Optional[str],
+                           background_layer_id: Optional[str],
+                           extra_layers: Optional[List[str]] = None,
+                           destination_folder: str = "",
+                           project_name: str = "",
+                           next_values: Dict[str, str] = None) -> bool:
         """
-        Import QField projects and collect Objects and Features layers from data.gpkg files.
+        Create a QGIS field project for a specific recording area.
         
         Args:
-            project_paths: List of paths to QField project directories
+            feature_data: Dictionary containing feature data (id, geometry_wkt, attributes, display_name)
+            recording_areas_layer_id: ID of the recording areas layer
+            objects_layer_id: ID of the objects layer
+            features_layer_id: ID of the features layer (optional)
+            background_layer_id: ID of the background image layer (optional)
+            extra_layers: List of additional layer IDs to include (optional)
+            destination_folder: Folder where to save the field project
+            project_name: Name for the field project
+            next_values: Dictionary containing first_number, level values (optional)
             
         Returns:
-            ValidationResult with success status and message
+            True if project creation was successful, False otherwise
         """
         pass
 
@@ -609,6 +549,34 @@ class IRasterProcessingService(ABC):
             
         Returns:
             Path to the clipped raster file (GeoTIFF), or None if operation failed
+            
+        Note:
+            Implementations should handle coordinate system transformations
+            and temporary file cleanup automatically.
+        """
+        pass
+    
+    @abstractmethod
+    def clip_raster_to_geometry(self, 
+                               raster_layer_id: str,
+                               geometry_wkt: str,
+                               output_path: Optional[str] = None,
+                               offset_meters: float = 0.2) -> bool:
+        """
+        Clip a raster layer to a geometry defined by WKT string with an offset.
+        
+        This method should clip a raster layer to the boundary of a polygon defined by
+        a WKT (Well-Known Text) string, optionally adding a buffer zone around
+        the geometry. The clipped raster should be saved as a GeoTIFF file.
+        
+        Args:
+            raster_layer_id: ID of the raster layer to clip (must exist in QGIS project)
+            geometry_wkt: WKT string defining the polygon geometry to clip to
+            output_path: Optional output path for the clipped raster (auto-generated if None)
+            offset_meters: Offset in meters to expand the clipping area (default: 0.2)
+            
+        Returns:
+            True if clipping was successful, False otherwise
             
         Note:
             Implementations should handle coordinate system transformations

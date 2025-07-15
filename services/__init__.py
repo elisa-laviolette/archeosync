@@ -10,9 +10,9 @@ from .file_system_service import QGISFileSystemService
 from .translation_service import QGISTranslationService
 from .configuration_validator import ArcheoSyncConfigurationValidator
 from .layer_service import QGISLayerService
-from .qfield_service import QGISQFieldService
 from .csv_import_service import CSVImportService
 from .raster_processing_service import QGISRasterProcessingService
+from .project_creation_service import QGISProjectCreationService
 
 __all__ = [
     'QGISSettingsManager',
@@ -20,6 +20,7 @@ __all__ = [
     'QGISTranslationService',
     'ArcheoSyncConfigurationValidator',
     'QGISLayerService',
-    'QGISQFieldService',
-    'CSVImportService'
+    'CSVImportService',
+    'QGISRasterProcessingService',
+    'QGISProjectCreationService'
 ] 

@@ -42,8 +42,6 @@ class TestArcheoSyncDialogSettings(unittest.TestCase):
         def mock_get_value(key, default):
             if key == 'field_projects_folder':
                 return '/default/field/projects'  # Return default folder path
-            elif key == 'use_qfield':
-                return True  # Return boolean for QField setting
             else:
                 return default  # Return default for other settings
         
@@ -142,7 +140,6 @@ class TestArcheoSyncDialogSettings(unittest.TestCase):
             '',                # recording_areas_layer (not tested here)
             '',                # objects_layer (not tested here)
             '',                # features_layer (not tested here)
-            True               # use_qfield
         ]
         
         # Call the load settings method directly
@@ -150,13 +147,11 @@ class TestArcheoSyncDialogSettings(unittest.TestCase):
         
         self.mock_settings.get_value.assert_any_call('field_projects_folder', '')
         self.assertEqual(self.dialog._field_projects_widget.input_field.text(), test_folder_path)
-        self.assertTrue(self.dialog._qfield_checkbox.isChecked())
 
     def test_save_and_accept_success(self):
         """Test successful save and accept for field projects."""
         test_folder_path = "/test/field/projects"
         self.dialog._field_projects_widget.input_field.setText(test_folder_path)
-        self.dialog._qfield_checkbox.setChecked(True)
         
         # Mock validation to return no errors
         self.mock_validator.validate_all_settings.return_value = {}
@@ -166,7 +161,6 @@ class TestArcheoSyncDialogSettings(unittest.TestCase):
         self.dialog._save_and_accept()
         
         self.mock_settings.set_value.assert_any_call('field_projects_folder', test_folder_path)
-        self.mock_settings.set_value.assert_any_call('use_qfield', True)
 
     def test_save_and_accept_validation_errors(self):
         """Test save_and_accept when validation fails."""
@@ -186,35 +180,22 @@ class TestArcheoSyncDialogSettings(unittest.TestCase):
         # Should not call set_value when validation fails
         self.mock_settings.set_value.assert_not_called()
 
-    def test_qfield_checkbox_properties(self):
-        """Test that QField checkbox has correct properties."""
-        # Test checkbox text
-        self.assertEqual(
-            self.dialog._qfield_checkbox.text(),
-            "Use QField for field data collection"
-        )
-        
-        # Test default state - should be checked since mock returns True
-        self.assertTrue(self.dialog._qfield_checkbox.isChecked())
+
 
     def test_cancel_reverts_settings(self):
-        """Test cancel reverts field projects folder and QField checkbox."""
+        """Test cancel reverts field projects folder."""
         original_folder = "/original/folder"
-        original_qfield = True
         self.dialog._original_values = {
             'field_projects_folder': original_folder,
             'total_station_folder': '',
-            'completed_projects_folder': '',
-            'use_qfield': original_qfield
+            'completed_projects_folder': ''
         }
         self.dialog._field_projects_widget.input_field.setText("/changed/folder")
-        self.dialog._qfield_checkbox.setChecked(False)
         
         # Call the reject method directly
         self.dialog._reject()
         
         self.assertEqual(self.dialog._field_projects_widget.input_field.text(), original_folder)
-        self.assertTrue(self.dialog._qfield_checkbox.isChecked())
 
 
 if __name__ == '__main__':

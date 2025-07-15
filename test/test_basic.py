@@ -55,10 +55,10 @@ class TestBasicFunctionality:
         
         # Test case 1: Level is defined
         feature_name = "Test Area"
-        next_level = "A"
+        level = "A"
         
-        if next_level:
-            project_name = f"{feature_name}_{next_level}"
+        if level:
+            project_name = f"{feature_name}_{level}"
         else:
             project_name = feature_name
         
@@ -69,10 +69,10 @@ class TestBasicFunctionality:
         
         # Test case 2: Level is not defined
         feature_name = "Test Area"
-        next_level = ""
+        level = ""
         
-        if next_level:
-            project_name = f"{feature_name}_{next_level}"
+        if level:
+            project_name = f"{feature_name}_{level}"
         else:
             project_name = feature_name
         
@@ -83,10 +83,10 @@ class TestBasicFunctionality:
         
         # Test case 3: Level with special characters
         feature_name = "Test Area (North)"
-        next_level = "Level 1"
+        level = "Level 1"
         
-        if next_level:
-            project_name = f"{feature_name}_{next_level}"
+        if level:
+            project_name = f"{feature_name}_{level}"
         else:
             project_name = feature_name
         

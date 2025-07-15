@@ -35,7 +35,6 @@ class TestPrepareRecordingDialog(unittest.TestCase):
         """Set up test fixtures."""
         self.mock_layer_service = Mock()
         self.mock_settings_manager = Mock()
-        self.mock_qfield_service = Mock()
         
         # Set up default mock return values
         self.mock_settings_manager.get_value.return_value = ''
@@ -45,13 +44,9 @@ class TestPrepareRecordingDialog(unittest.TestCase):
         self.mock_layer_service.calculate_next_level.return_value = ''
         self.mock_layer_service.get_raster_layers_overlapping_feature.return_value = []
         
-        # Set up QField service mock
-        self.mock_qfield_service.is_qfield_enabled.return_value = False
-        
         self.dialog = PrepareRecordingDialog(
             layer_service=self.mock_layer_service,
-            settings_manager=self.mock_settings_manager,
-            qfield_service=self.mock_qfield_service
+            settings_manager=self.mock_settings_manager
         )
     
     def tearDown(self):
@@ -68,7 +63,6 @@ class TestPrepareRecordingDialog(unittest.TestCase):
         """Test dialog initialization with injected dependencies."""
         self.assertEqual(self.dialog._layer_service, self.mock_layer_service)
         self.assertEqual(self.dialog._settings_manager, self.mock_settings_manager)
-        self.assertEqual(self.dialog._qfield_service, self.mock_qfield_service)
     
     def test_window_title(self):
         """Test that dialog has correct window title."""
@@ -90,7 +84,7 @@ class TestPrepareRecordingDialog(unittest.TestCase):
         self.assertEqual(self.dialog._recording_areas_label.text(), "Recording Areas Layer: Not configured")
         self.assertEqual(self.dialog._selected_count_label.text(), "Selected Entities: 0")
         
-        # Verify OK button is hidden (QField is disabled by default in mock)
+        # Verify OK button is hidden (no selection)
         ok_button = self.dialog._button_box.button(self.dialog._button_box.Ok)
         self.assertFalse(ok_button.isVisible())
     
@@ -109,7 +103,7 @@ class TestPrepareRecordingDialog(unittest.TestCase):
         self.assertEqual(self.dialog._recording_areas_label.text(), "Recording Areas Layer: Layer not found")
         self.assertEqual(self.dialog._selected_count_label.text(), "Selected Entities: 0")
         
-        # Verify OK button is hidden (QField is disabled by default in mock)
+        # Verify OK button is hidden (no selection)
         ok_button = self.dialog._button_box.button(self.dialog._button_box.Ok)
         self.assertFalse(ok_button.isVisible())
     
@@ -137,7 +131,7 @@ class TestPrepareRecordingDialog(unittest.TestCase):
         self.assertEqual(self.dialog._recording_areas_label.text(), "Recording Areas Layer: Test Recording Areas")
         self.assertEqual(self.dialog._selected_count_label.text(), "Selected Entities: 0")
         
-        # Verify OK button is hidden (QField is disabled by default in mock)
+        # Verify OK button is hidden (no selection)
         ok_button = self.dialog._button_box.button(self.dialog._button_box.Ok)
         self.assertFalse(ok_button.isVisible())
         
@@ -146,9 +140,6 @@ class TestPrepareRecordingDialog(unittest.TestCase):
     
     def test_update_selected_count_with_selection(self):
         """Test update when layer exists and features are selected."""
-        # Set up all mocks BEFORE creating the dialog
-        self.mock_qfield_service.is_qfield_enabled.return_value = True
-        
         # Mock settings to return proper values for all calls
         def mock_get_value(key, default=None):
             if key == 'recording_areas_layer':
@@ -183,11 +174,10 @@ class TestPrepareRecordingDialog(unittest.TestCase):
         mock_layer.fields.return_value = mock_fields
         mock_layer.displayExpression.return_value = ''  # No display expression to avoid QGIS expression evaluation
         
-        # Create a new dialog with QField enabled
+        # Create a new dialog
         dialog = PrepareRecordingDialog(
             layer_service=self.mock_layer_service,
-            settings_manager=self.mock_settings_manager,
-            qfield_service=self.mock_qfield_service
+            settings_manager=self.mock_settings_manager
         )
         
         # Call the method
@@ -197,13 +187,13 @@ class TestPrepareRecordingDialog(unittest.TestCase):
         self.assertEqual(dialog._recording_areas_label.text(), "Recording Areas Layer: Test Recording Areas")
         self.assertEqual(dialog._selected_count_label.text(), "Selected Entities: 1")
         
-        # Verify OK button is enabled and has correct text (QField is enabled)
+        # Verify OK button is enabled and has correct text (selection exists)
         ok_button = dialog._button_box.button(dialog._button_box.Ok)
         self.assertTrue(ok_button.isEnabled())
         self.assertEqual(ok_button.text(), "Prepare Recording")
         
         # Note: Button visibility is managed by Qt events and may not be immediately visible
-        # in test environment, but the logic is correct (enabled when QField is enabled and selection exists)
+        # in test environment, but the logic is correct (enabled when selection exists)
         
         # Verify table has one row
         self.assertEqual(dialog._entities_table.rowCount(), 1)
@@ -399,13 +389,13 @@ class TestPrepareRecordingDialog(unittest.TestCase):
         # Verify table has one row
         self.assertEqual(self.dialog._entities_table.rowCount(), 1)
         
-        # Verify next number is calculated correctly (10 + 1 = 11)
-        next_number_item = self.dialog._entities_table.item(0, 2)  # Next number column
-        self.assertEqual(next_number_item.text(), '11')
+        # Verify first number is calculated correctly (10 + 1 = 11)
+        first_number_item = self.dialog._entities_table.item(0, 2)  # First number column
+        self.assertEqual(first_number_item.text(), '11')
         
-        # Verify next level is calculated correctly
-        next_level_item = self.dialog._entities_table.item(0, 4)  # Next level column
-        self.assertEqual(next_level_item.text(), 'Level B')
+        # Verify level is calculated correctly
+        level_item = self.dialog._entities_table.item(0, 4)  # Level column
+        self.assertEqual(level_item.text(), 'Level B')
         
         # Verify background image dropdown was created
         background_widget = self.dialog._entities_table.cellWidget(0, 5)  # Background image column
@@ -455,9 +445,9 @@ class TestPrepareRecordingDialog(unittest.TestCase):
         # Populate table
         self.dialog._populate_entities_table([mock_feature])
         
-        # Set next number and next level values
-        self.dialog._entities_table.setItem(0, 2, QtWidgets.QTableWidgetItem('16'))  # Next number column
-        self.dialog._entities_table.setItem(0, 4, QtWidgets.QTableWidgetItem('Level C'))  # Next level column
+        # Set first number and level values
+        self.dialog._entities_table.setItem(0, 2, QtWidgets.QTableWidgetItem('16'))  # First number column
+        self.dialog._entities_table.setItem(0, 4, QtWidgets.QTableWidgetItem('Level C'))  # Level column
         
         # Set background image selection
         background_widget = self.dialog._entities_table.cellWidget(0, 5)  # Background image column
@@ -467,15 +457,15 @@ class TestPrepareRecordingDialog(unittest.TestCase):
         result = self.dialog.get_next_values_for_feature(0)
         
         # Verify result
-        self.assertEqual(result['next_number'], '16')  # 15 + 1
-        self.assertEqual(result['next_level'], 'Level C')
+        self.assertEqual(result['first_number'], '16')  # 15 + 1
+        self.assertEqual(result['level'], 'Level C')
         self.assertEqual(result['background_image'], '')  # No raster layers in default mock
 
     def test_get_next_values_for_feature_invalid_index(self):
         """Test getting next values for an invalid feature index."""
         result = self.dialog.get_next_values_for_feature(999)
-        self.assertEqual(result['next_number'], '')
-        self.assertEqual(result['next_level'], '')
+        self.assertEqual(result['first_number'], '')
+        self.assertEqual(result['level'], '')
 
     def test_get_all_next_values(self):
         """Test getting all next values for all features."""
@@ -525,22 +515,22 @@ class TestPrepareRecordingDialog(unittest.TestCase):
         # Populate table
         self.dialog._populate_entities_table([mock_feature1, mock_feature2])
         
-        # Set next number and next level values for both rows
-        self.dialog._entities_table.setItem(0, 2, QtWidgets.QTableWidgetItem('16'))  # Next number column, row 0
-        self.dialog._entities_table.setItem(0, 4, QtWidgets.QTableWidgetItem('Level C'))  # Next level column, row 0
-        self.dialog._entities_table.setItem(1, 2, QtWidgets.QTableWidgetItem('17'))  # Next number column, row 1
-        self.dialog._entities_table.setItem(1, 4, QtWidgets.QTableWidgetItem('Level D'))  # Next level column, row 1
+        # Set first number and level values for both rows
+        self.dialog._entities_table.setItem(0, 2, QtWidgets.QTableWidgetItem('16'))  # First number column, row 0
+        self.dialog._entities_table.setItem(0, 4, QtWidgets.QTableWidgetItem('Level C'))  # Level column, row 0
+        self.dialog._entities_table.setItem(1, 2, QtWidgets.QTableWidgetItem('17'))  # First number column, row 1
+        self.dialog._entities_table.setItem(1, 4, QtWidgets.QTableWidgetItem('Level D'))  # Level column, row 1
         
         # Get all next values
         results = self.dialog.get_all_next_values()
         
         # Verify results
         self.assertEqual(len(results), 2)
-        self.assertEqual(results[0]['next_number'], '16')
-        self.assertEqual(results[0]['next_level'], 'Level C')
+        self.assertEqual(results[0]['first_number'], '16')
+        self.assertEqual(results[0]['level'], 'Level C')
         self.assertEqual(results[0]['background_image'], '')  # No raster layers in default mock
-        self.assertEqual(results[1]['next_number'], '17')
-        self.assertEqual(results[1]['next_level'], 'Level D')
+        self.assertEqual(results[1]['first_number'], '17')
+        self.assertEqual(results[1]['level'], 'Level D')
         self.assertEqual(results[1]['background_image'], '')  # No raster layers in default mock
 
     def test_table_editing_enabled(self):
@@ -607,9 +597,9 @@ class TestPrepareRecordingDialog(unittest.TestCase):
         # Verify table has one row
         self.assertEqual(self.dialog._entities_table.rowCount(), 1)
         
-        # Verify next number is calculated correctly (10 + 1 = 11)
-        next_number_item = self.dialog._entities_table.item(0, 2)  # Next number column
-        self.assertEqual(next_number_item.text(), '11')
+        # Verify first number is calculated correctly (10 + 1 = 11)
+        first_number_item = self.dialog._entities_table.item(0, 2)  # First number column
+        self.assertEqual(first_number_item.text(), '11')
         
         # Verify background image dropdown was created (last column)
         background_widget = self.dialog._entities_table.cellWidget(0, 3)  # Background image column
@@ -665,9 +655,9 @@ class TestPrepareRecordingDialog(unittest.TestCase):
         # Verify table has one row
         self.assertEqual(self.dialog._entities_table.rowCount(), 1)
         
-        # Verify next level is calculated correctly
-        next_level_item = self.dialog._entities_table.item(0, 2)  # Next level column
-        self.assertEqual(next_level_item.text(), 'Level B')
+        # Verify level is calculated correctly
+        level_item = self.dialog._entities_table.item(0, 2)  # Level column
+        self.assertEqual(level_item.text(), 'Level B')
         
         # Verify background image dropdown was created (last column)
         background_widget = self.dialog._entities_table.cellWidget(0, 3)  # Background image column
@@ -717,13 +707,13 @@ class TestPrepareRecordingDialog(unittest.TestCase):
         # Verify table has one row
         self.assertEqual(self.dialog._entities_table.rowCount(), 1)
         
-        # Verify next number defaults to '1' when no previous objects exist
-        next_number_item = self.dialog._entities_table.item(0, 2)  # Next number column
-        self.assertEqual(next_number_item.text(), '1')
+        # Verify first number defaults to '1' when no previous objects exist
+        first_number_item = self.dialog._entities_table.item(0, 2)  # First number column
+        self.assertEqual(first_number_item.text(), '1')
         
-        # Verify next level is calculated correctly
-        next_level_item = self.dialog._entities_table.item(0, 4)  # Next level column
-        self.assertEqual(next_level_item.text(), 'a')
+        # Verify level is calculated correctly
+        level_item = self.dialog._entities_table.item(0, 4)  # Level column
+        self.assertEqual(level_item.text(), 'a')
         
         # Verify background image dropdown was created
         background_widget = self.dialog._entities_table.cellWidget(0, 5)  # Background image column
@@ -784,11 +774,11 @@ class TestPrepareRecordingDialog(unittest.TestCase):
         self.assertFalse(last_level_item.flags() & Qt.ItemIsEditable)
         
         # Verify editable columns are editable
-        next_number_item = self.dialog._entities_table.item(0, 2)  # Next number column
-        self.assertTrue(next_number_item.flags() & Qt.ItemIsEditable)
+        first_number_item = self.dialog._entities_table.item(0, 2)  # First number column
+        self.assertTrue(first_number_item.flags() & Qt.ItemIsEditable)
         
-        next_level_item = self.dialog._entities_table.item(0, 4)  # Next level column
-        self.assertTrue(next_level_item.flags() & Qt.ItemIsEditable)
+        level_item = self.dialog._entities_table.item(0, 4)  # Level column
+        self.assertTrue(level_item.flags() & Qt.ItemIsEditable)
         
         # Verify background image dropdown was created
         background_widget = self.dialog._entities_table.cellWidget(0, 5)  # Background image column
@@ -838,9 +828,9 @@ class TestPrepareRecordingDialog(unittest.TestCase):
         # Verify table has one row
         self.assertEqual(self.dialog._entities_table.rowCount(), 1)
         
-        # Verify next level preserves case
-        next_level_item = self.dialog._entities_table.item(0, 2)  # Next level column
-        self.assertEqual(next_level_item.text(), 'LEVEL B')  # Should preserve uppercase
+        # Verify level preserves case
+        level_item = self.dialog._entities_table.item(0, 2)  # Level column
+        self.assertEqual(level_item.text(), 'LEVEL B')  # Should preserve uppercase
         
         # Verify background image dropdown was created (last column)
         background_widget = self.dialog._entities_table.cellWidget(0, 3)  # Background image column
@@ -994,8 +984,8 @@ class TestPrepareRecordingDialog(unittest.TestCase):
         result = self.dialog.get_next_values_for_feature(0)
         
         # Verify result includes background image
-        self.assertEqual(result['next_number'], '')
-        self.assertEqual(result['next_level'], '')
+        self.assertEqual(result['first_number'], '')
+        self.assertEqual(result['level'], '')
         self.assertEqual(result['background_image'], 'raster1')
 
     def test_get_all_next_values_with_background_image(self):

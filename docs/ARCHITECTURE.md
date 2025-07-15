@@ -4,7 +4,7 @@ This document describes the architecture of the ArcheoSync QGIS plugin, focusing
 
 ## Overview
 
-The plugin follows SOLID principles and clean architecture to ensure maintainability, testability, and extensibility. The current version includes 351 tests with 351 passing and 8 skipped, demonstrating robust code quality and comprehensive coverage.
+The plugin follows SOLID principles and clean architecture to ensure maintainability, testability, and extensibility. The current version includes 357 tests with 357 passing and 8 skipped, demonstrating robust code quality and comprehensive coverage.
 
 ## SOLID Principles Implementation
 
@@ -13,7 +13,7 @@ Each class has one reason to change:
 - `QGISSettingsManager`: Only manages settings
 - `QGISFileSystemService`: Only handles file operations
 - `ArcheoSyncConfigurationValidator`: Only validates configuration
-- `QGISQFieldService`: Only handles QField integration and packaging
+- `QGISProjectCreationService`: Only handles field project creation and packaging
 
 ### Open/Closed Principle (OCP)
 Open for extension, closed for modification:
@@ -282,7 +282,7 @@ Test real QGIS environment integration.
 - **Strategy Pattern**: Different implementations can be swapped
 - **Factory Pattern**: Service creation and management
 - **Observer Pattern**: UI updates based on state changes
-- **Template Method Pattern**: QField packaging with customizable steps
+- **Template Method Pattern**: Field project packaging with customizable steps
 
 ## QField Integration Architecture
 
@@ -303,7 +303,7 @@ The packaging process includes:
 5. **Export**: Creates QField-compatible project files
 
 ### Intelligent Data Filtering
-The filtering process ensures QField projects contain only relevant data:
+The filtering process ensures field projects contain only relevant data:
 1. **Recording Area Filtering**: Identifies and keeps only the selected recording area feature
 2. **Relation Analysis**: Examines QGIS relations between layers to identify related features
 3. **Extra Layer Filtering**: For extra layers with relations to recording areas, keeps only features related to the selected recording area
@@ -318,11 +318,23 @@ The filtering process ensures QField projects contain only relevant data:
 - **Error Recovery**: Graceful handling of QGIS object deletion issues
 - **Relation Processing**: Efficient relation-based filtering using QGIS relation manager
 
-## Latest Features (v0.10.0)
+## Latest Features (v0.10.1)
 
-### Intelligent QField Data Filtering
+### Raster Clipping Coordinate Comparison Fix
+- **Critical Bug Fix**: Resolved coordinate comparison error in raster clipping operations
+  - **Problem**: QgsPointXY objects were being compared directly with `!=` operator
+  - **Solution**: Implemented proper coordinate comparison using `.x()` and `.y()` methods
+  - **Impact**: Fixes "'>' not supported between instances of 'str' and 'int'" error
+  - **Compatibility**: Works with both single and multipart polygons
+  - **Testing**: Added comprehensive tests for coordinate comparison scenarios
+- **Enhanced Error Handling**: Improved robustness of polygon coordinate processing
+- **Test Coverage**: Expanded to 357 tests with comprehensive coverage
+
+## Previous Features (v0.10.0)
+
+### Intelligent Field Project Data Filtering
 - **Recording Area Filtering**: Automatically filters recording areas layer to keep only the selected feature
-  - Identifies the correct recording area layer in QField projects
+  - Identifies the correct recording area layer in field projects
   - Removes all features except the selected recording area
   - Preserves project structure and layer configuration
 - **Related Extra Layers Filtering**: Filters extra layers based on QGIS relations
@@ -354,11 +366,11 @@ The filtering process ensures QField projects contain only relevant data:
 
 ## Previous Features (v0.9.0)
 
-### Raster Clipping for QField Projects
-- **Automatic Background Image Clipping**: Added automatic background image clipping to recording areas when creating QField projects
+### Raster Clipping for Field Projects
+- **Automatic Background Image Clipping**: Added automatic background image clipping to recording areas when creating field projects
   - Configurable offset (default: 20 cm) to expand clipping area beyond recording area boundary
   - Uses GDAL tools (gdalwarp) for precise raster clipping with -cutline and -crop_to_cutline options
-  - Original raster remains unchanged; clipped version is used only for QField projects
+  - Original raster remains unchanged; clipped version is used only for field projects
   - Automatic cleanup of temporary clipped rasters after project creation
   - Settings dialog includes new "Raster Clipping Offset" configuration option
   - Comprehensive error handling and GDAL availability checking
@@ -369,7 +381,7 @@ The filtering process ensures QField projects contain only relevant data:
   - Temporary file management and cleanup
   - Coordinate system handling and WKT to GeoJSON conversion
   - Comprehensive test coverage for all raster processing operations
-- **Enhanced QField Service**: Integrated raster processing into QField project creation workflow
+- **Enhanced Project Creation Service**: Integrated raster processing into field project creation workflow
   - Automatic raster clipping before project packaging
   - Layer configuration to use clipped raster instead of original
   - Proper cleanup of temporary layers and files
@@ -382,7 +394,7 @@ The filtering process ensures QField projects contain only relevant data:
 
 ### Archive Folder Management
 - **CSV Archive Folder**: Configure dedicated folder for archiving imported CSV files
-- **QField Archive Folder**: Configure dedicated folder for archiving imported QField projects
+- **Field Project Archive Folder**: Configure dedicated folder for archiving imported field projects
 - **Automatic Archiving**: Imported files and projects are automatically moved to archive folders after successful import
 - **Configuration Dialog**: Added archive folder selectors in settings dialog with browse functionality
 - **Validation**: Real-time validation of archive folder paths (existence, writability, directory type)
@@ -393,16 +405,16 @@ The filtering process ensures QField projects contain only relevant data:
 
 ### Extra Layers Support
 - **Configuration Dialog**: Added multi-select widget for extra vector layers
-- **Read-Only Layers**: Selected extra layers are included as read-only in QField projects
+- **Read-Only Layers**: Selected extra layers are included as read-only in field projects
 - **Recording Areas Integration**: Recording areas layer is always included and locked
 - **User-Friendly Interface**: Checkbox selection with clear labeling
 
-### QField Service Consolidation
+### Project Creation Service Consolidation
 - **Method Consolidation**: Eliminated redundant `package_for_qfield_with_data_and_variables` method
 - **Enhanced API**: Updated `package_for_qfield_with_data` with optional parameters:
   - `add_variables`: Controls whether to add project variables (default: True)
   - `next_values`: Required when `add_variables=True` for field preparation
-  - `extra_layers`: Support for additional read-only layers in QField projects
+  - `extra_layers`: Support for additional read-only layers in field projects
 - **Code Quality**: Reduced duplication and improved maintainability
 - **Backward Compatibility**: All existing functionality preserved
 
@@ -416,7 +428,7 @@ The filtering process ensures QField projects contain only relevant data:
   - PointZ vector layer creation with attribute preservation
   - Automatic project integration and error handling
 
-- **QField Project Import**: Import completed QField projects
+- **Field Project Import**: Import completed field projects
   - Automatic processing of data.gpkg files from project directories
   - Merging of Objects and Features layers from multiple projects
   - Creation of new layers for imported data
@@ -428,8 +440,8 @@ The filtering process ensures QField projects contain only relevant data:
   - Include/exclude options for each column
   - Real-time validation of required columns
 
-### QField Integration Enhancements
-- **Complete Project Packaging**: Full QField project creation with proper layer configuration
+### Project Creation Enhancements
+- **Complete Project Packaging**: Full field project creation with proper layer configuration
 - **Empty Layer Creation**: Automatic creation of "Objects" and "Features" layers for offline editing
 - **Background Image Integration**: Intelligent selection and inclusion of overlapping raster layers
 - **Project Variables**: Automatic injection of next values for field preparation
@@ -449,7 +461,7 @@ The filtering process ensures QField projects contain only relevant data:
 
 ## Future Enhancements
 
-- **Cloud Integration**: Support for QFieldCloud synchronization
+- **Cloud Integration**: Support for cloud-based field data synchronization
 - **Advanced Validation**: More sophisticated relationship validation
 - **Performance Monitoring**: Metrics collection for optimization
 - **Plugin Ecosystem**: Extension points for third-party integrations 

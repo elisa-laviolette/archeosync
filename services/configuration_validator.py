@@ -177,60 +177,9 @@ class ArcheoSyncConfigurationValidator(IConfigurationValidator):
         
         return errors
     
-    def validate_qfield_archive_folder(self, path: str) -> List[str]:
-        """
-        Validate QField archive folder configuration.
-        
-        Args:
-            path: Path to validate
-            
-        Returns:
-            List of validation error messages (empty if valid)
-        """
-        errors = []
-        
-        # QField archive folder is optional, so no error if empty
-        if not path:
-            return errors
-        
-        if not self._file_system_service.path_exists(path):
-            errors.append(f"QField archive folder does not exist: {path}")
-        elif not self._file_system_service.is_directory(path):
-            errors.append(f"QField archive path is not a directory: {path}")
-        elif not self._file_system_service.is_writable(path):
-            errors.append(f"QField archive folder is not writable: {path}")
-        
-        return errors
+
     
-    def validate_template_project_folder(self, path: str) -> List[str]:
-        """
-        Validate template project folder configuration.
-        
-        Args:
-            path: Path to validate
-            
-        Returns:
-            List of validation error messages (empty if valid)
-        """
-        errors = []
-        
-        if not path:
-            errors.append("Template project folder path is required")
-            return errors
-        
-        if not self._file_system_service.path_exists(path):
-            errors.append(f"Template project folder does not exist: {path}")
-        elif not self._file_system_service.is_directory(path):
-            errors.append(f"Template project path is not a directory: {path}")
-        else:
-            # Check if directory contains QGIS project files
-            qgz_files = self._file_system_service.list_files(path, '.qgz')
-            qgs_files = self._file_system_service.list_files(path, '.qgs')
-            
-            if not qgz_files and not qgs_files:
-                errors.append(f"No QGIS project files (.qgz or .qgs) found in template folder: {path}")
-        
-        return errors
+
     
     def validate_recording_areas_layer(self, layer_id: str) -> List[str]:
         """
@@ -460,22 +409,9 @@ class ArcheoSyncConfigurationValidator(IConfigurationValidator):
                 settings['csv_archive_folder']
             )
         
-        if 'qfield_archive_folder' in settings:
-            validation_results['qfield_archive_folder'] = self.validate_qfield_archive_folder(
-                settings['qfield_archive_folder']
-            )
+
         
-        # Template project folder is only required when QField is not used
-        if 'template_project_folder' in settings:
-            use_qfield = settings.get('use_qfield', False)
-            if not use_qfield:
-                # Only validate template project folder if QField is not being used
-                validation_results['template_project_folder'] = self.validate_template_project_folder(
-                    settings['template_project_folder']
-                )
-            else:
-                # QField is being used, so template project folder is not required
-                validation_results['template_project_folder'] = []
+
         
         if 'recording_areas_layer' in settings:
             validation_results['recording_areas_layer'] = self.validate_recording_areas_layer(

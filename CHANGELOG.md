@@ -2,6 +2,26 @@
 
 All notable changes to the ArcheoSync QGIS plugin will be documented in this file.
 
+## [0.11.0] - 2025-07-15
+
+### Breaking Changes
+
+- **QField Dependency Removal**: Removed all QField-specific dependencies and references
+  - **Service Renaming**: Renamed `QGISQFieldService` to `QGISProjectCreationService`
+  - **Interface Updates**: Updated `IQFieldService` to `IProjectCreationService`
+  - **Method Renaming**: Renamed QField-specific methods to generic field project methods
+  - **Documentation Updates**: Updated all documentation to remove QField references
+  - **Architecture Changes**: Updated architecture documentation to reflect field project creation focus
+  - **User Interface**: Updated UI text and labels to use generic field project terminology
+  - **Configuration**: Updated settings dialog to use field project archive folder terminology
+
+### Technical Improvements
+
+- **Clean Architecture**: Simplified architecture by removing QField-specific abstractions
+- **Generic Implementation**: Made project creation service more generic for various mobile field tools
+- **Documentation Cleanup**: Comprehensive removal of QField references from all documentation files
+- **Future Flexibility**: Architecture now supports integration with various mobile field data collection tools
+
 ## [0.10.1] - 2025-07-14
 
 ### Bug Fixes
@@ -23,9 +43,9 @@ All notable changes to the ArcheoSync QGIS plugin will be documented in this fil
 
 ### New Features
 
-- **Intelligent QField Data Filtering**: Added automatic filtering of QField projects to include only relevant data
+- **Intelligent Field Project Data Filtering**: Added automatic filtering of field projects to include only relevant data
   - **Recording Area Filtering**: Automatically filters recording areas layer to keep only the selected feature
-    - Identifies the correct recording area layer in QField projects
+    - Identifies the correct recording area layer in field projects
     - Removes all features except the selected recording area
     - Preserves project structure and layer configuration
   - **Related Extra Layers Filtering**: Filters extra layers based on QGIS relations
@@ -57,10 +77,10 @@ All notable changes to the ArcheoSync QGIS plugin will be documented in this fil
 
 ### New Features
 
-- **Raster Clipping for QField Projects**: Added automatic background image clipping to recording areas when creating QField projects
+- **Raster Clipping for Field Projects**: Added automatic background image clipping to recording areas when creating field projects
   - Configurable offset (default: 20 cm) to expand clipping area beyond recording area boundary
   - Uses GDAL tools (gdalwarp) for precise raster clipping with -cutline and -crop_to_cutline options
-  - Original raster remains unchanged; clipped version is used only for QField projects
+  - Original raster remains unchanged; clipped version is used only for field projects
   - Automatic cleanup of temporary clipped rasters after project creation
   - Settings dialog includes new "Raster Clipping Offset" configuration option
   - Comprehensive error handling and GDAL availability checking
@@ -72,7 +92,7 @@ All notable changes to the ArcheoSync QGIS plugin will be documented in this fil
   - Temporary file management and cleanup
   - Coordinate system handling and WKT to GeoJSON conversion
   - Comprehensive test coverage for all raster processing operations
-- **Enhanced QField Service**: Integrated raster processing into QField project creation workflow
+- **Enhanced Project Creation Service**: Integrated raster processing into field project creation workflow
   - Automatic raster clipping before project packaging
   - Layer configuration to use clipped raster instead of original
   - Proper cleanup of temporary layers and files
@@ -86,13 +106,13 @@ All notable changes to the ArcheoSync QGIS plugin will be documented in this fil
 ### New Features
 - **Archive Folder Management**: Added configuration for automatic archiving of imported files
   - CSV Archive Folder: Configure dedicated folder for archiving imported CSV files
-  - QField Archive Folder: Configure dedicated folder for archiving imported QField projects
+  - Field Project Archive Folder: Configure dedicated folder for archiving imported field projects
   - Archive folder selectors in settings dialog with browse functionality
   - Real-time validation of archive folder paths (existence, writability, directory type)
 
 - **Automatic Archiving**: Imported files and projects are automatically moved to archive folders
   - CSV files are moved to CSV archive folder after successful import
-  - QField projects are moved to QField archive folder after successful import
+  - Field projects are moved to field project archive folder after successful import
   - Archive operations only occur after successful import to prevent data loss
   - Graceful error handling with user feedback for archive operations
 
@@ -106,14 +126,14 @@ All notable changes to the ArcheoSync QGIS plugin will be documented in this fil
 ## [0.7.0] - 2025-07-10
 
 ### New Features
-- **Extra Layers Support**: Added configuration option for additional vector layers in QField projects
+- **Extra Layers Support**: Added configuration option for additional vector layers in field projects
   - Multi-select widget in settings dialog for choosing extra layers
-  - Selected layers are included as read-only in QField projects
+  - Selected layers are included as read-only in field projects
   - Recording areas layer is always included and cannot be deselected
   - User-friendly checkbox interface with clear labeling
 
 ### Technical Improvements
-- **QField Service Consolidation**: Eliminated redundant method implementation
+- **Project Creation Service Consolidation**: Eliminated redundant method implementation
   - Removed `package_for_qfield_with_data_and_variables` method
   - Enhanced `package_for_qfield_with_data` with optional parameters:
     - `add_variables`: Controls project variable injection (default: True)
@@ -131,14 +151,14 @@ All notable changes to the ArcheoSync QGIS plugin will be documented in this fil
   - Interactive column mapping dialog for manual column matching
   - PointZ vector layer creation with all CSV attributes preserved
 
-- **QField Project Import**: Added import functionality for completed QField projects
-  - Automatic processing of data.gpkg files from QField project directories
+- **Field Project Import**: Added import functionality for completed field projects
+  - Automatic processing of data.gpkg files from field project directories
   - Merging of Objects and Features layers from multiple projects
   - Creation of new "New Objects" and "New Features" layers in the project
   - Feature collection and validation from completed field recordings
   - Support for multiple project import in a single operation
 
-- **Enhanced Project Naming**: QField project names now include level information when available
+- **Enhanced Project Naming**: Field project names now include level information when available
   - When a level is defined, project names follow the pattern: "Recording Area Name_Level"
   - Examples: "Test Area_A", "Excavation Site_Level 1", "Trench 1_B"
   - If no level is defined, only the recording area name is used

@@ -6,11 +6,11 @@
 name=ArcheoSync
 qgisMinimumVersion=3.0
 description=This plugin allows archaeologists to prepare data for the field and to import it back into the project
-version=0.7.0
+version=0.11.0
 author=Elisa Caron-Laviolette
 email=elisa.laviolette@gmail.com
 
-about=ArcheoSync is a QGIS plugin designed to streamline archaeological field recording workflows. It allows users to export GIS layers, raster basemaps, and custom forms to field tablets (e.g., using QField), and then import the recorded data back into the main QGIS project. The plugin facilitates round-trip data transfer, ensuring spatial and attribute data integrity, detecting conflicts or duplicate entries, and assisting in the validation of new data. It supports modular, square-meter-based recording typical in prehistoric excavation projects.
+about=ArcheoSync is a comprehensive QGIS plugin designed to streamline archaeological field recording workflows. It provides intelligent data preparation for field work with mobile integration, automatic background image clipping, intelligent data filtering, and comprehensive import capabilities. The plugin supports round-trip data transfer with automatic archiving, CSV import with column mapping, field project import with layer merging, and intelligent filtering to create focused field projects. It includes raster processing with GDAL integration, spatial analysis for background image selection, and robust validation systems. The plugin follows clean architecture principles with 357 comprehensive tests and supports modular, square-meter-based recording typical in prehistoric excavation projects.
 
 tracker=http://bugs
 repository=http://repo

@@ -353,8 +353,8 @@ class TestQFieldService:
             'attributes': {'name': 'Test Area', 'display_name': 'Test Recording Area'}
         }
         next_values = {
-            'next_number': '15',
-            'next_level': 'Level B',
+                    'first_number': '15',
+        'level': 'Level B',
             'background_image': 'raster_layer_id'
         }
         mock_offliner = Mock()
@@ -396,8 +396,8 @@ class TestQFieldService:
             'attributes': {'name': 'Test Area', 'display_name': 'Test Recording Area'}
         }
         next_values = {
-            'next_number': None,
-            'next_level': None,
+                    'first_number': None,
+        'level': None,
             'background_image': None
         }
         mock_offliner = Mock()
@@ -441,8 +441,8 @@ class TestQFieldService:
         
         # Mock next values
         next_values = {
-            'next_level': 'A1',
-            'next_number': '1001'
+            'level': 'A1',
+            'first_number': '1001'
         }
         
         # Mock QgsProject

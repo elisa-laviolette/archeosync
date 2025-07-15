@@ -153,11 +153,7 @@ class SettingsDialog(QtWidgets.QDialog):
         )
         settings_layout.addRow("CSV Archive Folder:", self._csv_archive_widget)
         
-        # QField projects archive folder
-        self._qfield_archive_widget = self._create_folder_selector(
-            "Select folder to archive imported QField projects..."
-        )
-        settings_layout.addRow("QField Projects Archive Folder:", self._qfield_archive_widget)
+
         
         # Recording areas layer
         self._recording_areas_widget = self._create_layer_selector()
@@ -175,24 +171,17 @@ class SettingsDialog(QtWidgets.QDialog):
         self._features_widget = self._create_layer_selector()
         settings_layout.addRow("Features Layer:", self._features_widget)
         
-        # QField integration
-        self._qfield_checkbox = QtWidgets.QCheckBox("Use QField for field data collection")
-        settings_layout.addRow("QField Integration:", self._qfield_checkbox)
+
         
-        # Raster clipping offset for QField projects
+        # Raster clipping offset for field projects
         self._raster_offset_widget = self._create_raster_offset_widget()
         settings_layout.addRow("Raster Clipping Offset:", self._raster_offset_widget)
         
-        # Extra layers for QField projects
+        # Extra layers for field projects
         self._extra_layers_widget = self._create_extra_layers_widget()
-        settings_layout.addRow("Extra QField Layers:", self._extra_layers_widget)
+        settings_layout.addRow("Extra Field Layers:", self._extra_layers_widget)
         
-        # Template QGIS project (conditional)
-        self._template_project_widget = self._create_folder_selector(
-            "Select folder containing template QGIS project..."
-        )
-        self._template_project_label = QtWidgets.QLabel("Template QGIS Project:")
-        settings_layout.addRow(self._template_project_label, self._template_project_widget)
+
         
         parent_layout.addWidget(settings_group)
     
@@ -285,7 +274,7 @@ class SettingsDialog(QtWidgets.QDialog):
         
         # Description label
         description_label = QtWidgets.QLabel(
-            "Select additional vector layers to include in QField projects as read-only layers. "
+            "Select additional vector layers to include in field projects. "
             "The recording areas layer is always included and cannot be modified."
         )
         description_label.setWordWrap(True)
@@ -316,7 +305,7 @@ class SettingsDialog(QtWidgets.QDialog):
         
         # Description label
         description_label = QtWidgets.QLabel(
-            "Offset in meters to expand the clipping area around recording areas when creating QField projects. "
+            "Offset in meters to expand the clipping area around recording areas when creating field projects. "
             "This ensures the background image extends slightly beyond the recording area boundary."
         )
         description_label.setWordWrap(True)
@@ -371,14 +360,8 @@ class SettingsDialog(QtWidgets.QDialog):
             lambda: self._browse_folder(self._csv_archive_widget.input_field,
                                       "Select Folder for CSV Archive")
         )
-        self._qfield_archive_widget.browse_button.clicked.connect(
-            lambda: self._browse_folder(self._qfield_archive_widget.input_field,
-                                      "Select Folder for QField Archive")
-        )
-        self._template_project_widget.browse_button.clicked.connect(
-            lambda: self._browse_folder(self._template_project_widget.input_field,
-                                      "Select Folder for Template QGIS Project")
-        )
+
+
         
         # Layer selector connections
         self._recording_areas_widget.refresh_button.clicked.connect(self._refresh_layer_list)
@@ -389,8 +372,7 @@ class SettingsDialog(QtWidgets.QDialog):
         # Extra layers connections
         self._extra_layers_widget.refresh_button.clicked.connect(self._refresh_extra_layers_list)
         
-        # QField checkbox connection
-        self._qfield_checkbox.stateChanged.connect(self._update_ui_state)
+
     
     def _browse_folder(self, input_field: QtWidgets.QLineEdit, title: str) -> None:
         """Browse for a folder and update the input field."""
@@ -574,12 +556,8 @@ class SettingsDialog(QtWidgets.QDialog):
     
     def _update_ui_state(self) -> None:
         """Update UI state based on current settings."""
-        use_qfield = self._qfield_checkbox.isChecked()
-        
-        # Show/hide template project widgets
-        should_show_template = not use_qfield
-        self._template_project_label.setVisible(should_show_template)
-        self._template_project_widget.setVisible(should_show_template)
+        # No longer needed since QField checkbox is removed
+        pass
     
     def _load_settings(self) -> None:
         """Load settings into the UI."""
@@ -600,9 +578,7 @@ class SettingsDialog(QtWidgets.QDialog):
             csv_archive_path = self._settings_manager.get_value('csv_archive_folder', '')
             self._csv_archive_widget.input_field.setText(csv_archive_path)
             
-            # Load QField archive folder
-            qfield_archive_path = self._settings_manager.get_value('qfield_archive_folder', '')
-            self._qfield_archive_widget.input_field.setText(qfield_archive_path)
+
             
             # Load recording areas layer
             recording_areas_layer_id = self._settings_manager.get_value('recording_areas_layer', '')
@@ -639,16 +615,14 @@ class SettingsDialog(QtWidgets.QDialog):
                 if index >= 0:
                     self._features_widget.combo_box.setCurrentIndex(index)
             
-            # Load QField setting
-            use_qfield = self._settings_manager.get_value('use_qfield', False)
-            self._qfield_checkbox.setChecked(bool(use_qfield))
+
             
             # Load raster clipping offset
             raster_offset = self._settings_manager.get_value('raster_clipping_offset', 0.2)
             self._raster_offset_spinbox.setValue(float(raster_offset))
             
-            # Load extra layers for QField
-            extra_layers = self._settings_manager.get_value('extra_qfield_layers', [])
+            # Load extra layers for field projects
+            extra_layers = self._settings_manager.get_value('extra_field_layers', [])
             self._refresh_extra_layers_list()  # Populate the list
             # Set checked state for extra layers (recording areas handled in refresh)
             for i in range(self._extra_layers_list.count()):
@@ -659,9 +633,7 @@ class SettingsDialog(QtWidgets.QDialog):
                 elif item.flags() & Qt.ItemIsEnabled:
                     item.setCheckState(Qt.Unchecked)
             
-            # Load template project folder
-            template_project_path = self._settings_manager.get_value('template_project_folder', '')
-            self._template_project_widget.input_field.setText(template_project_path)
+
             
             # Store original values
             self._original_values = {
@@ -669,16 +641,15 @@ class SettingsDialog(QtWidgets.QDialog):
                 'total_station_folder': total_station_path,
                 'completed_projects_folder': completed_projects_path,
                 'csv_archive_folder': csv_archive_path,
-                'qfield_archive_folder': qfield_archive_path,
                 'recording_areas_layer': recording_areas_layer_id,
                 'objects_layer': objects_layer_id,
                 'objects_number_field': self._settings_manager.get_value('objects_number_field', ''),
                 'objects_level_field': self._settings_manager.get_value('objects_level_field', ''),
                 'features_layer': features_layer_id,
-                'use_qfield': bool(use_qfield),
+
                 'raster_clipping_offset': float(raster_offset),
-                'extra_qfield_layers': extra_layers,
-                'template_project_folder': template_project_path
+                'extra_field_layers': extra_layers,
+
             }
             
         except Exception as e:
@@ -693,16 +664,15 @@ class SettingsDialog(QtWidgets.QDialog):
                 'total_station_folder': self._total_station_widget.input_field.text(),
                 'completed_projects_folder': self._completed_projects_widget.input_field.text(),
                 'csv_archive_folder': self._csv_archive_widget.input_field.text(),
-                'qfield_archive_folder': self._qfield_archive_widget.input_field.text(),
                 'recording_areas_layer': self._recording_areas_widget.combo_box.currentData(),
                 'objects_layer': self._objects_widget.combo_box.currentData(),
                 'objects_number_field': self._number_field_combo.currentData(),
                 'objects_level_field': self._level_field_combo.currentData(),
                 'features_layer': self._features_widget.combo_box.currentData(),
-                'use_qfield': self._qfield_checkbox.isChecked(),
+
                 'raster_clipping_offset': self._raster_offset_spinbox.value(),
-                'extra_qfield_layers': self._get_selected_extra_layers(),
-                'template_project_folder': self._template_project_widget.input_field.text()
+                'extra_field_layers': self._get_selected_extra_layers(),
+
             }
             
             # Validate settings
@@ -739,18 +709,12 @@ class SettingsDialog(QtWidgets.QDialog):
             self._csv_archive_widget.input_field.setText(
                 self._original_values.get('csv_archive_folder', '')
             )
-            self._qfield_archive_widget.input_field.setText(
-                self._original_values.get('qfield_archive_folder', '')
-            )
-            self._qfield_checkbox.setChecked(
-                self._original_values.get('use_qfield', False)
-            )
+
+
             self._raster_offset_spinbox.setValue(
                 self._original_values.get('raster_clipping_offset', 0.2)
             )
-            self._template_project_widget.input_field.setText(
-                self._original_values.get('template_project_folder', '')
-            )
+
             
             # Revert recording areas layer selection
             recording_areas_layer_id = self._original_values.get('recording_areas_layer', '')

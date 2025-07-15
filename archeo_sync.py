@@ -40,9 +40,9 @@ from .services import (
     QGISTranslationService,
     ArcheoSyncConfigurationValidator,
     QGISLayerService,
-    QGISQFieldService,
     CSVImportService,
-    QGISRasterProcessingService
+    QGISRasterProcessingService,
+    QGISProjectCreationService
 )
 
 
@@ -115,10 +115,10 @@ class ArcheoSyncPlugin:
         # Initialize raster processing service FIRST
         self._raster_processing_service = QGISRasterProcessingService()
 
-        # Initialize QField service
-        self._qfield_service = QGISQFieldService(
-            self._settings_manager, 
-            self._layer_service, 
+        # Initialize project creation service
+        self._project_creation_service = QGISProjectCreationService(
+            self._settings_manager,
+            self._layer_service,
             self._file_system_service,
             self._raster_processing_service
         )
@@ -258,7 +258,6 @@ class ArcheoSyncPlugin:
         dialog = PrepareRecordingDialog(
             layer_service=self._layer_service,
             settings_manager=self._settings_manager,
-            qfield_service=self._qfield_service,
             parent=self._iface.mainWindow()
         )
         
@@ -271,15 +270,6 @@ class ArcheoSyncPlugin:
     def _handle_prepare_recording_accepted(self, dialog) -> None:
         """Handle the case when prepare recording dialog is accepted."""
         try:
-            # Check if QField is enabled
-            if not self._qfield_service.is_qfield_enabled():
-                from qgis.PyQt.QtWidgets import QMessageBox
-                QMessageBox.warning(
-                    self._iface.mainWindow(),
-                    "QField Not Enabled",
-                    "QField integration is not enabled. Please enable it in the configuration."
-                )
-                return
             
             # Get configuration
             recording_areas_layer_id = self._settings_manager.get_value('recording_areas_layer', '')
@@ -387,12 +377,12 @@ class ArcheoSyncPlugin:
                     # Use the pre-extracted display name
                     feature_name = feature_info['display_name']
                     
-                    # Get next level from next values
-                    next_level = next_values[i].get('next_level', '') if i < len(next_values) else ''
+                    # Get level from next values
+                    level = next_values[i].get('level', '') if i < len(next_values) else ''
                     
-                    # Create project name: display name + '_' + next level (if level is defined)
-                    if next_level:
-                        project_name = f"{feature_name}_{next_level}"
+                    # Create project name: display name + '_' + level (if level is defined)
+                    if level:
+                        project_name = f"{feature_name}_{level}"
                     else:
                         project_name = feature_name
                     
@@ -404,11 +394,10 @@ class ArcheoSyncPlugin:
                     background_layer_id = next_values[i]['background_image'] if i < len(next_values) else ''
                     
                     # Get extra layers from settings
-                    extra_layers = self._settings_manager.get_value('extra_qfield_layers', [])
+                    extra_layers = self._settings_manager.get_value('extra_field_layers', [])
                     
-                    # Package for QField using extracted feature data to avoid QGIS object deletion issues
-                    # Use the consolidated method with optional variables
-                    success = self._qfield_service.package_for_qfield_with_data(
+                    # Create field project using the new project creation service
+                    success = self._project_creation_service.create_field_project(
                         feature_data=feature_info,
                         recording_areas_layer_id=recording_areas_layer_id,
                         objects_layer_id=objects_layer_id,
@@ -417,7 +406,6 @@ class ArcheoSyncPlugin:
                         extra_layers=extra_layers,
                         destination_folder=destination_folder,
                         project_name=project_name,
-                        add_variables=True,
                         next_values=next_values[i] if i < len(next_values) else {}
                     )
                     
@@ -436,14 +424,14 @@ class ArcheoSyncPlugin:
             if error_count == 0:
                 QMessageBox.information(
                     self._iface.mainWindow(),
-                    "QField Preparation Complete",
-                    f"Successfully prepared {success_count} QField project(s) in:\n{destination_folder}"
+                    "Field Project Preparation Complete",
+                    f"Successfully created {success_count} field project(s) in:\n{destination_folder}"
                 )
             else:
                 QMessageBox.warning(
                     self._iface.mainWindow(),
-                    "QField Preparation Results",
-                    f"Prepared {success_count} QField project(s) successfully.\n{error_count} project(s) failed.\n\nCheck the console for error details."
+                    "Field Project Preparation Results",
+                    f"Created {success_count} field project(s) successfully.\n{error_count} project(s) failed.\n\nCheck the console for error details."
                 )
                 
         except Exception as e:
@@ -451,7 +439,7 @@ class ArcheoSyncPlugin:
             QMessageBox.critical(
                 self._iface.mainWindow(),
                 "Error",
-                f"An error occurred during QField preparation:\n{str(e)}"
+                f"An error occurred during field project preparation:\n{str(e)}"
             )
     
     def run_import_data(self) -> None:
@@ -550,24 +538,15 @@ class ArcheoSyncPlugin:
             )
     
     def _process_completed_projects(self, project_paths: List[str]) -> None:
-        """Process completed QField projects for import."""
+        """Process completed field projects for import."""
         from qgis.PyQt.QtWidgets import QMessageBox
         
-        # Import QField projects using the QField service
-        import_result = self._qfield_service.import_qfield_projects(project_paths)
-        
-        if import_result.is_valid:
-            QMessageBox.information(
-                self._iface.mainWindow(),
-                "QField Project Import Complete",
-                import_result.message
-            )
-        else:
-            QMessageBox.critical(
-                self._iface.mainWindow(),
-                "QField Project Import Error",
-                import_result.message
-            )
+        # For now, just show a message that this functionality needs to be implemented
+        QMessageBox.information(
+            self._iface.mainWindow(),
+            "Field Project Import",
+            "Import functionality for completed field projects will be implemented in a future version."
+        )
     
     @property
     def settings_manager(self):
@@ -584,10 +563,12 @@ class ArcheoSyncPlugin:
         """Get the layer service instance."""
         return self._layer_service
     
+
+    
     @property
-    def qfield_service(self):
-        """Get the QField service instance."""
-        return self._qfield_service
+    def project_creation_service(self):
+        """Get the project creation service instance."""
+        return self._project_creation_service
     
     @property
     def csv_import_service(self):

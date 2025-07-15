@@ -35,9 +35,9 @@ from qgis.PyQt import QtWidgets
 from qgis.PyQt.QtCore import Qt
 
 try:
-    from ..core.interfaces import ILayerService, ISettingsManager, IQFieldService
+    from ..core.interfaces import ILayerService, ISettingsManager
 except ImportError:
-    from core.interfaces import ILayerService, ISettingsManager, IQFieldService
+    from core.interfaces import ILayerService, ISettingsManager
 
 
 class PrepareRecordingDialog(QtWidgets.QDialog):
@@ -51,7 +51,6 @@ class PrepareRecordingDialog(QtWidgets.QDialog):
     def __init__(self, 
                  layer_service: ILayerService,
                  settings_manager: ISettingsManager,
-                 qfield_service: IQFieldService,
                  parent=None):
         """
         Initialize the prepare recording dialog.
@@ -66,7 +65,6 @@ class PrepareRecordingDialog(QtWidgets.QDialog):
         # Store injected dependencies
         self._layer_service = layer_service
         self._settings_manager = settings_manager
-        self._qfield_service = qfield_service
         
         # Initialize UI
         self._setup_ui()
@@ -133,7 +131,7 @@ class PrepareRecordingDialog(QtWidgets.QDialog):
         self._button_box.accepted.connect(self.accept)
         self._button_box.rejected.connect(self.reject)
         
-        # Initially hide the OK button - it will be shown only if QField is enabled
+        # Initially hide the OK button - it will be shown when features are selected
         self._button_box.button(QtWidgets.QDialogButtonBox.Ok).setVisible(False)
         
         parent_layout.addWidget(self._button_box)
@@ -217,14 +215,11 @@ class PrepareRecordingDialog(QtWidgets.QDialog):
             # Populate table with actual features
             self._populate_entities_table(selected_features)
             
-            # Check if QField is enabled
-            qfield_enabled = self._qfield_service.is_qfield_enabled()
-            
-            # Show/hide and enable/disable OK button based on QField and selection
+            # Show/hide and enable/disable OK button based on selection
             has_selection = selected_count > 0
             ok_button = self._button_box.button(QtWidgets.QDialogButtonBox.Ok)
             
-            if qfield_enabled and has_selection:
+            if has_selection:
                 ok_button.setVisible(True)
                 ok_button.setEnabled(True)
                 ok_button.setText("Prepare Recording")
@@ -308,17 +303,17 @@ class PrepareRecordingDialog(QtWidgets.QDialog):
                 self._entities_table.setItem(row, col_index, number_item)
                 col_index += 1
                 
-                # Add next number (editable)
-                next_number = '1'  # Default value
+                # Add first number (editable)
+                first_number = '1'  # Default value
                 if related_info['last_number']:
                     try:
                         last_num = int(related_info['last_number'])
-                        next_number = str(last_num + 1)
+                        first_number = str(last_num + 1)
                     except (ValueError, TypeError):
-                        next_number = '1'
+                        first_number = '1'
                 
-                next_number_item = QtWidgets.QTableWidgetItem(next_number)
-                self._entities_table.setItem(row, col_index, next_number_item)
+                first_number_item = QtWidgets.QTableWidgetItem(first_number)
+                self._entities_table.setItem(row, col_index, first_number_item)
                 col_index += 1
             
             if objects_layer_id and level_field:
@@ -334,12 +329,12 @@ class PrepareRecordingDialog(QtWidgets.QDialog):
                 self._entities_table.setItem(row, col_index, level_item)
                 col_index += 1
                 
-                # Add next level (editable)
-                next_level = self._layer_service.calculate_next_level(
+                # Add level (editable)
+                level = self._layer_service.calculate_next_level(
                     related_info['last_level'], level_field, objects_layer_id
                 )
-                next_level_item = QtWidgets.QTableWidgetItem(next_level)
-                self._entities_table.setItem(row, col_index, next_level_item)
+                level_item = QtWidgets.QTableWidgetItem(level)
+                self._entities_table.setItem(row, col_index, level_item)
                 col_index += 1
             
             # Add background image dropdown
@@ -380,47 +375,47 @@ class PrepareRecordingDialog(QtWidgets.QDialog):
     
     def get_next_values_for_feature(self, feature_index: int) -> Dict[str, str]:
         """
-        Get the next object number, next level, and background image values for a specific feature.
+        Get the first object number, level, and background image values for a specific feature.
         
         Args:
             feature_index: The index of the feature in the features list
             
         Returns:
-            Dictionary with 'next_number', 'next_level', and 'background_image' values
+            Dictionary with 'first_number', 'level', and 'background_image' values
         """
         if feature_index >= self._entities_table.rowCount():
-            return {'next_number': '', 'next_level': '', 'background_image': ''}
+            return {'first_number': '', 'level': '', 'background_image': ''}
         
         # Get configuration
         objects_layer_id = self._settings_manager.get_value('objects_layer', '')
         number_field = self._settings_manager.get_value('objects_number_field', '')
         level_field = self._settings_manager.get_value('objects_level_field', '')
         
-        result = {'next_number': '', 'next_level': '', 'background_image': ''}
+        result = {'first_number': '', 'level': '', 'background_image': ''}
         
-        # Get next number if configured
+        # Get first number if configured
         if objects_layer_id and number_field:
-            # Find the next number column (should be column 2 if both number and level are configured)
+            # Find the first number column (should be column 2 if both number and level are configured)
             col_index = 1  # Start after Name column
             if objects_layer_id and number_field:
                 col_index += 1  # Skip last number column
                 if col_index < self._entities_table.columnCount():
                     item = self._entities_table.item(feature_index, col_index)
                     if item:
-                        result['next_number'] = item.text()
+                        result['first_number'] = item.text()
         
-        # Get next level if configured
+        # Get level if configured
         if objects_layer_id and level_field:
-            # Find the next level column
+            # Find the level column
             col_index = 1  # Start after Name column
             if objects_layer_id and number_field:
-                col_index += 2  # Skip last number and next number columns
+                col_index += 2  # Skip last number and first number columns
             if objects_layer_id and level_field:
                 col_index += 1  # Skip last level column
                 if col_index < self._entities_table.columnCount():
                     item = self._entities_table.item(feature_index, col_index)
                     if item:
-                        result['next_level'] = item.text()
+                        result['level'] = item.text()
         
         # Get background image (always the last column)
         background_col = self._entities_table.columnCount() - 1
@@ -434,10 +429,10 @@ class PrepareRecordingDialog(QtWidgets.QDialog):
     
     def get_all_next_values(self) -> List[Dict[str, str]]:
         """
-        Get the next object number, next level, and background image values for all features.
+        Get the first object number, level, and background image values for all features.
         
         Returns:
-            List of dictionaries with 'next_number', 'next_level', and 'background_image' values for each feature
+            List of dictionaries with 'first_number', 'level', and 'background_image' values for each feature
         """
         results = []
         for row in range(self._entities_table.rowCount()):

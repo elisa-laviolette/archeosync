@@ -269,8 +269,9 @@ class CSVImportService(ICSVImportService):
             
             # Get project CRS instead of using hardcoded EPSG:4326
             from qgis.core import QgsProject
-            project_crs = QgsProject.instance().crs().authid()
-            layer_uri = f"PointZ?crs={project_crs}&field=id:integer"
+            project_crs = QgsProject.instance().crs()
+            project_crs_string = self._get_crs_string(project_crs)
+            layer_uri = f"PointZ?crs={project_crs_string}&field=id:integer"
             
             # Add fields for all columns in mapping (excluding required X, Y, Z columns)
             for column_name in column_mapping.keys():
@@ -382,4 +383,29 @@ class CSVImportService(ICSVImportService):
                         print(f"Warning: Could not archive CSV file: {filename}")
                         
         except Exception as e:
-            print(f"Error archiving CSV files: {str(e)}") 
+            print(f"Error archiving CSV files: {str(e)}")
+
+    def _get_crs_string(self, crs):
+        """Get CRS string representation, handling custom CRS properly."""
+        try:
+            # Try to get authid first
+            authid = crs.authid()
+            if authid and authid != '':
+                return authid
+            
+            # For custom CRS, use WKT
+            wkt = crs.toWkt()
+            if wkt and wkt != '':
+                return wkt
+            
+            # Fallback to proj4 string
+            proj4 = crs.toProj4()
+            if proj4 and proj4 != '':
+                return proj4
+            
+            # Last resort - use EPSG:4326
+            print("Warning: Could not determine CRS, using EPSG:4326 as fallback")
+            return "EPSG:4326"
+        except Exception as e:
+            print(f"Error getting CRS string: {str(e)}, using EPSG:4326 as fallback")
+            return "EPSG:4326" 
