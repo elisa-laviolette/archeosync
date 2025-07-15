@@ -243,6 +243,81 @@ class CSVImportService(ICSVImportService):
                     column_mapping[column_key].append(matching_col)
         return column_mapping, all_headers
     
+    def _detect_field_types(self, csv_files: List[str], column_mapping: Dict[str, List[Optional[str]]]) -> Dict[str, str]:
+        """
+        Detect appropriate field types for each column based on CSV data.
+        
+        Args:
+            csv_files: List of CSV file paths
+            column_mapping: Column mapping dictionary
+            
+        Returns:
+            Dictionary mapping column names to QGIS field types
+        """
+        field_types = {}
+        
+        # Sample data from each CSV file to determine types
+        for column_name, column_list in column_mapping.items():
+            if column_name in self._required_columns:
+                # X, Y, Z are always numeric
+                field_types[column_name] = "real"
+                continue
+                
+            # Sample values from all files for this column
+            sample_values = []
+            for file_index, csv_file in enumerate(csv_files):
+                col_name = column_list[file_index]
+                if not col_name:
+                    continue
+                    
+                try:
+                    with open(csv_file, 'r', newline='', encoding='utf-8') as file:
+                        reader = csv.DictReader(file)
+                        # Sample first 10 rows
+                        for i, row in enumerate(reader):
+                            if i >= 10:
+                                break
+                            if col_name in row:
+                                sample_values.append(row[col_name])
+                except Exception:
+                    continue
+            
+            # Determine type based on sample values
+            if not sample_values:
+                field_types[column_name] = "string"  # Default to string
+                continue
+                
+            # Check if all values can be converted to integers
+            all_integers = True
+            all_reals = True
+            
+            for value in sample_values:
+                if not value or value.strip() == '':
+                    continue
+                    
+                # Try integer conversion
+                try:
+                    int(value)
+                except (ValueError, TypeError):
+                    all_integers = False
+                
+                # Try real conversion
+                try:
+                    float(value)
+                except (ValueError, TypeError):
+                    all_reals = False
+                    break
+            
+            # Determine field type
+            if all_integers:
+                field_types[column_name] = "integer"
+            elif all_reals:
+                field_types[column_name] = "real"
+            else:
+                field_types[column_name] = "string"
+        
+        return field_types
+
     def import_csv_files(self, csv_files: List[str], column_mapping: Optional[Dict[str, List[Optional[str]]]] = None) -> ValidationResult:
         """
         Import CSV files into a PointZ vector layer and add to QGIS project.
@@ -264,6 +339,9 @@ class CSVImportService(ICSVImportService):
             column_mapping = self.get_column_mapping(csv_files)
         
         try:
+            # Detect field types from CSV data
+            field_types = self._detect_field_types(csv_files, column_mapping)
+            
             # Create temporary layer
             layer_name = "Imported_CSV_Points"
             
@@ -271,12 +349,17 @@ class CSVImportService(ICSVImportService):
             from qgis.core import QgsProject
             project_crs = QgsProject.instance().crs()
             project_crs_string = self._get_crs_string(project_crs)
-            layer_uri = f"PointZ?crs={project_crs_string}&field=id:integer"
+            layer_uri = f"PointZ?crs={project_crs_string}"
             
-            # Add fields for all columns in mapping (excluding required X, Y, Z columns)
+            # Add fields for all columns in mapping with detected types
             for column_name in column_mapping.keys():
-                if column_name not in self._required_columns:
-                    layer_uri += f"&field={column_name.lower()}:string"
+                if column_name in self._required_columns:
+                    # X, Y, Z are always numeric
+                    layer_uri += f"&field={column_name.lower()}:real"
+                else:
+                    # Use detected field type, default to string
+                    field_type = field_types.get(column_name, "string")
+                    layer_uri += f"&field={column_name.lower()}:{field_type}"
             
             layer = QgsVectorLayer(layer_uri, layer_name, "memory")
             
@@ -313,17 +396,28 @@ class CSVImportService(ICSVImportService):
                                 geometry = QgsGeometry.fromPointXY(point)
                                 feature.setGeometry(geometry)
                                 
-                                # Set attributes
-                                feature.setAttribute('id', feature_id)
-                                
-                                # Set all attributes from column mapping (excluding X, Y, Z)
+                                # Set all attributes from column mapping
                                 for column_name, column_list in column_mapping.items():
-                                    if column_name not in self._required_columns:
-                                        col_name = column_list[file_index]
-                                        if col_name and col_name in row:
-                                            field_name = column_name.lower()
-                                            if field_name in [field.name() for field in layer.fields()]:
-                                                feature.setAttribute(field_name, row[col_name])
+                                    col_name = column_list[file_index]
+                                    if col_name and col_name in row:
+                                        field_name = column_name.lower()
+                                        if field_name in [field.name() for field in layer.fields()]:
+                                            # Convert value to appropriate type
+                                            value = row[col_name]
+                                            field_type = field_types.get(column_name, "string")
+                                            
+                                            if field_type == "integer" and value:
+                                                try:
+                                                    feature.setAttribute(field_name, int(value))
+                                                except (ValueError, TypeError):
+                                                    feature.setAttribute(field_name, value)  # Fallback to string
+                                            elif field_type == "real" and value:
+                                                try:
+                                                    feature.setAttribute(field_name, float(value))
+                                                except (ValueError, TypeError):
+                                                    feature.setAttribute(field_name, value)  # Fallback to string
+                                            else:
+                                                feature.setAttribute(field_name, value)
                                 
                                 # Add feature to layer
                                 layer.addFeature(feature)

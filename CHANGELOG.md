@@ -2,6 +2,34 @@
 
 All notable changes to the ArcheoSync QGIS plugin will be documented in this file.
 
+## [0.12.0] - 2025-07-15
+
+### New Features
+
+- **Enhanced Field Project Import**: Extended field project import functionality to process individual layer files
+  - **Dual Import Support**: Now processes both data.gpkg files and individual layer files (Objects.gpkg, Features.gpkg, etc.)
+  - **Individual Layer Processing**: Can import Objects and Features layers that are not contained within data.gpkg files
+  - **Hybrid Support**: Handles projects with both data.gpkg and individual layer files simultaneously
+  - **Flexible File Detection**: Automatically detects and processes various layer file naming conventions
+  - **Comprehensive Layer Merging**: Merges all discovered Objects and Features layers into new project layers
+
+### Technical Improvements
+
+- **FieldProjectImportService**: New dedicated service for field project import operations
+  - Clean separation of concerns with focused import functionality
+  - Comprehensive validation and error handling
+  - Automatic archiving of imported projects
+  - Project integration with current QGIS project
+- **Enhanced Test Coverage**: Added comprehensive test suite for field project import service
+  - Tests for data.gpkg processing
+  - Tests for individual layer file processing
+  - Tests for hybrid scenarios with both file types
+  - Tests for layer detection and validation
+- **Architecture Enhancement**: Improved service architecture with dedicated import service
+  - Follows clean architecture principles
+  - Dependency injection for testability
+  - Interface-based design for extensibility
+
 ## [0.11.0] - 2025-07-15
 
 ### Breaking Changes

@@ -519,3 +519,221 @@ class TestCSVImportService:
         # Check that the URI contains the project CRS, not hardcoded EPSG:4326
         assert "crs=EPSG:3857" in layer_uri
         assert "crs=EPSG:4326" not in layer_uri 
+
+    def test_detect_field_types_integer_fields(self):
+        """Test field type detection for integer fields."""
+        # Create test CSV with integer data
+        csv1 = self._create_test_csv(
+            "test1.csv",
+            ["X", "Y", "Z", "ID", "Count", "Code"],
+            [
+                ["100.0", "200.0", "10.5", "1", "5", "ABC123"],
+                ["150.0", "250.0", "15.2", "2", "10", "DEF456"],
+                ["200.0", "300.0", "20.1", "3", "15", "GHI789"]
+            ]
+        )
+        
+        column_mapping = {
+            "X": ["X"],
+            "Y": ["Y"],
+            "Z": ["Z"],
+            "ID": ["ID"],
+            "Count": ["Count"],
+            "Code": ["Code"]
+        }
+        
+        field_types = self.csv_service._detect_field_types([csv1], column_mapping)
+        
+        assert field_types["X"] == "real"
+        assert field_types["Y"] == "real"
+        assert field_types["Z"] == "real"
+        assert field_types["ID"] == "integer"
+        assert field_types["Count"] == "integer"
+        assert field_types["Code"] == "string"
+    
+    def test_detect_field_types_real_fields(self):
+        """Test field type detection for real (float) fields."""
+        # Create test CSV with real data
+        csv1 = self._create_test_csv(
+            "test1.csv",
+            ["X", "Y", "Z", "Latitude", "Longitude", "Elevation"],
+            [
+                ["100.0", "200.0", "10.5", "45.123456", "-73.987654", "100.5"],
+                ["150.0", "250.0", "15.2", "45.234567", "-73.876543", "101.2"],
+                ["200.0", "300.0", "20.1", "45.345678", "-73.765432", "102.8"]
+            ]
+        )
+        
+        column_mapping = {
+            "X": ["X"],
+            "Y": ["Y"],
+            "Z": ["Z"],
+            "Latitude": ["Latitude"],
+            "Longitude": ["Longitude"],
+            "Elevation": ["Elevation"]
+        }
+        
+        field_types = self.csv_service._detect_field_types([csv1], column_mapping)
+        
+        assert field_types["X"] == "real"
+        assert field_types["Y"] == "real"
+        assert field_types["Z"] == "real"
+        assert field_types["Latitude"] == "real"
+        assert field_types["Longitude"] == "real"
+        assert field_types["Elevation"] == "real"
+    
+    def test_detect_field_types_mixed_data(self):
+        """Test field type detection with mixed data types."""
+        # Create test CSV with mixed data
+        csv1 = self._create_test_csv(
+            "test1.csv",
+            ["X", "Y", "Z", "MixedField", "StringField", "NumericField"],
+            [
+                ["100.0", "200.0", "10.5", "123", "Text", "42"],
+                ["150.0", "250.0", "15.2", "456", "More Text", "84"],
+                ["200.0", "300.0", "20.1", "ABC", "Even More", "126"]
+            ]
+        )
+        
+        column_mapping = {
+            "X": ["X"],
+            "Y": ["Y"],
+            "Z": ["Z"],
+            "MixedField": ["MixedField"],
+            "StringField": ["StringField"],
+            "NumericField": ["NumericField"]
+        }
+        
+        field_types = self.csv_service._detect_field_types([csv1], column_mapping)
+        
+        assert field_types["X"] == "real"
+        assert field_types["Y"] == "real"
+        assert field_types["Z"] == "real"
+        assert field_types["MixedField"] == "string"  # Mixed data defaults to string
+        assert field_types["StringField"] == "string"
+        assert field_types["NumericField"] == "integer"
+    
+    def test_detect_field_types_empty_values(self):
+        """Test field type detection with empty values."""
+        # Create test CSV with empty values
+        csv1 = self._create_test_csv(
+            "test1.csv",
+            ["X", "Y", "Z", "EmptyField", "PartialEmpty"],
+            [
+                ["100.0", "200.0", "10.5", "", "1"],
+                ["150.0", "250.0", "15.2", "", "2"],
+                ["200.0", "300.0", "20.1", "", ""]
+            ]
+        )
+        
+        column_mapping = {
+            "X": ["X"],
+            "Y": ["Y"],
+            "Z": ["Z"],
+            "EmptyField": ["EmptyField"],
+            "PartialEmpty": ["PartialEmpty"]
+        }
+        
+        field_types = self.csv_service._detect_field_types([csv1], column_mapping)
+        
+        assert field_types["X"] == "real"
+        assert field_types["Y"] == "real"
+        assert field_types["Z"] == "real"
+        assert field_types["EmptyField"] == "string"  # Default for empty fields
+        assert field_types["PartialEmpty"] == "integer"  # Can be converted to int
+    
+    def test_detect_field_types_multiple_files(self):
+        """Test field type detection across multiple CSV files."""
+        # Create test CSV files with different data
+        csv1 = self._create_test_csv(
+            "test1.csv",
+            ["X", "Y", "Z", "ID", "Description"],
+            [
+                ["100.0", "200.0", "10.5", "1", "Point 1"],
+                ["150.0", "250.0", "15.2", "2", "Point 2"]
+            ]
+        )
+        
+        csv2 = self._create_test_csv(
+            "test2.csv",
+            ["X", "Y", "Z", "ID", "Notes"],
+            [
+                ["200.0", "300.0", "20.1", "3", "Point 3"],
+                ["250.0", "350.0", "25.8", "4", "Point 4"]
+            ]
+        )
+        
+        column_mapping = {
+            "X": ["X", "X"],
+            "Y": ["Y", "Y"],
+            "Z": ["Z", "Z"],
+            "ID": ["ID", "ID"],
+            "Description": ["Description", None],
+            "Notes": [None, "Notes"]
+        }
+        
+        field_types = self.csv_service._detect_field_types([csv1, csv2], column_mapping)
+        
+        assert field_types["X"] == "real"
+        assert field_types["Y"] == "real"
+        assert field_types["Z"] == "real"
+        assert field_types["ID"] == "integer"
+        assert field_types["Description"] == "string"
+        assert field_types["Notes"] == "string"
+    
+    def test_detect_field_types_string_id_field(self):
+        """Test field type detection for string ID fields (like PINC150725)."""
+        # Create test CSV with string ID values
+        csv1 = self._create_test_csv(
+            "test1.csv",
+            ["X", "Y", "Z", "ID", "Code"],
+            [
+                ["100.0", "200.0", "10.5", "PINC150725", "ABC123"],
+                ["150.0", "250.0", "15.2", "PINC150726", "DEF456"],
+                ["200.0", "300.0", "20.1", "PINC150727", "GHI789"]
+            ]
+        )
+        
+        column_mapping = {
+            "X": ["X"],
+            "Y": ["Y"],
+            "Z": ["Z"],
+            "ID": ["ID"],
+            "Code": ["Code"]
+        }
+        
+        field_types = self.csv_service._detect_field_types([csv1], column_mapping)
+        
+        assert field_types["X"] == "real"
+        assert field_types["Y"] == "real"
+        assert field_types["Z"] == "real"
+        assert field_types["ID"] == "string"  # String IDs should be detected as string
+        assert field_types["Code"] == "string"
+    
+    def test_detect_field_types_with_invalid_files(self):
+        """Test field type detection handles invalid files gracefully."""
+        # Create test CSV with valid data
+        csv1 = self._create_test_csv(
+            "test1.csv",
+            ["X", "Y", "Z", "ID"],
+            [
+                ["100.0", "200.0", "10.5", "1"],
+                ["150.0", "250.0", "15.2", "2"]
+            ]
+        )
+        
+        column_mapping = {
+            "X": ["X"],
+            "Y": ["Y"],
+            "Z": ["Z"],
+            "ID": ["ID"]
+        }
+        
+        # Test with non-existent file
+        field_types = self.csv_service._detect_field_types(["/nonexistent/file.csv"], column_mapping)
+        
+        # Should default to string for all fields when file can't be read
+        assert field_types["X"] == "real"  # Required columns are always real
+        assert field_types["Y"] == "real"
+        assert field_types["Z"] == "real"
+        assert field_types["ID"] == "string" 

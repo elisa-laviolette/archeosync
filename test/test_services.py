@@ -1523,6 +1523,47 @@ class TestArcheoSyncConfigurationValidator(unittest.TestCase):
         errors = self.validator.validate_csv_archive_folder('/test/path')
         self.assertEqual(len(errors), 0)
     
+    def test_validate_field_project_archive_folder_empty_path(self):
+        """Test validation of empty field project archive folder path."""
+        errors = self.validator.validate_field_project_archive_folder('')
+        self.assertEqual(len(errors), 0)  # Empty path is valid (optional)
+    
+    def test_validate_field_project_archive_folder_not_exists(self):
+        """Test validation of field project archive folder that does not exist."""
+        self.file_system_service.path_exists.return_value = False
+        
+        errors = self.validator.validate_field_project_archive_folder('/test/path')
+        self.assertEqual(len(errors), 1)
+        self.assertIn('Field project archive folder does not exist', errors[0])
+    
+    def test_validate_field_project_archive_folder_not_directory(self):
+        """Test validation of field project archive folder that is not a directory."""
+        self.file_system_service.path_exists.return_value = True
+        self.file_system_service.is_directory.return_value = False
+        
+        errors = self.validator.validate_field_project_archive_folder('/test/path')
+        self.assertEqual(len(errors), 1)
+        self.assertIn('Field project archive path is not a directory', errors[0])
+    
+    def test_validate_field_project_archive_folder_not_writable(self):
+        """Test validation of field project archive folder that is not writable."""
+        self.file_system_service.path_exists.return_value = True
+        self.file_system_service.is_directory.return_value = True
+        self.file_system_service.is_writable.return_value = False
+        
+        errors = self.validator.validate_field_project_archive_folder('/test/path')
+        self.assertEqual(len(errors), 1)
+        self.assertIn('Field project archive folder is not writable', errors[0])
+    
+    def test_validate_field_project_archive_folder_valid(self):
+        """Test validation of valid field project archive folder."""
+        self.file_system_service.path_exists.return_value = True
+        self.file_system_service.is_directory.return_value = True
+        self.file_system_service.is_writable.return_value = True
+        
+        errors = self.validator.validate_field_project_archive_folder('/test/path')
+        self.assertEqual(len(errors), 0)
+    
 
     
     def test_validate_all_settings(self):

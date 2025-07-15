@@ -212,6 +212,10 @@ class IConfigurationValidator(ABC):
         """Validate CSV archive folder configuration."""
         pass
     
+    def validate_field_project_archive_folder(self, path: str) -> List[str]:
+        """Validate field project archive folder configuration."""
+        pass
+    
 
     
     @abstractmethod
@@ -612,5 +616,75 @@ class IRasterProcessingService(ABC):
         Note:
             This method should provide comprehensive information about where
             GDAL tools were searched and their availability status.
+        """
+        pass 
+
+
+class IFieldProjectImportService(ABC):
+    """Interface for field project import operations."""
+    
+    @abstractmethod
+    def import_field_projects(self, project_paths: List[str]) -> ValidationResult:
+        """
+        Import completed field projects and merge their Objects and Features layers.
+        
+        Args:
+            project_paths: List of paths to completed field project directories
+            
+        Returns:
+            ValidationResult indicating if import was successful and any error messages
+        """
+        pass
+    
+    @abstractmethod
+    def _scan_project_layers(self, project_path: str) -> Dict[str, List[str]]:
+        """
+        Scan a field project directory for layer files.
+        
+        Args:
+            project_path: Path to the field project directory
+            
+        Returns:
+            Dictionary mapping layer types to lists of file paths
+        """
+        pass
+    
+    @abstractmethod
+    def _process_data_gpkg(self, data_gpkg_path: str) -> Dict[str, List[Any]]:
+        """
+        Process a data.gpkg file to extract Objects and Features layers.
+        
+        Args:
+            data_gpkg_path: Path to the data.gpkg file
+            
+        Returns:
+            Dictionary mapping layer types to lists of features
+        """
+        pass
+    
+    @abstractmethod
+    def _process_individual_layers(self, layer_files: Dict[str, List[str]]) -> Dict[str, List[Any]]:
+        """
+        Process individual layer files (not in data.gpkg).
+        
+        Args:
+            layer_files: Dictionary mapping layer types to lists of file paths
+            
+        Returns:
+            Dictionary mapping layer types to lists of features
+        """
+        pass
+    
+    @abstractmethod
+    def _create_merged_layer(self, layer_name: str, features: List[Any]) -> Optional[Any]:
+        """
+        Create a merged layer from a list of features.
+        
+        Args:
+            layer_name: Name for the merged layer
+            features: List of features to merge
+            
+        Returns:
+            QGIS layer object, or None if failed
         """
         pass 

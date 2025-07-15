@@ -13,6 +13,7 @@ from .layer_service import QGISLayerService
 from .csv_import_service import CSVImportService
 from .raster_processing_service import QGISRasterProcessingService
 from .project_creation_service import QGISProjectCreationService
+from .field_project_import_service import FieldProjectImportService
 
 __all__ = [
     'QGISSettingsManager',
@@ -22,5 +23,6 @@ __all__ = [
     'QGISLayerService',
     'CSVImportService',
     'QGISRasterProcessingService',
-    'QGISProjectCreationService'
+    'QGISProjectCreationService',
+    'FieldProjectImportService'
 ] 

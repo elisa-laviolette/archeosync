@@ -80,6 +80,7 @@ class TestCoreInterfaces(unittest.TestCase):
         self.assertTrue(hasattr(IConfigurationValidator, 'validate_total_station_folder'))
         self.assertTrue(hasattr(IConfigurationValidator, 'validate_completed_projects_folder'))
         self.assertTrue(hasattr(IConfigurationValidator, 'validate_csv_archive_folder'))
+        self.assertTrue(hasattr(IConfigurationValidator, 'validate_field_project_archive_folder'))
 
 
     

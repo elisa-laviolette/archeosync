@@ -177,6 +177,31 @@ class ArcheoSyncConfigurationValidator(IConfigurationValidator):
         
         return errors
     
+    def validate_field_project_archive_folder(self, path: str) -> List[str]:
+        """
+        Validate field project archive folder configuration.
+        
+        Args:
+            path: Path to validate
+            
+        Returns:
+            List of validation error messages (empty if valid)
+        """
+        errors = []
+        
+        # Field project archive folder is optional, so no error if empty
+        if not path:
+            return errors
+        
+        if not self._file_system_service.path_exists(path):
+            errors.append(f"Field project archive folder does not exist: {path}")
+        elif not self._file_system_service.is_directory(path):
+            errors.append(f"Field project archive path is not a directory: {path}")
+        elif not self._file_system_service.is_writable(path):
+            errors.append(f"Field project archive folder is not writable: {path}")
+        
+        return errors
+    
 
     
 
@@ -409,8 +434,10 @@ class ArcheoSyncConfigurationValidator(IConfigurationValidator):
                 settings['csv_archive_folder']
             )
         
-
-        
+        if 'field_project_archive_folder' in settings:
+            validation_results['field_project_archive_folder'] = self.validate_field_project_archive_folder(
+                settings['field_project_archive_folder']
+            )
 
         
         if 'recording_areas_layer' in settings:

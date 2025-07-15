@@ -187,6 +187,21 @@ QGIS-specific implementation for layer operations including:
 - Empty layer creation for QField offline editing
 - Layer structure copying with styling preservation
 
+### FieldProjectImportService
+QGIS-specific implementation for field project import operations including:
+- **Dual Import Support**: Processes both data.gpkg files and individual layer files
+  - **data.gpkg Processing**: Extracts Objects and Features layers from data.gpkg files
+  - **Individual Layer Processing**: Processes Objects.gpkg, Features.gpkg, and other individual layer files
+  - **Hybrid Support**: Handles projects with both data.gpkg and individual layer files
+- **Layer Merging**: Merges Objects and Features layers from multiple completed projects
+  - Creates new "New Objects" and "New Features" layers in the current project
+  - Preserves all attributes and geometry from imported layers
+  - Maintains coordinate reference system compatibility
+- **Automatic Archiving**: Moves imported field projects to configured archive folder after successful import
+- **Comprehensive Validation**: Validates layer structure and content before import
+- **Error Recovery**: Graceful handling of missing or invalid layers
+- **Project Integration**: Automatically adds merged layers to the current QGIS project
+
 ### QGISQFieldService
 QGIS-specific implementation for QField integration including:
 - Automatic empty layer creation ("Objects", "Features")

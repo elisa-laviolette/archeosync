@@ -112,6 +112,7 @@ class TestSettingsDialog(unittest.TestCase):
             call('total_station_folder', ''),
             call('completed_projects_folder', ''),
             call('csv_archive_folder', ''),
+            call('field_project_archive_folder', ''),
             call('recording_areas_layer', ''),
             call('objects_layer', ''),
             call('features_layer', ''),
@@ -128,6 +129,7 @@ class TestSettingsDialog(unittest.TestCase):
             '/path/to/total',
             '/path/to/completed',
             '',  # csv_archive_folder
+            '',  # field_project_archive_folder
             'test_layer_id',  # recording_areas_layer
             'test_objects_layer_id',  # objects_layer
             '',  # objects_number_field
@@ -195,6 +197,7 @@ class TestSettingsDialog(unittest.TestCase):
             'total_station_folder': '/path/to/total',
             'completed_projects_folder': '/path/to/completed',
             'csv_archive_folder': '',
+            'field_project_archive_folder': '',
             'recording_areas_layer': 'test_layer_id',
             'objects_layer': 'test_objects_layer_id',
             'objects_number_field': '',
@@ -242,6 +245,7 @@ class TestSettingsDialog(unittest.TestCase):
             'total_station_folder': '/path/to/total',
             'completed_projects_folder': '/path/to/completed',
             'csv_archive_folder': '',
+            'field_project_archive_folder': '',
             'recording_areas_layer': 'test_layer_id',
             'objects_layer': 'test_objects_layer_id',
             'objects_number_field': '',
@@ -397,6 +401,7 @@ class TestSettingsDialog(unittest.TestCase):
             call('total_station_folder', '/path/to/total'),
             call('completed_projects_folder', '/path/to/completed'),
             call('csv_archive_folder', ''),
+            call('field_project_archive_folder', ''),
             call('recording_areas_layer', ''),
             call('objects_layer', 'test_objects_layer_id'),  # Now mandatory, so has a value
             call('objects_number_field', ''),

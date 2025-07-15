@@ -42,7 +42,8 @@ from .services import (
     QGISLayerService,
     CSVImportService,
     QGISRasterProcessingService,
-    QGISProjectCreationService
+    QGISProjectCreationService,
+    FieldProjectImportService
 )
 
 
@@ -125,6 +126,13 @@ class ArcheoSyncPlugin:
         
         # Initialize CSV import service
         self._csv_import_service = CSVImportService(self._iface, self._file_system_service, self._settings_manager)
+        
+        # Initialize field project import service
+        self._field_project_import_service = FieldProjectImportService(
+            self._settings_manager,
+            self._layer_service,
+            self._file_system_service
+        )
         
         # Initialize configuration validator
         self._configuration_validator = ArcheoSyncConfigurationValidator(
@@ -541,12 +549,21 @@ class ArcheoSyncPlugin:
         """Process completed field projects for import."""
         from qgis.PyQt.QtWidgets import QMessageBox
         
-        # For now, just show a message that this functionality needs to be implemented
-        QMessageBox.information(
-            self._iface.mainWindow(),
-            "Field Project Import",
-            "Import functionality for completed field projects will be implemented in a future version."
-        )
+        # Import field projects using the field project import service
+        import_result = self._field_project_import_service.import_field_projects(project_paths)
+        
+        if import_result.is_valid:
+            QMessageBox.information(
+                self._iface.mainWindow(),
+                "Field Project Import Complete",
+                import_result.message
+            )
+        else:
+            QMessageBox.critical(
+                self._iface.mainWindow(),
+                "Field Project Import Error",
+                import_result.message
+            )
     
     @property
     def settings_manager(self):
