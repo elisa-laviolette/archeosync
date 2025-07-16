@@ -2,6 +2,31 @@
 
 All notable changes to the ArcheoSync QGIS plugin will be documented in this file.
 
+## [0.13.0] - 2025-07-16
+
+### New Features
+
+- **Raster Enhancement Settings**: Added three new slider settings in the Raster tab of the configuration dialog for adjusting clipped raster layers:
+  - **Brightness**: Adjust brightness from -255 to +255 (default: 0)
+  - **Contrast**: Adjust contrast from -100 to +100 (default: 0)  
+  - **Saturation**: Adjust saturation from -100 to +100 (default: 0)
+  - Settings are applied to clipped raster layers when creating field projects
+  - Real-time value display with slider controls
+  - Proper validation and persistence of enhancement values
+  - Comprehensive test coverage for all new settings
+
+### Technical Improvements
+
+- **Enhanced Settings Dialog**: Extended raster configuration tab with new enhancement section
+  - User-friendly slider widgets with value labels
+  - Proper integration with existing settings management
+  - Validation for enhancement value ranges
+  - Revert functionality for cancelled changes
+- **Configuration Validation**: Added validation methods for raster enhancement settings
+  - Type checking for integer values
+  - Range validation for brightness (-255 to 255), contrast (-100 to 100), saturation (-100 to 100)
+  - Integration with existing validation framework
+
 ## [0.12.0] - 2025-07-15
 
 ### New Features

@@ -52,6 +52,10 @@ A QGIS plugin for archaeologists to prepare data for field work and import it ba
 
    **Raster Tab:**
    - **Raster Clipping Offset**: Configure the offset (in meters) for clipping background images to recording areas
+   - **Raster Enhancement Settings**: Adjust visual properties of clipped raster layers:
+     - **Brightness**: Adjust brightness from -255 to +255 (default: 0)
+     - **Contrast**: Adjust contrast from -100 to +100 (default: 0)
+     - **Saturation**: Adjust saturation from -100 to +100 (default: 0)
 
 ### Prepare Recording
 
@@ -72,6 +76,8 @@ A QGIS plugin for archaeologists to prepare data for field work and import it ba
 **Project Naming**: When a level is defined, field project names will be the display name of the recording area followed by '_' and the content of the Next level column. For example: "Test Area_A" or "Excavation Site_Level 1". If no level is defined, only the recording area name is used.
 
 **Background Image Processing**: When a background image is selected, the system will automatically clip the raster to the recording area boundary with a configurable offset (default: 20 cm). This ensures the background image extends slightly beyond the recording area for better context in the field. The original raster remains unchanged, and the clipped version is used only for the field project. Background images are positioned at the bottom of the layer tree for optimal visualization.
+
+**Raster Enhancement**: Clipped raster layers can be enhanced with brightness, contrast, and saturation adjustments. These settings are applied during field project creation and saved in QML style files to ensure consistent appearance across different QGIS installations. Enhancement settings are particularly useful for improving visibility of archaeological features in challenging lighting conditions or for highlighting specific elements in the background imagery.
 
 **Intelligent Data Filtering**: When creating field projects, the system automatically filters the data to include only relevant information:
 - **Recording Area Filtering**: Only the selected recording area feature is kept in the recording areas layer
@@ -137,7 +143,7 @@ The plugin follows clean architecture principles with:
 make test
 ```
 
-The project includes 357 tests with 357 passing and 8 skipped (QGIS-specific tests).
+The project includes comprehensive test coverage with robust validation and quality assurance.
 
 ### Project Structure
 
@@ -145,7 +151,7 @@ The project includes 357 tests with 357 passing and 8 skipped (QGIS-specific tes
   - `core/`: Core interfaces and abstractions
   - `services/`: Service implementations
   - `ui/`: User interface components
-  - `test/`: Test files (357 tests)
+  - `test/`: Test files with comprehensive coverage
 
 ### Key Services
 
@@ -159,7 +165,22 @@ The project includes 357 tests with 357 passing and 8 skipped (QGIS-specific tes
 
 ## Recent Updates
 
-### Version 0.10.1 (Latest)
+### Version 0.13.0 (Latest)
+- **Raster Enhancement Settings**: Added comprehensive raster enhancement capabilities for field projects
+  - **Brightness Control**: Adjust brightness from -255 to +255 with slider controls
+  - **Contrast Control**: Adjust contrast from -100 to +100 for better feature distinction
+  - **Saturation Control**: Adjust saturation from -100 to +100 for color enhancement
+  - **Style Persistence**: Enhancement settings saved in QML files for consistent appearance
+  - **User Interface**: Enhanced settings dialog with dedicated raster enhancement section
+  - **Validation**: Comprehensive validation for all enhancement parameters
+  - **Integration**: Seamless integration with existing raster clipping workflow
+- **Technical Improvements**: Enhanced raster processing with QGIS renderer integration
+  - Direct integration with QGIS raster renderer methods
+  - Automatic QML style file generation with enhancement parameters
+  - Real-time preview and validation of enhancement settings
+  - Comprehensive test coverage for all enhancement functionality
+
+### Version 0.10.1
 - **Raster Clipping Coordinate Comparison Fix**: Fixed critical error in temporary shapefile creation during raster clipping
   - **Root Cause**: QgsPointXY objects were being compared directly with `!=` operator, causing type comparison errors
   - **Solution**: Implemented proper coordinate comparison using `.x()` and `.y()` methods for QgsPointXY objects

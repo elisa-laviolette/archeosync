@@ -212,8 +212,24 @@ class IConfigurationValidator(ABC):
         """Validate CSV archive folder configuration."""
         pass
     
+    @abstractmethod
     def validate_field_project_archive_folder(self, path: str) -> List[str]:
         """Validate field project archive folder configuration."""
+        pass
+    
+    @abstractmethod
+    def validate_raster_brightness(self, value: int) -> List[str]:
+        """Validate raster brightness setting."""
+        pass
+    
+    @abstractmethod
+    def validate_raster_contrast(self, value: int) -> List[str]:
+        """Validate raster contrast setting."""
+        pass
+    
+    @abstractmethod
+    def validate_raster_saturation(self, value: int) -> List[str]:
+        """Validate raster saturation setting."""
         pass
     
 

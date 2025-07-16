@@ -4,7 +4,7 @@ This document describes the architecture of the ArcheoSync QGIS plugin, focusing
 
 ## Overview
 
-The plugin follows SOLID principles and clean architecture to ensure maintainability, testability, and extensibility. The current version includes 357 tests with 357 passing and 8 skipped, demonstrating robust code quality and comprehensive coverage.
+The plugin follows SOLID principles and clean architecture to ensure maintainability, testability, and extensibility. The current version includes comprehensive test coverage with robust code quality and extensive validation.
 
 ## SOLID Principles Implementation
 
@@ -202,8 +202,8 @@ QGIS-specific implementation for field project import operations including:
 - **Error Recovery**: Graceful handling of missing or invalid layers
 - **Project Integration**: Automatically adds merged layers to the current QGIS project
 
-### QGISQFieldService
-QGIS-specific implementation for QField integration including:
+### QGISProjectCreationService
+QGIS-specific implementation for field project creation and packaging including:
 - Automatic empty layer creation ("Objects", "Features")
 - Layer configuration for offline editing with extra layers support
 - Project packaging with area of interest
@@ -218,6 +218,11 @@ QGIS-specific implementation for QField integration including:
   - **Related Extra Layers Filtering**: For extra layers with relations to the recording area layer, keeps only features related to the selected recording area
   - **Relation-Based Filtering**: Uses QGIS relations to identify and preserve related features across layers
   - **Automatic Project Updates**: Saves filtered projects with clean, focused datasets for field use
+- **Raster Enhancement Integration**: Applies brightness, contrast, and saturation settings to clipped raster layers:
+  - **Renderer Integration**: Direct integration with QGIS raster renderer methods
+  - **Style Persistence**: Enhancement settings saved in QML style files
+  - **Automatic Application**: Enhancement applied during field project creation workflow
+  - **QML Generation**: Enhanced QML file creation with regex-based parameter injection
 
 ### CSVImportService
 QGIS-specific implementation for CSV import operations including:
@@ -232,15 +237,17 @@ QGIS-specific implementation for CSV import operations including:
 ## UI Components
 
 ### SettingsDialog
-Clean, testable settings dialog with dependency injection and real-time validation including:
+Dialog for managing plugin configuration with:
+- **Dependency Injection**: All services injected through interfaces for testability
 - **Tabbed Interface**: Organized into 3 logical tabs for better user experience
   - **Folders Tab**: All folder-related settings (field projects, total station, archives)
   - **Layers Tab**: Layer selection, field configuration, and extra layers
-  - **Raster Tab**: Raster processing configuration (clipping offset)
+  - **Raster Tab**: Raster processing configuration (clipping offset, brightness, contrast, saturation)
 - Archive folder configuration for CSV files and QField projects
 - Folder selection widgets with browse functionality
 - Real-time validation of archive folder paths
 - Integration with file system service for folder operations
+- Raster enhancement settings with slider controls for brightness, contrast, and saturation
 
 ### PrepareRecordingDialog
 Dialog for recording preparation showing selected entities in a table with:
@@ -287,7 +294,7 @@ Test real QGIS environment integration.
 
 ## Benefits
 
-1. **Testability**: All components can be unit tested with mocks (351 tests, 351 passing, 8 skipped)
+1. **Testability**: All components can be unit tested with mocks
 2. **Maintainability**: Clear separation of concerns
 3. **Extensibility**: Easy to add new features through interfaces
 4. **Reliability**: Comprehensive validation and error handling
@@ -337,7 +344,49 @@ The filtering process ensures field projects contain only relevant data:
 - **Error Recovery**: Graceful handling of QGIS object deletion issues
 - **Relation Processing**: Efficient relation-based filtering using QGIS relation manager
 
-## Latest Features (v0.10.1)
+## Latest Features (v0.13.0)
+
+### Raster Enhancement Settings
+- **Brightness Control**: Adjust brightness from -255 to +255 (default: 0)
+  - Positive values increase brightness, negative values decrease brightness
+  - Applied to clipped raster layers in field projects
+  - Real-time preview with slider controls
+- **Contrast Control**: Adjust contrast from -100 to +100 (default: 0)
+  - Positive values increase contrast, negative values decrease contrast
+  - Enhances visual distinction between features in background images
+  - Integrated with brightness control for comprehensive image enhancement
+- **Saturation Control**: Adjust saturation from -100 to +100 (default: 0)
+  - Positive values increase color intensity, negative values create grayscale effect
+  - Useful for highlighting or subduing colors in archaeological contexts
+  - Applied through QGIS hue/saturation renderer settings
+- **User Interface**: Enhanced settings dialog with dedicated raster tab
+  - Slider controls with real-time value display
+  - Proper validation and persistence of enhancement values
+  - Integration with existing settings management system
+- **Style Persistence**: Enhancement settings are saved in QML style files
+  - Automatic QML file generation with enhancement parameters
+  - Style files accompany clipped raster layers in field projects
+  - Ensures consistent appearance across different QGIS installations
+- **Validation**: Comprehensive validation for enhancement settings
+  - Type checking for integer values
+  - Range validation for all enhancement parameters
+  - Integration with existing configuration validation framework
+
+### Technical Implementation
+- **Renderer Integration**: Direct integration with QGIS raster renderer
+  - Uses `setBrightness()`, `setContrast()`, and `setSaturation()` methods
+  - Applied during field project creation workflow
+  - Automatic layer repaint to apply changes immediately
+- **QML Style Generation**: Enhanced QML file creation with enhancement parameters
+  - Regex-based QML content modification
+  - Preserves existing style settings while adding enhancement values
+  - Automatic style loading to ensure persistence
+- **Project Creation Integration**: Seamless integration with field project creation
+  - Enhancement applied after raster clipping operations
+  - Maintains original raster integrity
+  - Automatic cleanup of temporary files and layers
+
+## Previous Features (v0.10.1)
 
 ### Raster Clipping Coordinate Comparison Fix
 - **Critical Bug Fix**: Resolved coordinate comparison error in raster clipping operations
@@ -408,6 +457,8 @@ The filtering process ensures field projects contain only relevant data:
   - New setting: `raster_clipping_offset` (default: 0.2 meters)
   - Settings dialog includes user-friendly configuration widget
   - Proper validation and persistence of offset values
+
+
 
 ## Previous Features (v0.8.0)
 

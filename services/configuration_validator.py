@@ -438,7 +438,21 @@ class ArcheoSyncConfigurationValidator(IConfigurationValidator):
             validation_results['field_project_archive_folder'] = self.validate_field_project_archive_folder(
                 settings['field_project_archive_folder']
             )
-
+        
+        if 'raster_brightness' in settings:
+            validation_results['raster_brightness'] = self.validate_raster_brightness(
+                settings['raster_brightness']
+            )
+        
+        if 'raster_contrast' in settings:
+            validation_results['raster_contrast'] = self.validate_raster_contrast(
+                settings['raster_contrast']
+            )
+        
+        if 'raster_saturation' in settings:
+            validation_results['raster_saturation'] = self.validate_raster_saturation(
+                settings['raster_saturation']
+            )
         
         if 'recording_areas_layer' in settings:
             validation_results['recording_areas_layer'] = self.validate_recording_areas_layer(
@@ -510,3 +524,60 @@ class ArcheoSyncConfigurationValidator(IConfigurationValidator):
             for error in errors:
                 all_errors.append(f"{setting_name}: {error}")
         return all_errors 
+
+    def validate_raster_brightness(self, value: int) -> List[str]:
+        """
+        Validate raster brightness setting.
+        
+        Args:
+            value: Brightness value to validate
+            
+        Returns:
+            List of validation error messages (empty if valid)
+        """
+        errors = []
+        
+        if not isinstance(value, int):
+            errors.append("Brightness value must be an integer")
+        elif value < -255 or value > 255:
+            errors.append("Brightness value must be between -255 and 255")
+        
+        return errors
+    
+    def validate_raster_contrast(self, value: int) -> List[str]:
+        """
+        Validate raster contrast setting.
+        
+        Args:
+            value: Contrast value to validate
+            
+        Returns:
+            List of validation error messages (empty if valid)
+        """
+        errors = []
+        
+        if not isinstance(value, int):
+            errors.append("Contrast value must be an integer")
+        elif value < -100 or value > 100:
+            errors.append("Contrast value must be between -100 and 100")
+        
+        return errors
+    
+    def validate_raster_saturation(self, value: int) -> List[str]:
+        """
+        Validate raster saturation setting.
+        
+        Args:
+            value: Saturation value to validate
+            
+        Returns:
+            List of validation error messages (empty if valid)
+        """
+        errors = []
+        
+        if not isinstance(value, int):
+            errors.append("Saturation value must be an integer")
+        elif value < -100 or value > 100:
+            errors.append("Saturation value must be between -100 and 100")
+        
+        return errors 

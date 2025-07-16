@@ -52,6 +52,7 @@ The dialog provides:
 from typing import Optional, Dict, Any, List
 from qgis.PyQt import QtWidgets
 from qgis.PyQt.QtCore import Qt
+import functools
 
 try:
     from ..core.interfaces import ISettingsManager, IFileSystemService, ILayerService, IConfigurationValidator
@@ -69,38 +70,35 @@ class SettingsDialog(QtWidgets.QDialog):
     into three tabs for better user experience.
     """
     
-    def __init__(self, 
-                 settings_manager: ISettingsManager,
+    def __init__(self, settings_manager: ISettingsManager, 
                  file_system_service: IFileSystemService,
                  layer_service: ILayerService,
                  configuration_validator: IConfigurationValidator,
-                 parent=None):
-        """
-        Initialize the settings dialog.
-        
-        Args:
-            settings_manager: Service for managing settings
-            file_system_service: Service for file system operations
-            layer_service: Service for QGIS layer operations
-            configuration_validator: Service for validating configuration
-            parent: Parent widget for the dialog
-        """
+                 parent: Optional[QtWidgets.QWidget] = None) -> None:
+        """Initialize the settings dialog."""
         super().__init__(parent)
         
-        # Store injected dependencies
+        # Initialize services
         self._settings_manager = settings_manager
         self._file_system_service = file_system_service
         self._layer_service = layer_service
         self._configuration_validator = configuration_validator
         
-        # Store original values for cancel functionality
-        self._original_values: Dict[str, Any] = {}
+        # Flag to track programmatic changes
+        self._programmatic_change = False
         
-        # Initialize UI
+        # Initialize UI components
+        self._sliders = {}
+        self._value_labels = {}
+        self._button_box = None
+        self._field_projects_widget = None
+        self._total_station_widget = None
+        self._raster_enhancement_group = None
+        
+        # Set up UI
         self._setup_ui()
         self._setup_connections()
         self._load_settings()
-        self._update_ui_state()
     
     def _setup_ui(self) -> None:
         """Set up the user interface components."""
@@ -127,6 +125,11 @@ class SettingsDialog(QtWidgets.QDialog):
         
         # Add button box
         self._create_button_box(main_layout)
+
+        # Debug: print slider ids
+        print("Slider object ids:")
+        for name, slider in self._sliders.items():
+            print(f"  {name}: id={id(slider)}")
     
     def _create_folders_tab(self) -> None:
         """Create the folders configuration tab."""
@@ -246,6 +249,29 @@ class SettingsDialog(QtWidgets.QDialog):
         # Raster clipping offset for field projects
         self._raster_offset_widget = self._create_raster_offset_widget()
         form_layout.addRow("Raster Clipping Offset:", self._raster_offset_widget)
+        
+        # Raster enhancement settings section
+        enhancement_label = QtWidgets.QLabel("Raster Enhancement Settings")
+        enhancement_label.setStyleSheet("font-weight: bold; margin-top: 15px; margin-bottom: 5px;")
+        form_layout.addRow(enhancement_label)
+        
+        # Brightness slider
+        self._brightness_widget = self._create_slider_widget(
+            "Brightness", -255, 255, 0, "Adjust the brightness of clipped raster layers"
+        )
+        form_layout.addRow("Brightness:", self._brightness_widget)
+        
+        # Contrast slider
+        self._contrast_widget = self._create_slider_widget(
+            "Contrast", -100, 100, 0, "Adjust the contrast of clipped raster layers"
+        )
+        form_layout.addRow("Contrast:", self._contrast_widget)
+        
+        # Saturation slider
+        self._saturation_widget = self._create_slider_widget(
+            "Saturation", -100, 100, 0, "Adjust the saturation of clipped raster layers"
+        )
+        form_layout.addRow("Saturation:", self._saturation_widget)
         
         raster_layout.addLayout(form_layout)
         raster_layout.addStretch()
@@ -396,6 +422,25 @@ class SettingsDialog(QtWidgets.QDialog):
         
         return widget
     
+    def _create_slider_widget(self, title: str, min_val: int, max_val: int, default_val: int, tooltip: str) -> QtWidgets.QWidget:
+        """Create an integer spinbox widget for raster enhancement settings (replaces slider)."""
+        widget = QtWidgets.QWidget()
+        layout = QtWidgets.QHBoxLayout(widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        # SpinBox
+        spinbox = QtWidgets.QSpinBox()
+        spinbox.setMinimum(min_val)
+        spinbox.setMaximum(max_val)
+        spinbox.setValue(default_val)
+        spinbox.setToolTip(tooltip)
+        layout.addWidget(spinbox)
+
+        # Store reference
+        self._sliders[title] = spinbox
+        # Remove value label, not needed for spinbox
+        return widget
+    
     def _create_button_box(self, parent_layout: QtWidgets.QVBoxLayout) -> None:
         """Create the dialog button box."""
         self._button_box = QtWidgets.QDialogButtonBox(
@@ -432,20 +477,15 @@ class SettingsDialog(QtWidgets.QDialog):
             lambda: self._browse_folder(self._field_project_archive_widget.input_field,
                                       "Select Folder for Field Project Archive")
         )
-
-
-        
         # Layer selector connections
         self._recording_areas_widget.refresh_button.clicked.connect(self._refresh_layer_list)
         self._objects_widget.refresh_button.clicked.connect(self._refresh_objects_layer_list)
         self._objects_widget.combo_box.currentIndexChanged.connect(self._on_objects_layer_changed)
         self._features_widget.refresh_button.clicked.connect(self._refresh_features_layer_list)
-        
         # Extra layers connections
         self._extra_layers_widget.refresh_button.clicked.connect(self._refresh_extra_layers_list)
-        
+        # No slider signal connections needed for spinboxes
 
-    
     def _browse_folder(self, input_field: QtWidgets.QLineEdit, title: str) -> None:
         """Browse for a folder and update the input field."""
         folder_path = self._file_system_service.select_directory(
@@ -696,6 +736,16 @@ class SettingsDialog(QtWidgets.QDialog):
             raster_offset = self._settings_manager.get_value('raster_clipping_offset', 0.2)
             self._raster_offset_spinbox.setValue(float(raster_offset))
             
+            # Load raster enhancement settings
+            brightness = self._settings_manager.get_value('raster_brightness', 0)
+            contrast = self._settings_manager.get_value('raster_contrast', 0)
+            saturation = self._settings_manager.get_value('raster_saturation', 0)
+            self._programmatic_change = True
+            self._sliders['Brightness'].setValue(int(brightness))
+            self._sliders['Contrast'].setValue(int(contrast))
+            self._sliders['Saturation'].setValue(int(saturation))
+            self._programmatic_change = False
+            
             # Load extra layers for field projects
             extra_layers = self._settings_manager.get_value('extra_field_layers', [])
             self._refresh_extra_layers_list()  # Populate the list
@@ -724,6 +774,9 @@ class SettingsDialog(QtWidgets.QDialog):
                 'features_layer': features_layer_id,
 
                 'raster_clipping_offset': float(raster_offset),
+                'raster_brightness': int(brightness),
+                'raster_contrast': int(contrast),
+                'raster_saturation': int(saturation),
                 'extra_field_layers': extra_layers,
 
             }
@@ -748,6 +801,9 @@ class SettingsDialog(QtWidgets.QDialog):
                 'features_layer': self._features_widget.combo_box.currentData(),
 
                 'raster_clipping_offset': self._raster_offset_spinbox.value(),
+                'raster_brightness': self._sliders['Brightness'].value(),
+                'raster_contrast': self._sliders['Contrast'].value(),
+                'raster_saturation': self._sliders['Saturation'].value(),
                 'extra_field_layers': self._get_selected_extra_layers(),
 
             }
@@ -771,8 +827,17 @@ class SettingsDialog(QtWidgets.QDialog):
             self._show_error("Settings Error", f"Failed to save settings: {str(e)}")
     
     def _reject(self) -> None:
-        """Handle dialog rejection by reverting to original values."""
+        """Handle dialog rejection by resetting to original values."""
         try:
+            # Reset raster enhancement settings to original values
+            brightness = self._original_values.get('raster_brightness', 0)
+            contrast = self._original_values.get('raster_contrast', 0)
+            saturation = self._original_values.get('raster_saturation', 0)
+            self._programmatic_change = True
+            self._sliders['Brightness'].setValue(int(brightness))
+            self._sliders['Contrast'].setValue(int(contrast))
+            self._sliders['Saturation'].setValue(int(saturation))
+            self._programmatic_change = False
             # Revert UI to original values
             self._field_projects_widget.input_field.setText(
                 self._original_values.get('field_projects_folder', '')
@@ -794,7 +859,6 @@ class SettingsDialog(QtWidgets.QDialog):
             self._raster_offset_spinbox.setValue(
                 self._original_values.get('raster_clipping_offset', 0.2)
             )
-
             
             # Revert recording areas layer selection
             recording_areas_layer_id = self._original_values.get('recording_areas_layer', '')
@@ -852,3 +916,5 @@ class SettingsDialog(QtWidgets.QDialog):
     def _show_error(self, title: str, message: str) -> None:
         """Show an error message to the user."""
         QtWidgets.QMessageBox.critical(self, title, message) 
+
+        

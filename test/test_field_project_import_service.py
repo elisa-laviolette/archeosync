@@ -146,35 +146,22 @@ class TestFieldProjectImportService:
             return path.endswith("data.gpkg")
         mock_exists.side_effect = exists_side_effect
         
+        # Mock Objects sublayer using the helper function
+        mock_objects_layer = create_mock_layer_with_fields()
+        mock_feature = create_iterable_mock_feature()
+        mock_objects_layer.getFeatures.return_value = [mock_feature]
+        
         # Mock data layer
         mock_data_layer = MagicMock()
         mock_data_layer.isValid.return_value = True
-        mock_data_layer.dataProvider.return_value.subLayers.return_value = [
+        
+        # Mock dataProvider and subLayers properly
+        mock_data_provider = MagicMock()
+        mock_data_layer.dataProvider.return_value = mock_data_provider
+        # Return actual strings that can be split
+        mock_data_provider.subLayers.return_value = [
             "0!!::!!Objects_abc123!!::!!Point!!::!!EPSG:4326"
         ]
-        mock_data_layer.__getitem__.side_effect = lambda idx: mock_objects_layer
-        
-        # Mock Objects sublayer
-        mock_objects_layer = MagicMock()
-        mock_field = MagicMock()
-        mock_field.name.return_value = "id"
-        mock_field.typeName.return_value = "Integer"
-        mock_fields = MagicMock()
-        mock_fields.count.return_value = 1
-        mock_fields.__iter__ = lambda self: iter([mock_field])
-        mock_fields.__getitem__ = lambda self, index: mock_field if index == 0 else None
-        mock_fields.indexOf = lambda field_name: 0 if field_name == "id" else -1
-        mock_objects_layer.fields.return_value = mock_fields
-        mock_feature = MagicMock()
-        mock_feature.geometry.return_value = MagicMock(type=lambda: 2, isMultipart=lambda: False, isEmpty=lambda: False)
-        mock_feature.fields.return_value = mock_fields
-        mock_feature.__getitem__.side_effect = lambda field_name: 1 if field_name == "id" else None
-        mock_feature.__contains__.side_effect = lambda field_name: field_name == "id"
-        mock_objects_layer.getFeatures.return_value = [mock_feature]
-        
-        # Make sure the mock_objects_layer is properly configured for the sublayer access
-        mock_objects_layer.isValid.return_value = True
-        mock_objects_layer.geometryType.return_value = MagicMock()
         
         # Mock merged layer
         mock_merged_layer = create_mock_layer_with_fields()
@@ -211,13 +198,6 @@ class TestFieldProjectImportService:
                 return mock_merged_layer
         
         mock_vector_layer.side_effect = vector_layer_side_effect
-        
-        # Make the objects layer subscriptable for data.gpkg sublayer access
-        mock_objects_layer.__getitem__.side_effect = lambda idx: create_iterable_mock_feature()
-        
-        # Make sure the mock_objects_layer is properly configured for the sublayer access
-        mock_objects_layer.isValid.return_value = True
-        mock_objects_layer.geometryType.return_value = MagicMock()
 
         result = self.field_import_service.import_field_projects(["/test/project1"])
         
@@ -284,12 +264,6 @@ class TestFieldProjectImportService:
         
         mock_vector_layer.side_effect = vector_layer_side_effect
         
-        # Patch QgsFeature to return a proper mock
-        def feature_side_effect(fields):
-            return make_qgsfeature_mock(fields)
-        mock_qgsfeature = Mock()
-        mock_qgsfeature.side_effect = feature_side_effect
-        
         # Use string path instead of mock
         project_path = "/test/project1"
         result = self.field_import_service.import_field_projects([project_path])
@@ -312,35 +286,22 @@ class TestFieldProjectImportService:
         # Mock directory listing to include individual layer files
         mock_listdir.return_value = ["Objects.gpkg", "Features.gpkg", "other_file.txt"]
         
+        # Mock Objects sublayer from data.gpkg using helper functions
+        mock_objects_sublayer = create_mock_layer_with_fields()
+        mock_feature1 = create_iterable_mock_feature()
+        mock_objects_sublayer.getFeatures.return_value = [mock_feature1]
+        
         # Mock data layer
         mock_data_layer = MagicMock()
         mock_data_layer.isValid.return_value = True
-        mock_data_layer.dataProvider.return_value.subLayers.return_value = [
+        
+        # Mock dataProvider and subLayers properly
+        mock_data_provider = MagicMock()
+        mock_data_layer.dataProvider.return_value = mock_data_provider
+        # Return actual strings that can be split
+        mock_data_provider.subLayers.return_value = [
             "0!!::!!Objects_abc123!!::!!Point!!::!!EPSG:4326"
         ]
-        mock_data_layer.__getitem__.side_effect = lambda idx: mock_objects_layer
-        
-        # Mock Objects sublayer from data.gpkg
-        mock_objects_sublayer = MagicMock()
-        mock_field = MagicMock()
-        mock_field.name.return_value = "id"
-        mock_field.typeName.return_value = "Integer"
-        mock_fields = MagicMock()
-        mock_fields.count.return_value = 1
-        mock_fields.__iter__ = lambda self: iter([mock_field])
-        mock_fields.__getitem__ = lambda self, index: mock_field if index == 0 else None
-        mock_fields.indexOf = lambda field_name: 0 if field_name == "id" else -1
-        mock_objects_sublayer.fields.return_value = mock_fields
-        mock_feature1 = MagicMock()
-        mock_feature1.geometry.return_value = MagicMock(type=lambda: 2, isMultipart=lambda: False, isEmpty=lambda: False)
-        mock_feature1.fields.return_value = mock_fields
-        mock_feature1.__getitem__.side_effect = lambda field_name: 1 if field_name == "id" else None
-        mock_feature1.__contains__.side_effect = lambda field_name: field_name == "id"
-        mock_objects_sublayer.getFeatures.return_value = [mock_feature1]
-        
-        # Make sure the mock_objects_sublayer is properly configured for the sublayer access
-        mock_objects_sublayer.isValid.return_value = True
-        mock_objects_sublayer.geometryType.return_value = MagicMock()
         
         # Mock individual Objects layer file
         mock_objects_individual = create_mock_layer_with_fields()
@@ -381,7 +342,6 @@ class TestFieldProjectImportService:
         # Patch QgsFeature to return a proper mock
         def feature_side_effect(fields):
             return make_qgsfeature_mock(fields)
-        mock_qgsfeature = Mock()
         mock_qgsfeature.side_effect = feature_side_effect
         
         # Use string path instead of mock
@@ -490,7 +450,12 @@ class TestFieldProjectImportService:
         # Mock data layer
         mock_data_layer = Mock()
         mock_data_layer.isValid.return_value = True
-        mock_data_layer.dataProvider.return_value.subLayers.return_value = [
+        
+        # Mock dataProvider and subLayers properly
+        mock_data_provider = Mock()
+        mock_data_layer.dataProvider.return_value = mock_data_provider
+        # Return actual strings that can be split
+        mock_data_provider.subLayers.return_value = [
             "0!!::!!Objects_abc123!!::!!Point!!::!!EPSG:4326"
         ]
         
@@ -567,7 +532,12 @@ class TestFieldProjectImportService:
         # Mock data layer
         mock_data_layer = Mock()
         mock_data_layer.isValid.return_value = True
-        mock_data_layer.dataProvider.return_value.subLayers.return_value = [
+        
+        # Mock dataProvider and subLayers properly
+        mock_data_provider = Mock()
+        mock_data_layer.dataProvider.return_value = mock_data_provider
+        # Return actual strings that can be split
+        mock_data_provider.subLayers.return_value = [
             "0!!::!!Objects_abc123!!::!!Point!!::!!EPSG:4326"
         ]
         

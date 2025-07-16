@@ -618,7 +618,7 @@ class QGISProjectCreationService(IProjectCreationService):
 
     def _create_clipped_raster(self, raster_layer_id: str, recording_area_geometry: str, 
                               output_path: str, project: QgsProject, offset_meters: float = 0.0) -> bool:
-        """Create a clipped raster layer."""
+        """Create a clipped raster layer with enhancement settings applied."""
         try:
             # Use the raster processing service to clip the raster
             success = self._raster_processing_service.clip_raster_to_geometry(
@@ -632,12 +632,130 @@ class QGISProjectCreationService(IProjectCreationService):
                 # Add to project
                 layer = QgsRasterLayer(output_path, "Background", "gdal")
                 if layer.isValid():
+                    # Apply raster enhancement settings
+                    enhancement_applied = self._apply_raster_enhancement(layer)
+                    
+                    # Force the layer to update its style after enhancement
+                    layer.triggerRepaint()
+                    
+                    # Save raster style as QML with enhancement values
+                    import os
+                    qml_path = os.path.splitext(output_path)[0] + ".qml"
+                    
+                    if enhancement_applied:
+                        # Save the style with enhancement values
+                        self._save_raster_style_with_enhancement(layer, qml_path)
+                    else:
+                        # Save the style without enhancement
+                        style_result = layer.saveNamedStyle(qml_path)
+                        if style_result[0]:
+                            print(f"[DEBUG] Saved raster QML style file: {qml_path}")
+                        else:
+                            print(f"[DEBUG] Failed to save raster QML style file: {qml_path}")
+                    
+                    # Load the style back to ensure it's associated
+                    load_result = layer.loadNamedStyle(qml_path)
+                    if load_result[0]:
+                        print(f"[DEBUG] Loaded raster QML style file: {qml_path}")
+                    else:
+                        print(f"[DEBUG] Failed to load raster QML style file: {qml_path}")
+                    
                     project.addMapLayer(layer)
                     return True
             
             return False
         except Exception as e:
             print(f"Error creating clipped raster: {str(e)}")
+            return False
+
+    def _save_raster_style_with_enhancement(self, layer: QgsRasterLayer, qml_path: str) -> bool:
+        """Save raster style to QML file with enhancement values explicitly included."""
+        try:
+            # Get enhancement settings
+            brightness = self._settings_manager.get_value('raster_brightness', 0)
+            contrast = self._settings_manager.get_value('raster_contrast', 0)
+            saturation = self._settings_manager.get_value('raster_saturation', 0)
+            
+            # First save the basic style
+            style_result = layer.saveNamedStyle(qml_path)
+            if not style_result[0]:
+                print(f"[DEBUG] Failed to save basic raster style: {qml_path}")
+                return False
+            
+            # Read the QML file
+            with open(qml_path, 'r', encoding='utf-8') as f:
+                qml_content = f.read()
+            
+            # Update the brightness/contrast and hue/saturation elements using simple string replacement
+            
+            # Find and replace brightness/contrast
+            import re
+            brightness_contrast_pattern = r'<brightnesscontrast[^>]*gamma="[^"]*" contrast="[^"]*" brightness="[^"]*"[^>]*/>'
+            new_brightness_contrast = f'<brightnesscontrast gamma="1" contrast="{contrast}" brightness="{brightness}"/>'
+            qml_content = re.sub(brightness_contrast_pattern, new_brightness_contrast, qml_content)
+            
+            # Find and replace saturation
+            hue_saturation_pattern = r'<huesaturation[^>]*saturation="[^"]*"[^>]*/>'
+            new_hue_saturation = f'<huesaturation colorizeOn="0" invertColors="0" colorizeRed="255" colorizeGreen="128" colorizeStrength="100" grayscaleMode="0" saturation="{saturation}" colorizeBlue="128"/>'
+            qml_content = re.sub(hue_saturation_pattern, new_hue_saturation, qml_content)
+            
+            # Write the updated QML content back
+            with open(qml_path, 'w', encoding='utf-8') as f:
+                f.write(qml_content)
+            
+            print(f"[DEBUG] Saved raster QML style file with enhancement - Brightness: {brightness}, Contrast: {contrast}, Saturation: {saturation}")
+            return True
+            
+        except Exception as e:
+            print(f"Error saving raster style with enhancement: {str(e)}")
+            return False
+
+    def _apply_raster_enhancement(self, raster_layer: QgsRasterLayer) -> bool:
+        """
+        Apply brightness, contrast, and saturation settings to a raster layer.
+        
+        Args:
+            raster_layer: The raster layer to enhance
+            
+        Returns:
+            True if enhancement was applied successfully, False otherwise
+        """
+        try:
+            if not raster_layer or not raster_layer.isValid():
+                return False
+            
+            # Get the renderer
+            renderer = raster_layer.renderer()
+            if not renderer:
+                return False
+            
+            # Get enhancement settings from settings manager
+            brightness = self._settings_manager.get_value('raster_brightness', 0)
+            contrast = self._settings_manager.get_value('raster_contrast', 0)
+            saturation = self._settings_manager.get_value('raster_saturation', 0)
+            
+            print(f"[DEBUG] Applying raster enhancement - Brightness: {brightness}, Contrast: {contrast}, Saturation: {saturation}")
+            
+            # Apply brightness and contrast
+            if hasattr(renderer, 'setBrightness'):
+                renderer.setBrightness(brightness)
+                print(f"[DEBUG] Set brightness to: {brightness}")
+            if hasattr(renderer, 'setContrast'):
+                renderer.setContrast(contrast)
+                print(f"[DEBUG] Set contrast to: {contrast}")
+            
+            # Apply saturation (hue/saturation)
+            if hasattr(renderer, 'setSaturation'):
+                renderer.setSaturation(saturation)
+                print(f"[DEBUG] Set saturation to: {saturation}")
+            
+            # Trigger repaint to apply changes
+            raster_layer.triggerRepaint()
+            
+            return True
+            
+        except Exception as e:
+            print(f"Error applying raster enhancement: {str(e)}")
             return False
 
     def _set_project_variables(self, project: QgsProject, next_values: Dict[str, str], recording_area: str) -> None:

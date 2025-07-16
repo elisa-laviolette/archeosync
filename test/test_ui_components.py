@@ -204,6 +204,9 @@ class TestSettingsDialog(unittest.TestCase):
             'objects_level_field': '',
             'features_layer': 'test_features_layer_id',
             'raster_clipping_offset': 0.2,
+            'raster_brightness': 0,
+            'raster_contrast': 0,
+            'raster_saturation': 0,
             'extra_field_layers': []
         }.get(key, default)
         
@@ -252,6 +255,9 @@ class TestSettingsDialog(unittest.TestCase):
             'objects_level_field': '',
             'features_layer': 'test_features_layer_id',
             'raster_clipping_offset': 0.2,
+            'raster_brightness': 0,
+            'raster_contrast': 0,
+            'raster_saturation': 0,
             'extra_field_layers': []
         }
         self.assertEqual(self.dialog._original_values, expected_original_values)
@@ -408,6 +414,9 @@ class TestSettingsDialog(unittest.TestCase):
             call('objects_level_field', ''),
             call('features_layer', ''),
             call('raster_clipping_offset', 0.2),
+            call('raster_brightness', 0),
+            call('raster_contrast', 0),
+            call('raster_saturation', 0),
             call('extra_field_layers', [])
         ]
         self.mock_settings_manager.set_value.assert_has_calls(expected_calls)

@@ -1596,7 +1596,10 @@ class TestArcheoSyncConfigurationValidator(unittest.TestCase):
         settings = {
             'field_projects_folder': '/valid/path',
             'total_station_folder': '/valid/path',
-            'completed_projects_folder': '/valid/path'
+            'completed_projects_folder': '/valid/path',
+            'raster_brightness': 50,
+            'raster_contrast': 25,
+            'raster_saturation': -10
         }
         
         results = self.validator.validate_all_settings(settings)
@@ -1607,6 +1610,9 @@ class TestArcheoSyncConfigurationValidator(unittest.TestCase):
         self.assertIn('field_projects_folder', results)
         self.assertIn('total_station_folder', results)
         self.assertIn('completed_projects_folder', results)
+        self.assertIn('raster_brightness', results)
+        self.assertIn('raster_contrast', results)
+        self.assertIn('raster_saturation', results)
         
         # All validations should pass
         for field_name, field_errors in results.items():
@@ -1893,6 +1899,87 @@ class TestArcheoSyncConfigurationValidator(unittest.TestCase):
         self.assertGreater(len(results['layer_relationships']), 0)
         self.assertIn("Objects layer must have a relationship with Recording areas layer", results['layer_relationships'])
         self.assertIn("Features layer must have a relationship with Recording areas layer", results['layer_relationships'])
+
+    def test_validate_raster_brightness_valid(self):
+        """Test validation of valid raster brightness setting."""
+        errors = self.validator.validate_raster_brightness(0)
+        self.assertEqual(len(errors), 0)
+        
+        errors = self.validator.validate_raster_brightness(100)
+        self.assertEqual(len(errors), 0)
+        
+        errors = self.validator.validate_raster_brightness(-100)
+        self.assertEqual(len(errors), 0)
+    
+    def test_validate_raster_brightness_invalid_type(self):
+        """Test validation of invalid raster brightness type."""
+        errors = self.validator.validate_raster_brightness("invalid")
+        self.assertEqual(len(errors), 1)
+        self.assertIn("Brightness value must be an integer", errors[0])
+    
+    def test_validate_raster_brightness_out_of_range(self):
+        """Test validation of raster brightness out of range."""
+        errors = self.validator.validate_raster_brightness(300)
+        self.assertEqual(len(errors), 1)
+        self.assertIn("Brightness value must be between -255 and 255", errors[0])
+        
+        errors = self.validator.validate_raster_brightness(-300)
+        self.assertEqual(len(errors), 1)
+        self.assertIn("Brightness value must be between -255 and 255", errors[0])
+    
+    def test_validate_raster_contrast_valid(self):
+        """Test validation of valid raster contrast setting."""
+        errors = self.validator.validate_raster_contrast(0)
+        self.assertEqual(len(errors), 0)
+        
+        errors = self.validator.validate_raster_contrast(50)
+        self.assertEqual(len(errors), 0)
+        
+        errors = self.validator.validate_raster_contrast(-50)
+        self.assertEqual(len(errors), 0)
+    
+    def test_validate_raster_contrast_invalid_type(self):
+        """Test validation of invalid raster contrast type."""
+        errors = self.validator.validate_raster_contrast("invalid")
+        self.assertEqual(len(errors), 1)
+        self.assertIn("Contrast value must be an integer", errors[0])
+    
+    def test_validate_raster_contrast_out_of_range(self):
+        """Test validation of raster contrast out of range."""
+        errors = self.validator.validate_raster_contrast(150)
+        self.assertEqual(len(errors), 1)
+        self.assertIn("Contrast value must be between -100 and 100", errors[0])
+        
+        errors = self.validator.validate_raster_contrast(-150)
+        self.assertEqual(len(errors), 1)
+        self.assertIn("Contrast value must be between -100 and 100", errors[0])
+    
+    def test_validate_raster_saturation_valid(self):
+        """Test validation of valid raster saturation setting."""
+        errors = self.validator.validate_raster_saturation(0)
+        self.assertEqual(len(errors), 0)
+        
+        errors = self.validator.validate_raster_saturation(50)
+        self.assertEqual(len(errors), 0)
+        
+        errors = self.validator.validate_raster_saturation(-50)
+        self.assertEqual(len(errors), 0)
+    
+    def test_validate_raster_saturation_invalid_type(self):
+        """Test validation of invalid raster saturation type."""
+        errors = self.validator.validate_raster_saturation("invalid")
+        self.assertEqual(len(errors), 1)
+        self.assertIn("Saturation value must be an integer", errors[0])
+    
+    def test_validate_raster_saturation_out_of_range(self):
+        """Test validation of raster saturation out of range."""
+        errors = self.validator.validate_raster_saturation(150)
+        self.assertEqual(len(errors), 1)
+        self.assertIn("Saturation value must be between -100 and 100", errors[0])
+        
+        errors = self.validator.validate_raster_saturation(-150)
+        self.assertEqual(len(errors), 1)
+        self.assertIn("Saturation value must be between -100 and 100", errors[0])
 
 
 if __name__ == '__main__':
