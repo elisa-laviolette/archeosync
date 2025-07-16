@@ -6,6 +6,14 @@ All notable changes to the ArcheoSync QGIS plugin will be documented in this fil
 
 ### New Features
 
+- **Duplicate Detection for Field Project Import**: Added intelligent duplicate detection to prevent importing features that already exist in the current project
+  - **Automatic Duplicate Filtering**: Filters out features that already exist in Objects, Features, and Small Finds layers before creating merged layers
+  - **Smart Feature Comparison**: Creates unique signatures based on feature attributes and geometry to identify duplicates
+  - **Existing Layer Integration**: Retrieves existing layers from current project using settings configuration
+  - **Seamless User Experience**: Works automatically without user intervention during import process
+  - **Comprehensive Coverage**: Handles duplicates across all layer types (Objects, Features, Small Finds)
+  - **Performance Optimized**: Efficient duplicate detection that scales with project size
+
 - **Small Finds Layer Support**: Added support for small finds layers in field project creation and import
   - **Small Finds Layer Configuration**: New layer selector in settings dialog for small finds layers
     - Supports point, multipoint, and no geometry layer types
@@ -23,6 +31,12 @@ All notable changes to the ArcheoSync QGIS plugin will be documented in this fil
 
 ### Technical Improvements
 
+- **Enhanced Field Project Import Service**: Extended import service with duplicate detection capabilities
+  - `_get_existing_layer()` method to retrieve existing layers from current project
+  - `_filter_duplicates()` method with intelligent feature comparison using unique signatures
+  - Integration with existing settings service for layer retrieval
+  - Automatic duplicate filtering during import workflow
+  - Bug fix for small finds layer processing in `_process_individual_layers()`
 - **Enhanced Layer Service**: Extended layer service with small finds support
   - `get_point_and_multipoint_layers()` method for small finds layer detection
   - `get_no_geometry_layers()` method for small finds without geometry
@@ -44,7 +58,11 @@ All notable changes to the ArcheoSync QGIS plugin will be documented in this fil
 
 ### Test Coverage
 
-- **Comprehensive Testing**: Added extensive test coverage for small finds functionality
+- **Comprehensive Testing**: Added extensive test coverage for duplicate detection and small finds functionality
+  - Tests for duplicate detection with various feature types and geometries
+  - Tests for existing layer retrieval and integration
+  - Tests for feature signature creation and comparison
+  - Tests for duplicate filtering during import workflow
   - Tests for small finds layer validation (point, multipoint, no geometry)
   - Tests for layer relationship validation
   - Tests for field project creation with small finds layers

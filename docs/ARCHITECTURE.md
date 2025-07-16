@@ -190,11 +190,18 @@ QGIS-specific implementation for layer operations including:
 ### FieldProjectImportService
 QGIS-specific implementation for field project import operations including:
 - **Dual Import Support**: Processes both data.gpkg files and individual layer files
-  - **data.gpkg Processing**: Extracts Objects and Features layers from data.gpkg files
-  - **Individual Layer Processing**: Processes Objects.gpkg, Features.gpkg, and other individual layer files
+  - **data.gpkg Processing**: Extracts Objects, Features, and Small Finds layers from data.gpkg files
+  - **Individual Layer Processing**: Processes Objects.gpkg, Features.gpkg, Small Finds.gpkg, and other individual layer files
   - **Hybrid Support**: Handles projects with both data.gpkg and individual layer files
-- **Layer Merging**: Merges Objects and Features layers from multiple completed projects
-  - Creates new "New Objects" and "New Features" layers in the current project
+- **Duplicate Detection**: Intelligent duplicate detection prevents importing features that already exist in the current project
+  - **Automatic Duplicate Filtering**: Filters out features that already exist in Objects, Features, and Small Finds layers before creating merged layers
+  - **Smart Feature Comparison**: Creates unique signatures based on feature attributes and geometry to identify duplicates
+  - **Existing Layer Integration**: Retrieves existing layers from current project using settings configuration
+  - **Seamless User Experience**: Works automatically without user intervention during import process
+  - **Comprehensive Coverage**: Handles duplicates across all layer types (Objects, Features, Small Finds)
+  - **Performance Optimized**: Efficient duplicate detection that scales with project size
+- **Layer Merging**: Merges Objects, Features, and Small Finds layers from multiple completed projects
+  - Creates new "New Objects", "New Features", and "New Small Finds" layers in the current project
   - Preserves all attributes and geometry from imported layers
   - Maintains coordinate reference system compatibility
 - **Automatic Archiving**: Moves imported field projects to configured archive folder after successful import

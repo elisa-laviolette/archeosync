@@ -97,6 +97,11 @@ class FieldProjectImportService(IFieldProjectImportService):
             return ValidationResult(True, "No projects to import")
         
         try:
+            # Get existing layers to check for duplicates
+            existing_objects_layer = self._get_existing_layer('objects_layer')
+            existing_features_layer = self._get_existing_layer('features_layer')
+            existing_small_finds_layer = self._get_existing_layer('small_finds_layer')
+            
             # Collect all features from all projects
             all_objects_features = []
             all_features_features = []
@@ -157,26 +162,33 @@ class FieldProjectImportService(IFieldProjectImportService):
             print(f"Total features features collected: {len(all_features_features)}")
             print(f"Total small finds features collected: {len(all_small_finds_features)}")
             
+            # Filter out duplicates before creating merged layers
+            filtered_objects_features = self._filter_duplicates(all_objects_features, existing_objects_layer, "Objects")
+            filtered_features_features = self._filter_duplicates(all_features_features, existing_features_layer, "Features")
+            filtered_small_finds_features = self._filter_duplicates(all_small_finds_features, existing_small_finds_layer, "Small Finds")
+            
+            print(f"After duplicate filtering - objects: {len(filtered_objects_features)}, features: {len(filtered_features_features)}, small finds: {len(filtered_small_finds_features)}")
+            
             # Create merged layers
             layers_created = 0
             
-            if all_objects_features:
-                objects_layer = self._create_merged_layer("New Objects", all_objects_features)
+            if filtered_objects_features:
+                objects_layer = self._create_merged_layer("New Objects", filtered_objects_features)
                 if objects_layer:
                     QgsProject.instance().addMapLayer(objects_layer)
                     layers_created += 1
             
-            if all_features_features:
-                features_layer = self._create_merged_layer("New Features", all_features_features)
+            if filtered_features_features:
+                features_layer = self._create_merged_layer("New Features", filtered_features_features)
                 if features_layer:
                     QgsProject.instance().addMapLayer(features_layer)
                     layers_created += 1
             
-            if all_small_finds_features:
+            if filtered_small_finds_features:
                 layer_name = "New Small Finds"
                 if self._translation_service:
                     layer_name = self._translation_service.translate("New Small Finds")
-                small_finds_layer = self._create_merged_layer(layer_name, all_small_finds_features)
+                small_finds_layer = self._create_merged_layer(layer_name, filtered_small_finds_features)
                 if small_finds_layer:
                     QgsProject.instance().addMapLayer(small_finds_layer)
                     layers_created += 1
@@ -317,7 +329,8 @@ class FieldProjectImportService(IFieldProjectImportService):
         """
         features = {
             'objects': [],
-            'features': []
+            'features': [],
+            'small_finds': []
         }
         
         # Process Objects layer files
@@ -337,6 +350,15 @@ class FieldProjectImportService(IFieldProjectImportService):
                     features['features'].extend(list(layer.getFeatures()))
             except Exception as e:
                 print(f"Error processing Features layer {file_path}: {str(e)}")
+        
+        # Process Small Finds layer files
+        for file_path in layer_files['small_finds']:
+            try:
+                layer = QgsVectorLayer(file_path, "temp_small_finds", "ogr")
+                if layer.isValid():
+                    features['small_finds'].extend(list(layer.getFeatures()))
+            except Exception as e:
+                print(f"Error processing Small Finds layer {file_path}: {str(e)}")
         
         return features
     
@@ -641,3 +663,96 @@ class FieldProjectImportService(IFieldProjectImportService):
                     
         except Exception as e:
             print(f"Error archiving projects: {str(e)}") 
+
+    def _get_existing_layer(self, layer_setting_key: str) -> Optional[Any]:
+        """
+        Get an existing layer from the current project based on settings.
+        
+        Args:
+            layer_setting_key: The settings key for the layer (e.g., 'objects_layer', 'features_layer')
+            
+        Returns:
+            QGIS layer object, or None if not found
+        """
+        layer_id = self._settings_manager.get_value(layer_setting_key, '')
+        if layer_id:
+            return self._layer_service.get_layer_by_id(layer_id)
+        return None
+    
+    def _filter_duplicates(self, features: List[Any], existing_layer: Optional[Any], layer_type: str) -> List[Any]:
+        """
+        Filter out features that already exist in the current project layer.
+        
+        Args:
+            features: List of features to filter
+            existing_layer: Existing layer to check against, or None
+            layer_type: Type of layer for logging purposes
+            
+        Returns:
+            List of features with duplicates removed
+        """
+        if not existing_layer or not features:
+            return features
+        
+        print(f"Checking {len(features)} {layer_type} features against existing layer...")
+        
+        # Get all existing features for comparison
+        existing_features = list(existing_layer.getFeatures())
+        print(f"Found {len(existing_features)} existing {layer_type} features to compare against")
+        
+        # Create a set of existing feature signatures for fast lookup
+        existing_signatures = set()
+        for existing_feature in existing_features:
+            signature = self._create_feature_signature(existing_feature)
+            existing_signatures.add(signature)
+        
+        # Filter out duplicates
+        filtered_features = []
+        duplicates_count = 0
+        
+        for feature in features:
+            signature = self._create_feature_signature(feature)
+            if signature not in existing_signatures:
+                filtered_features.append(feature)
+            else:
+                duplicates_count += 1
+        
+        print(f"Filtered out {duplicates_count} duplicate {layer_type} features")
+        return filtered_features
+    
+    def _create_feature_signature(self, feature: Any) -> str:
+        """
+        Create a unique signature for a feature based on its attributes and geometry.
+        
+        Args:
+            feature: QGIS feature to create signature for
+            
+        Returns:
+            String signature representing the feature
+        """
+        # Create signature from attributes
+        attributes = []
+        for field in feature.fields():
+            field_name = field.name()
+            value = feature[field_name]
+            # Convert value to string, handling None values
+            if value is None:
+                attr_str = f"{field_name}:NULL"
+            else:
+                attr_str = f"{field_name}:{str(value)}"
+            attributes.append(attr_str)
+        
+        # Sort attributes for consistent signature
+        attributes.sort()
+        attr_signature = "|".join(attributes)
+        
+        # Create signature from geometry
+        geometry = feature.geometry()
+        if geometry and not geometry.isEmpty():
+            # Use WKT (Well-Known Text) representation for geometry
+            geom_signature = geometry.asWkt()
+        else:
+            geom_signature = "NO_GEOMETRY"
+        
+        # Combine attributes and geometry signatures
+        return f"{attr_signature}|GEOM:{geom_signature}" 

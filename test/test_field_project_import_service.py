@@ -599,3 +599,287 @@ class TestFieldProjectImportService:
         
         # Verify project was NOT moved to archive
         self.file_system_service.move_directory.assert_not_called() 
+
+    def test_import_field_projects_with_duplicate_detection(self):
+        """Test that duplicate features are filtered out during import."""
+        # Mock existing layers with some features
+        mock_existing_objects_layer = MagicMock()
+        mock_existing_features_layer = MagicMock()
+        mock_existing_small_finds_layer = MagicMock()
+        
+        # Create mock features for existing layers
+        existing_object_feature = MagicMock()
+        existing_object_feature.fields.return_value = [MagicMock(name='name'), MagicMock(name='type')]
+        existing_object_feature.__getitem__.side_effect = lambda key: {'name': 'Test Object', 'type': 'Feature'}.get(key)
+        existing_object_feature.geometry.return_value = MagicMock()
+        existing_object_feature.geometry().isEmpty.return_value = False
+        existing_object_feature.geometry().asWkt.return_value = 'POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))'
+        
+        existing_feature_feature = MagicMock()
+        existing_feature_feature.fields.return_value = [MagicMock(name='name'), MagicMock(name='type')]
+        existing_feature_feature.__getitem__.side_effect = lambda key: {'name': 'Test Feature', 'type': 'Feature'}.get(key)
+        existing_feature_feature.geometry.return_value = MagicMock()
+        existing_feature_feature.geometry().isEmpty.return_value = False
+        existing_feature_feature.geometry().asWkt.return_value = 'POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))'
+        
+        existing_small_find_feature = MagicMock()
+        existing_small_find_feature.fields.return_value = [MagicMock(name='name'), MagicMock(name='type')]
+        existing_small_find_feature.__getitem__.side_effect = lambda key: {'name': 'Test Small Find', 'type': 'Small Find'}.get(key)
+        existing_small_find_feature.geometry.return_value = MagicMock()
+        existing_small_find_feature.geometry().isEmpty.return_value = False
+        existing_small_find_feature.geometry().asWkt.return_value = 'POINT(0.5 0.5)'
+        
+        mock_existing_objects_layer.getFeatures.return_value = [existing_object_feature]
+        mock_existing_features_layer.getFeatures.return_value = [existing_feature_feature]
+        mock_existing_small_finds_layer.getFeatures.return_value = [existing_small_find_feature]
+        
+        # Mock the layer service to return existing layers
+        def get_layer_by_id_side_effect(layer_id):
+            if layer_id == 'objects_layer_id':
+                return mock_existing_objects_layer
+            elif layer_id == 'features_layer_id':
+                return mock_existing_features_layer
+            elif layer_id == 'small_finds_layer_id':
+                return mock_existing_small_finds_layer
+            return None
+        
+        self.layer_service.get_layer_by_id.side_effect = get_layer_by_id_side_effect
+        
+        # Mock settings to return layer IDs
+        def get_value_side_effect(key, default=''):
+            if key == 'objects_layer':
+                return 'objects_layer_id'
+            elif key == 'features_layer':
+                return 'features_layer_id'
+            elif key == 'small_finds_layer':
+                return 'small_finds_layer_id'
+            elif key == 'field_project_archive_folder':
+                return ''
+            return default
+        
+        self.settings_manager.get_value.side_effect = get_value_side_effect
+        
+        # Mock project paths
+        project_paths = ['/path/to/project1']
+        
+        # Mock file system operations
+        self.file_system_service.path_exists.return_value = True
+        self.file_system_service.create_directory.return_value = True
+        self.file_system_service.move_directory.return_value = True
+        
+        # Mock os.path.exists to return True for data.gpkg
+        with patch('os.path.exists', return_value=True):
+            # Mock os.listdir to return layer files
+            with patch('os.listdir', return_value=['Objects.gpkg', 'Features.gpkg', 'Small_Finds.gpkg']):
+                # Mock os.path.isfile to return True for all files
+                with patch('os.path.isfile', return_value=True):
+                    # Mock QgsVectorLayer for data.gpkg processing
+                    mock_data_layer = MagicMock()
+                    mock_data_layer.isValid.return_value = True
+                    mock_data_layer.dataProvider.return_value.subLayers.return_value = [
+                        "0!!::!!Objects!!::!!Polygon!!::!!EPSG:4326",
+                        "1!!::!!Features!!::!!Polygon!!::!!EPSG:4326",
+                        "2!!::!!Small_Finds!!::!!Point!!::!!EPSG:4326"
+                    ]
+                    
+                    # Create mock features for import (including duplicates)
+                    duplicate_object_feature = MagicMock()
+                    duplicate_object_feature.fields.return_value = [MagicMock(name='name'), MagicMock(name='type')]
+                    duplicate_object_feature.__getitem__.side_effect = lambda key: {'name': 'Test Object', 'type': 'Feature'}.get(key)
+                    duplicate_object_feature.geometry.return_value = MagicMock()
+                    duplicate_object_feature.geometry().isEmpty.return_value = False
+                    duplicate_object_feature.geometry().asWkt.return_value = 'POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))'
+                    
+                    new_object_feature = MagicMock()
+                    new_object_feature.fields.return_value = [MagicMock(name='name'), MagicMock(name='type')]
+                    new_object_feature.__getitem__.side_effect = lambda key: {'name': 'New Object', 'type': 'Feature'}.get(key)
+                    new_object_feature.geometry.return_value = MagicMock()
+                    new_object_feature.geometry().isEmpty.return_value = False
+                    new_object_feature.geometry().asWkt.return_value = 'POLYGON((1 1, 2 1, 2 2, 1 2, 1 1))'
+                    
+                    duplicate_feature_feature = MagicMock()
+                    duplicate_feature_feature.fields.return_value = [MagicMock(name='name'), MagicMock(name='type')]
+                    duplicate_feature_feature.__getitem__.side_effect = lambda key: {'name': 'Test Feature', 'type': 'Feature'}.get(key)
+                    duplicate_feature_feature.geometry.return_value = MagicMock()
+                    duplicate_feature_feature.geometry().isEmpty.return_value = False
+                    duplicate_feature_feature.geometry().asWkt.return_value = 'POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))'
+                    
+                    new_feature_feature = MagicMock()
+                    new_feature_feature.fields.return_value = [MagicMock(name='name'), MagicMock(name='type')]
+                    new_feature_feature.__getitem__.side_effect = lambda key: {'name': 'New Feature', 'type': 'Feature'}.get(key)
+                    new_feature_feature.geometry.return_value = MagicMock()
+                    new_feature_feature.geometry().isEmpty.return_value = False
+                    new_feature_feature.geometry().asWkt.return_value = 'POLYGON((1 1, 2 1, 2 2, 1 2, 1 1))'
+                    
+                    duplicate_small_find_feature = MagicMock()
+                    duplicate_small_find_feature.fields.return_value = [MagicMock(name='name'), MagicMock(name='type')]
+                    duplicate_small_find_feature.__getitem__.side_effect = lambda key: {'name': 'Test Small Find', 'type': 'Small Find'}.get(key)
+                    duplicate_small_find_feature.geometry.return_value = MagicMock()
+                    duplicate_small_find_feature.geometry().isEmpty.return_value = False
+                    duplicate_small_find_feature.geometry().asWkt.return_value = 'POINT(0.5 0.5)'
+                    
+                    new_small_find_feature = MagicMock()
+                    new_small_find_feature.fields.return_value = [MagicMock(name='name'), MagicMock(name='type')]
+                    new_small_find_feature.__getitem__.side_effect = lambda key: {'name': 'New Small Find', 'type': 'Small Find'}.get(key)
+                    new_small_find_feature.geometry.return_value = MagicMock()
+                    new_small_find_feature.geometry().isEmpty.return_value = False
+                    new_small_find_feature.geometry().asWkt.return_value = 'POINT(1.5 1.5)'
+                    
+                    # Mock sublayer processing
+                    def create_layer_side_effect(uri, name, provider):
+                        mock_layer = MagicMock()
+                        mock_layer.isValid.return_value = True
+                        if 'Objects' in uri:
+                            mock_layer.getFeatures.return_value = [duplicate_object_feature, new_object_feature]
+                        elif 'Features' in uri:
+                            mock_layer.getFeatures.return_value = [duplicate_feature_feature, new_feature_feature]
+                        elif 'Small_Finds' in uri:
+                            mock_layer.getFeatures.return_value = [duplicate_small_find_feature, new_small_find_feature]
+                        return mock_layer
+                    
+                    with patch('qgis.core.QgsVectorLayer', side_effect=create_layer_side_effect):
+                        # Mock QgsProject for layer creation
+                        mock_project = MagicMock()
+                        mock_project.crs.return_value = MagicMock()
+                        mock_project.crs().isValid.return_value = True
+                        mock_project.crs().authid.return_value = 'EPSG:4326'
+                        
+                        with patch('qgis.core.QgsProject.instance', return_value=mock_project):
+                            # Mock layer creation
+                            mock_created_layer = MagicMock()
+                            mock_created_layer.isValid.return_value = True
+                            mock_created_layer.fields.return_value = [MagicMock(name='name'), MagicMock(name='type')]
+                            mock_created_layer.startEditing.return_value = None
+                            mock_created_layer.addFeature.return_value = True
+                            mock_created_layer.commitChanges.return_value = None
+                            
+                            with patch('qgis.core.QgsVectorLayer', return_value=mock_created_layer):
+                                # Execute the import
+                                result = self.field_import_service.import_field_projects(project_paths)
+                                
+                                # Verify the result
+                                assert result.is_valid is True
+                                assert "Successfully imported" in result.message
+                                
+                                # Verify that the layer service was called to get existing layers
+                                self.layer_service.get_layer_by_id.assert_any_call('objects_layer_id')
+                                self.layer_service.get_layer_by_id.assert_any_call('features_layer_id')
+                                self.layer_service.get_layer_by_id.assert_any_call('small_finds_layer_id')
+                                
+                                # Verify that settings were queried for layer IDs
+                                self.settings_manager.get_value.assert_any_call('objects_layer', '')
+                                self.settings_manager.get_value.assert_any_call('features_layer', '')
+                                self.settings_manager.get_value.assert_any_call('small_finds_layer', '')
+
+    def test_filter_duplicates_with_no_existing_layer(self):
+        """Test that filtering works correctly when no existing layer is present."""
+        # Mock features to filter
+        mock_feature = MagicMock()
+        mock_feature.fields.return_value = [MagicMock(name='name'), MagicMock(name='type')]
+        mock_feature.__getitem__.side_effect = lambda key: {'name': 'Test Feature', 'type': 'Feature'}.get(key)
+        mock_feature.geometry.return_value = MagicMock()
+        mock_feature.geometry().isEmpty.return_value = False
+        mock_feature.geometry().asWkt.return_value = 'POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))'
+        
+        features = [mock_feature]
+        
+        # Test with no existing layer (None)
+        filtered_features = self.field_import_service._filter_duplicates(features, None, "Test")
+        
+        # Should return all features unchanged
+        assert len(filtered_features) == 1
+        assert filtered_features == features
+
+    def test_filter_duplicates_with_empty_features(self):
+        """Test that filtering works correctly with empty feature list."""
+        # Test with empty features list
+        filtered_features = self.field_import_service._filter_duplicates([], MagicMock(), "Test")
+        
+        # Should return empty list
+        assert len(filtered_features) == 0
+
+    def test_create_feature_signature(self):
+        """Test that feature signatures are created correctly."""
+        # Create a mock feature with proper field setup
+        mock_feature = MagicMock()
+        
+        # Create proper field mocks
+        name_field = MagicMock()
+        name_field.name.return_value = 'name'
+        type_field = MagicMock()
+        type_field.name.return_value = 'type'
+        description_field = MagicMock()
+        description_field.name.return_value = 'description'
+        
+        mock_feature.fields.return_value = [name_field, type_field, description_field]
+        mock_feature.__getitem__.side_effect = lambda key: {
+            'name': 'Test Feature',
+            'type': 'Feature',
+            'description': 'Test Description'
+        }.get(key)
+        mock_feature.geometry.return_value = MagicMock()
+        mock_feature.geometry().isEmpty.return_value = False
+        mock_feature.geometry().asWkt.return_value = 'POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))'
+        
+        # Create signature
+        signature = self.field_import_service._create_feature_signature(mock_feature)
+        
+        # Verify signature contains all attributes and geometry
+        assert 'description:Test Description' in signature
+        assert 'name:Test Feature' in signature
+        assert 'type:Feature' in signature
+        assert 'GEOM:POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))' in signature
+
+    def test_create_feature_signature_with_null_values(self):
+        """Test that feature signatures handle null values correctly."""
+        # Create a mock feature with null values
+        mock_feature = MagicMock()
+        
+        # Create proper field mocks
+        name_field = MagicMock()
+        name_field.name.return_value = 'name'
+        type_field = MagicMock()
+        type_field.name.return_value = 'type'
+        description_field = MagicMock()
+        description_field.name.return_value = 'description'
+        
+        mock_feature.fields.return_value = [name_field, type_field, description_field]
+        mock_feature.__getitem__.side_effect = lambda key: {
+            'name': 'Test Feature',
+            'type': None,
+            'description': 'Test Description'
+        }.get(key)
+        mock_feature.geometry.return_value = MagicMock()
+        mock_feature.geometry().isEmpty.return_value = False
+        mock_feature.geometry().asWkt.return_value = 'POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))'
+        
+        # Create signature
+        signature = self.field_import_service._create_feature_signature(mock_feature)
+        
+        # Verify signature contains null value
+        assert 'type:NULL' in signature
+
+    def test_create_feature_signature_with_no_geometry(self):
+        """Test that feature signatures handle features without geometry correctly."""
+        # Create a mock feature without geometry
+        mock_feature = MagicMock()
+        
+        # Create proper field mocks
+        name_field = MagicMock()
+        name_field.name.return_value = 'name'
+        type_field = MagicMock()
+        type_field.name.return_value = 'type'
+        
+        mock_feature.fields.return_value = [name_field, type_field]
+        mock_feature.__getitem__.side_effect = lambda key: {
+            'name': 'Test Feature',
+            'type': 'Feature'
+        }.get(key)
+        mock_feature.geometry.return_value = MagicMock()
+        mock_feature.geometry().isEmpty.return_value = True
+        
+        # Create signature
+        signature = self.field_import_service._create_feature_signature(mock_feature)
+        
+        # Verify signature contains no geometry indicator
+        assert 'GEOM:NO_GEOMETRY' in signature 

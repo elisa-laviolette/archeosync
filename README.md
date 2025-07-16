@@ -18,6 +18,7 @@ A QGIS plugin for archaeologists to prepare data for field work and import it ba
 - **Small Finds Support**: Comprehensive support for small finds layers with point, multipoint, and no geometry types
 - **CSV Import Service**: Comprehensive CSV import with column mapping and validation
 - **Field Project Import**: Import completed field projects and merge Objects/Features/Small Finds layers
+- **Duplicate Detection**: Intelligent duplicate detection prevents importing features that already exist in the current project
 - **Column Mapping Dialog**: Interactive column mapping for CSV files with different structures
 - **Intelligent Data Filtering**: Automatic filtering of field projects to include only relevant data:
   - **Recording Area Filtering**: Keeps only the selected recording area feature
@@ -115,6 +116,8 @@ The raster processing service uses GDAL for high-quality clipping operations and
 #### Field Project Import Features
 - **Data.gpkg Processing**: Automatically processes data.gpkg files from field projects
 - **Layer Merging**: Merges Objects, Features, and Small Finds layers from multiple projects
+- **Duplicate Detection**: Automatically filters out features that already exist in the current project's Objects, Features, and Small Finds layers
+- **Smart Feature Comparison**: Uses unique signatures based on attributes and geometry to identify duplicates
 - **Layer Creation**: Creates new "New Objects", "New Features", and "New Small Finds" layers in the project
 - **Feature Collection**: Collects all features from completed field recordings
 - **Automatic Archiving**: Moves imported field projects to the configured archive folder after successful import
@@ -168,6 +171,13 @@ The project includes comprehensive test coverage with robust validation and qual
 ## Recent Updates
 
 ### Version 0.14.0 (Latest)
+- **Duplicate Detection for Field Project Import**: Added intelligent duplicate detection to prevent importing features that already exist in the current project
+  - **Automatic Duplicate Filtering**: Filters out features that already exist in Objects, Features, and Small Finds layers before creating merged layers
+  - **Smart Feature Comparison**: Creates unique signatures based on feature attributes and geometry to identify duplicates
+  - **Existing Layer Integration**: Retrieves existing layers from current project using settings configuration
+  - **Seamless User Experience**: Works automatically without user intervention during import process
+  - **Comprehensive Coverage**: Handles duplicates across all layer types (Objects, Features, Small Finds)
+  - **Performance Optimized**: Efficient duplicate detection that scales with project size
 - **Small Finds Layer Support**: Added comprehensive support for small finds layers in field project creation and import
   - **Small Finds Configuration**: New layer selector in settings dialog supporting point, multipoint, and no geometry types
   - **Field Project Creation**: Small finds layers automatically included in field projects with empty layer creation
@@ -175,10 +185,11 @@ The project includes comprehensive test coverage with robust validation and qual
   - **Layer Validation**: Comprehensive validation for small finds layer geometry types and relationships
   - **Internationalization**: Complete French translations for small finds feature ("Petits objets")
   - **Service Architecture**: Enhanced services with optional translation support for internationalization
-- **Technical Improvements**: Extended layer service with small finds support
+- **Technical Improvements**: Extended layer service with small finds support and enhanced import service
   - New methods for point/multipoint and no geometry layer detection
   - Enhanced configuration validation for small finds layers
-  - Comprehensive test coverage for all small finds functionality
+  - Duplicate detection methods in field project import service
+  - Comprehensive test coverage for all small finds and duplicate detection functionality
   - Integration with existing field project workflow
 
 ### Version 0.13.0
