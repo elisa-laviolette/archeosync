@@ -437,3 +437,74 @@ class TestProjectCreationService:
     #         features_call = calls[1]
     #         assert features_call[1]['layer_name'] == 'Original Features Layer'
     #         assert 'Original Features Layer.gpkg' in features_call[1]['output_path'] 
+
+    @pytest.mark.skip(reason="GDAL/QGIS integration test - skipped due to architecture issues")
+    def test_background_raster_processed_first_for_layer_order(self):
+        """Test that background raster is processed first to appear at bottom of layer tree."""
+        # Mock feature data
+        feature_data = {
+            'id': 123,
+            'geometry_wkt': 'POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))',
+            'display_name': 'Test Area'
+        }
+        
+        # Mock layer info
+        self.layer_service.get_layer_info.return_value = {
+            'name': 'Test Layer',
+            'id': 'test_layer_id'
+        }
+        
+        # Mock QGIS project
+        mock_project = Mock()
+        from qgis.core import QgsCoordinateReferenceSystem
+        mock_layer = Mock()
+        real_crs = QgsCoordinateReferenceSystem("EPSG:4326")
+        mock_layer.crs.return_value = real_crs
+        self.layer_service.get_layer_by_id.return_value = mock_layer
+        
+        # Track the order of method calls
+        call_order = []
+        
+        def track_create_clipped_raster(*args, **kwargs):
+            call_order.append('background_raster')
+            return True
+        
+        def track_create_filtered_layer(*args, **kwargs):
+            call_order.append('recording_areas')
+            return True
+        
+        def track_create_empty_layer_copy(*args, **kwargs):
+            call_order.append('objects_layer')
+            return True
+        
+        # Mock file operations and project saving
+        with patch('os.path.exists', return_value=True), \
+             patch('os.makedirs'), \
+             patch('qgis.core.QgsProject.instance', return_value=mock_project), \
+             patch('qgis.core.QgsProject', return_value=mock_project), \
+             patch.object(mock_project, 'write', return_value=True), \
+             patch.object(mock_project, 'setCrs'), \
+             patch.object(self.project_service, '_create_clipped_raster', side_effect=track_create_clipped_raster), \
+             patch.object(self.project_service, '_create_filtered_layer', side_effect=track_create_filtered_layer), \
+             patch.object(self.project_service, '_create_empty_layer_copy', side_effect=track_create_empty_layer_copy), \
+             patch.object(self.project_service, '_set_project_variables'), \
+             patch.object(self.project_service, '_copy_layer_to_geopackage', return_value=True):
+            
+            result = self.project_service.create_field_project(
+                feature_data=feature_data,
+                recording_areas_layer_id="recording_areas_layer_id",
+                objects_layer_id="objects_layer_id",
+                features_layer_id=None,
+                background_layer_id="background_layer_id",
+                extra_layers=[],
+                destination_folder="/test/destination",
+                project_name="TestProject"
+            )
+            
+            assert result is True
+            
+            # Verify that background raster was processed first
+            assert len(call_order) >= 3
+            assert call_order[0] == 'background_raster', f"Expected background_raster first, got: {call_order}"
+            assert call_order[1] == 'recording_areas', f"Expected recording_areas second, got: {call_order}"
+            assert call_order[2] == 'objects_layer', f"Expected objects_layer third, got: {call_order}" 

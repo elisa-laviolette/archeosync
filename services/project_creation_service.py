@@ -129,6 +129,19 @@ class QGISProjectCreationService(IProjectCreationService):
                 project.setCrs(recording_layer.crs())
                 print(f"Set project CRS to: {self._get_crs_string(recording_layer.crs())}")
 
+            # Process background raster first (so it appears at the bottom of the layer tree)
+            if background_layer_id:
+                raster_offset = self._settings_manager.get_value('raster_clipping_offset', 0.0)
+                success = self._create_clipped_raster(
+                    raster_layer_id=background_layer_id,
+                    recording_area_geometry=feature_data['geometry_wkt'],
+                    output_path=os.path.join(project_dir, "background.tif"),
+                    project=project,
+                    offset_meters=raster_offset
+                )
+                if not success:
+                    print(f"Warning: Failed to create clipped background raster")
+
             # Create recording areas layer with only the selected feature
             recording_layer_info = self._layer_service.get_layer_info(recording_areas_layer_id)
             recording_layer_name = recording_layer_info['name'] if recording_layer_info else "Recording Areas"
@@ -211,19 +224,6 @@ class QGISProjectCreationService(IProjectCreationService):
                                 )
                             if not success:
                                 print(f"Warning: Failed to process extra layer {layer_name}")
-
-            # Process background raster if specified
-            if background_layer_id:
-                raster_offset = self._settings_manager.get_value('raster_clipping_offset', 0.0)
-                success = self._create_clipped_raster(
-                    raster_layer_id=background_layer_id,
-                    recording_area_geometry=feature_data['geometry_wkt'],
-                    output_path=os.path.join(project_dir, "background.tif"),
-                    project=project,
-                    offset_meters=raster_offset
-                )
-                if not success:
-                    print(f"Warning: Failed to create clipped background raster")
 
             # Set project variables
             if next_values:

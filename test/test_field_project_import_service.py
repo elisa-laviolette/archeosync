@@ -22,6 +22,76 @@ from services.field_project_import_service import FieldProjectImportService
 from core.interfaces import ValidationResult
 
 
+
+
+
+def create_mock_layer_with_fields():
+    """Create a properly mocked QGIS layer with fields."""
+    mock_layer = MagicMock()
+    mock_layer.isValid.return_value = True
+    mock_layer.geometryType.return_value = 2  # PolygonGeometry
+    mock_layer.startEditing.return_value = True
+    mock_layer.commitChanges.return_value = True
+    mock_layer.addFeature.return_value = True
+    mock_layer.lastError.return_value = ""
+    
+    # Mock layer fields
+    mock_field = Mock()
+    mock_field.name.return_value = "id"
+    mock_field.typeName.return_value = "Integer"
+    
+    # Create a proper fields object that can be iterated
+    mock_fields = Mock()
+    mock_fields.count.return_value = 1
+    mock_fields.__iter__ = lambda self: iter([mock_field])
+    mock_fields.__getitem__ = lambda self, index: mock_field if index == 0 else None
+    mock_fields.indexOf = lambda field_name: 0 if field_name == "id" else -1
+    
+    mock_layer.fields.return_value = mock_fields
+    
+    return mock_layer
+
+
+# Helper to create a mock QgsFeature with correct behavior
+def make_qgsfeature_mock(fields):
+    feature = Mock()
+    feature.setGeometry = Mock()
+    feature.fields.return_value = fields
+    feature.__getitem__ = lambda self, key: 1 if key == "id" else None
+    feature.__setitem__ = lambda self, key, value: None
+    feature.__contains__ = lambda self, key: key == "id"
+    return feature
+
+# Helper to create a mock feature that can be iterated (for getFeatures())
+def create_iterable_mock_feature():
+    mock_feature = MagicMock()
+    mock_geometry = MagicMock()
+    mock_geometry.type.return_value = 2  # PolygonGeometry
+    mock_geometry.isMultipart.return_value = False
+    mock_geometry.isEmpty.return_value = False
+    mock_feature.geometry.return_value = mock_geometry
+    
+    # Mock feature fields
+    mock_field = MagicMock()
+    mock_field.name.return_value = "id"
+    mock_field.typeName.return_value = "Integer"
+    
+    # Create a proper fields object that can be iterated
+    mock_fields = MagicMock()
+    mock_fields.count.return_value = 1
+    mock_fields.__iter__ = lambda self: iter([mock_field])
+    mock_fields.__getitem__ = lambda self, index: mock_field if index == 0 else None
+    mock_fields.indexOf = lambda field_name: 0 if field_name == "id" else -1
+    
+    mock_feature.fields.return_value = mock_fields
+    
+    # Make the feature subscriptable for attribute access
+    mock_feature.__getitem__.side_effect = lambda field_name: 1 if field_name == "id" else None
+    mock_feature.__contains__.side_effect = lambda field_name: field_name == "id"
+    
+    return mock_feature
+
+
 @pytest.mark.qgis
 @pytest.mark.skipif(not QGIS_AVAILABLE, reason="QGIS not available")
 class TestFieldProjectImportService:
@@ -58,15 +128,18 @@ class TestFieldProjectImportService:
         # Mock that project directory exists but no data.gpkg
         mock_exists.return_value = False
         
-        result = self.field_import_service.import_field_projects(["/test/project1"])
+        # Use string path instead of mock
+        project_path = "/test/project1"
+        result = self.field_import_service.import_field_projects([project_path])
         
         assert result.is_valid is False
         assert "No Objects or Features layers found" in result.message
     
+    @patch('services.field_project_import_service.QgsFeature')
     @patch('os.path.exists')
     @patch('services.field_project_import_service.QgsVectorLayer')
     @patch('services.field_project_import_service.QgsProject')
-    def test_import_field_projects_with_data_gpkg(self, mock_project, mock_vector_layer, mock_exists):
+    def test_import_field_projects_with_data_gpkg(self, mock_project, mock_vector_layer, mock_exists, mock_qgsfeature):
         """Test importing field projects with data.gpkg file."""
         # Mock that data.gpkg exists
         def exists_side_effect(path):
@@ -74,47 +147,46 @@ class TestFieldProjectImportService:
         mock_exists.side_effect = exists_side_effect
         
         # Mock data layer
-        mock_data_layer = Mock()
+        mock_data_layer = MagicMock()
         mock_data_layer.isValid.return_value = True
         mock_data_layer.dataProvider.return_value.subLayers.return_value = [
             "0!!::!!Objects_abc123!!::!!Point!!::!!EPSG:4326"
         ]
+        mock_data_layer.__getitem__.side_effect = lambda idx: mock_objects_layer
         
         # Mock Objects sublayer
-        mock_objects_layer = Mock()
-        mock_objects_layer.isValid.return_value = True
-        mock_objects_layer.geometryType.return_value = 2  # PolygonGeometry
-        
-        # Mock feature
-        mock_feature = Mock()
-        mock_geometry = Mock()
-        mock_geometry.type.return_value = 2  # PolygonGeometry
-        mock_geometry.isMultipart.return_value = False
-        mock_geometry.isEmpty.return_value = False
-        mock_feature.geometry.return_value = mock_geometry
-        
-        # Mock feature fields
-        mock_field = Mock()
+        mock_objects_layer = MagicMock()
+        mock_field = MagicMock()
         mock_field.name.return_value = "id"
         mock_field.typeName.return_value = "Integer"
-        mock_feature.fields.return_value = [mock_field]
-        
-        # Mock layer fields for the merged layer
-        mock_layer_field = Mock()
-        mock_layer_field.name.return_value = "id"
-        mock_layer_field.typeName.return_value = "Integer"
-        mock_layer_fields = Mock()
-        mock_layer_fields.count.return_value = 1
-        mock_layer_fields.__iter__ = lambda self: iter([mock_layer_field])
-        
+        mock_fields = MagicMock()
+        mock_fields.count.return_value = 1
+        mock_fields.__iter__ = lambda self: iter([mock_field])
+        mock_fields.__getitem__ = lambda self, index: mock_field if index == 0 else None
+        mock_fields.indexOf = lambda field_name: 0 if field_name == "id" else -1
+        mock_objects_layer.fields.return_value = mock_fields
+        mock_feature = MagicMock()
+        mock_feature.geometry.return_value = MagicMock(type=lambda: 2, isMultipart=lambda: False, isEmpty=lambda: False)
+        mock_feature.fields.return_value = mock_fields
+        mock_feature.__getitem__.side_effect = lambda field_name: 1 if field_name == "id" else None
+        mock_feature.__contains__.side_effect = lambda field_name: field_name == "id"
         mock_objects_layer.getFeatures.return_value = [mock_feature]
         
+        # Make sure the mock_objects_layer is properly configured for the sublayer access
+        mock_objects_layer.isValid.return_value = True
+        mock_objects_layer.geometryType.return_value = MagicMock()
+        
         # Mock merged layer
-        mock_merged_layer = Mock()
-        mock_merged_layer.isValid.return_value = True
-        mock_merged_layer.fields.return_value = mock_layer_fields
+        mock_merged_layer = create_mock_layer_with_fields()
         mock_merged_layer.addFeature.return_value = True
         mock_merged_layer.lastError.return_value = ""
+        mock_merged_layer.startEditing.return_value = True
+        mock_merged_layer.commitChanges.return_value = True
+        
+        # Patch QgsFeature to return a proper mock
+        def feature_side_effect(fields):
+            return make_qgsfeature_mock(fields)
+        mock_qgsfeature.side_effect = feature_side_effect
         
         # Mock project instance and CRS
         mock_project_instance = Mock()
@@ -131,7 +203,7 @@ class TestFieldProjectImportService:
         def vector_layer_side_effect(*args, **kwargs):
             if len(args) > 1 and args[0].endswith("data.gpkg") and args[1] == "temp_data":
                 return mock_data_layer
-            elif len(args) > 1 and "Objects" in args[1]:
+            elif len(args) > 1 and "Objects_abc123" in args[1]:
                 return mock_objects_layer
             elif len(args) > 1 and "New Objects" in args[1]:
                 return mock_merged_layer
@@ -140,17 +212,25 @@ class TestFieldProjectImportService:
         
         mock_vector_layer.side_effect = vector_layer_side_effect
         
+        # Make the objects layer subscriptable for data.gpkg sublayer access
+        mock_objects_layer.__getitem__.side_effect = lambda idx: create_iterable_mock_feature()
+        
+        # Make sure the mock_objects_layer is properly configured for the sublayer access
+        mock_objects_layer.isValid.return_value = True
+        mock_objects_layer.geometryType.return_value = MagicMock()
+
         result = self.field_import_service.import_field_projects(["/test/project1"])
         
         assert result.is_valid is True
         assert "Successfully imported 1 layer(s)" in result.message
     
+    @patch('services.field_project_import_service.QgsFeature')
     @patch('os.path.exists')
     @patch('os.listdir')
     @patch('os.path.isfile')
     @patch('services.field_project_import_service.QgsVectorLayer')
     @patch('services.field_project_import_service.QgsProject')
-    def test_import_field_projects_with_individual_layers(self, mock_project, mock_vector_layer, mock_isfile, mock_listdir, mock_exists):
+    def test_import_field_projects_with_individual_layers(self, mock_project, mock_vector_layer, mock_isfile, mock_listdir, mock_exists, mock_qgsfeature):
         """Test importing field projects with individual layer files."""
         # Mock that project directory exists but no data.gpkg
         def exists_side_effect(path):
@@ -166,40 +246,21 @@ class TestFieldProjectImportService:
         mock_isfile.side_effect = isfile_side_effect
         
         # Mock Objects layer file
-        mock_objects_layer = Mock()
-        mock_objects_layer.isValid.return_value = True
-        mock_objects_layer.geometryType.return_value = 2  # PolygonGeometry
-        
-        # Mock feature
-        mock_feature = Mock()
-        mock_geometry = Mock()
-        mock_geometry.type.return_value = 2  # PolygonGeometry
-        mock_geometry.isMultipart.return_value = False
-        mock_geometry.isEmpty.return_value = False
-        mock_feature.geometry.return_value = mock_geometry
-        
-        # Mock feature fields
-        mock_field = Mock()
-        mock_field.name.return_value = "id"
-        mock_field.typeName.return_value = "Integer"
-        mock_feature.fields.return_value = [mock_field]
-        
-        # Mock layer fields for the merged layer
-        mock_layer_field = Mock()
-        mock_layer_field.name.return_value = "id"
-        mock_layer_field.typeName.return_value = "Integer"
-        mock_layer_fields = Mock()
-        mock_layer_fields.count.return_value = 1
-        mock_layer_fields.__iter__ = lambda self: iter([mock_layer_field])
-        
+        mock_objects_layer = create_mock_layer_with_fields()
+        mock_feature = create_iterable_mock_feature()
         mock_objects_layer.getFeatures.return_value = [mock_feature]
         
         # Mock merged layer
-        mock_merged_layer = Mock()
-        mock_merged_layer.isValid.return_value = True
-        mock_merged_layer.fields.return_value = mock_layer_fields
+        mock_merged_layer = create_mock_layer_with_fields()
         mock_merged_layer.addFeature.return_value = True
         mock_merged_layer.lastError.return_value = ""
+        mock_merged_layer.startEditing.return_value = True
+        mock_merged_layer.commitChanges.return_value = True
+        
+        # Patch QgsFeature to return a proper mock
+        def feature_side_effect(fields):
+            return make_qgsfeature_mock(fields)
+        mock_qgsfeature.side_effect = feature_side_effect
         
         # Mock project instance and CRS
         mock_project_instance = Mock()
@@ -223,16 +284,25 @@ class TestFieldProjectImportService:
         
         mock_vector_layer.side_effect = vector_layer_side_effect
         
-        result = self.field_import_service.import_field_projects(["/test/project1"])
+        # Patch QgsFeature to return a proper mock
+        def feature_side_effect(fields):
+            return make_qgsfeature_mock(fields)
+        mock_qgsfeature = Mock()
+        mock_qgsfeature.side_effect = feature_side_effect
+        
+        # Use string path instead of mock
+        project_path = "/test/project1"
+        result = self.field_import_service.import_field_projects([project_path])
         
         assert result.is_valid is True
         assert "Successfully imported 1 layer(s)" in result.message
     
+    @patch('services.field_project_import_service.QgsFeature')
     @patch('os.path.exists')
     @patch('os.listdir')
     @patch('services.field_project_import_service.QgsVectorLayer')
     @patch('services.field_project_import_service.QgsProject')
-    def test_import_field_projects_with_both_data_gpkg_and_individual_layers(self, mock_project, mock_vector_layer, mock_listdir, mock_exists):
+    def test_import_field_projects_with_both_data_gpkg_and_individual_layers(self, mock_project, mock_vector_layer, mock_listdir, mock_exists, mock_qgsfeature):
         """Test importing field projects with both data.gpkg and individual layer files."""
         # Mock that both data.gpkg and individual files exist
         def exists_side_effect(path):
@@ -243,62 +313,42 @@ class TestFieldProjectImportService:
         mock_listdir.return_value = ["Objects.gpkg", "Features.gpkg", "other_file.txt"]
         
         # Mock data layer
-        mock_data_layer = Mock()
+        mock_data_layer = MagicMock()
         mock_data_layer.isValid.return_value = True
         mock_data_layer.dataProvider.return_value.subLayers.return_value = [
             "0!!::!!Objects_abc123!!::!!Point!!::!!EPSG:4326"
         ]
+        mock_data_layer.__getitem__.side_effect = lambda idx: mock_objects_layer
         
         # Mock Objects sublayer from data.gpkg
-        mock_objects_sublayer = Mock()
-        mock_objects_sublayer.isValid.return_value = True
-        mock_objects_sublayer.geometryType.return_value = 2  # PolygonGeometry
-        
-        # Mock feature from data.gpkg
-        mock_feature1 = Mock()
-        mock_geometry1 = Mock()
-        mock_geometry1.type.return_value = 2  # PolygonGeometry
-        mock_geometry1.isMultipart.return_value = False
-        mock_geometry1.isEmpty.return_value = False
-        mock_feature1.geometry.return_value = mock_geometry1
-        mock_field1 = Mock()
-        mock_field1.name.return_value = "id"
-        mock_field1.typeName.return_value = "Integer"
-        mock_feature1.fields.return_value = [mock_field1]
-        
+        mock_objects_sublayer = MagicMock()
+        mock_field = MagicMock()
+        mock_field.name.return_value = "id"
+        mock_field.typeName.return_value = "Integer"
+        mock_fields = MagicMock()
+        mock_fields.count.return_value = 1
+        mock_fields.__iter__ = lambda self: iter([mock_field])
+        mock_fields.__getitem__ = lambda self, index: mock_field if index == 0 else None
+        mock_fields.indexOf = lambda field_name: 0 if field_name == "id" else -1
+        mock_objects_sublayer.fields.return_value = mock_fields
+        mock_feature1 = MagicMock()
+        mock_feature1.geometry.return_value = MagicMock(type=lambda: 2, isMultipart=lambda: False, isEmpty=lambda: False)
+        mock_feature1.fields.return_value = mock_fields
+        mock_feature1.__getitem__.side_effect = lambda field_name: 1 if field_name == "id" else None
+        mock_feature1.__contains__.side_effect = lambda field_name: field_name == "id"
         mock_objects_sublayer.getFeatures.return_value = [mock_feature1]
         
+        # Make sure the mock_objects_sublayer is properly configured for the sublayer access
+        mock_objects_sublayer.isValid.return_value = True
+        mock_objects_sublayer.geometryType.return_value = MagicMock()
+        
         # Mock individual Objects layer file
-        mock_objects_individual = Mock()
-        mock_objects_individual.isValid.return_value = True
-        mock_objects_individual.geometryType.return_value = 2  # PolygonGeometry
-        
-        # Mock feature from individual file
-        mock_feature2 = Mock()
-        mock_geometry2 = Mock()
-        mock_geometry2.type.return_value = 2  # PolygonGeometry
-        mock_geometry2.isMultipart.return_value = False
-        mock_geometry2.isEmpty.return_value = False
-        mock_feature2.geometry.return_value = mock_geometry2
-        mock_field2 = Mock()
-        mock_field2.name.return_value = "id"
-        mock_field2.typeName.return_value = "Integer"
-        mock_feature2.fields.return_value = [mock_field2]
-        
+        mock_objects_individual = create_mock_layer_with_fields()
+        mock_feature2 = create_iterable_mock_feature()
         mock_objects_individual.getFeatures.return_value = [mock_feature2]
         
         # Mock merged layer
-        mock_merged_layer = Mock()
-        mock_merged_layer.isValid.return_value = True
-        
-        # Mock layer fields for the merged layer
-        mock_layer_field = Mock()
-        mock_layer_field.name.return_value = "id"
-        mock_layer_field.typeName.return_value = "Integer"
-        mock_layer_fields = Mock()
-        mock_layer_fields.count.return_value = 1
-        mock_layer_fields.__iter__ = lambda self: iter([mock_layer_field])
-        mock_merged_layer.fields.return_value = mock_layer_fields
+        mock_merged_layer = create_mock_layer_with_fields()
         mock_merged_layer.addFeature.return_value = True
         mock_merged_layer.lastError.return_value = ""
         
@@ -328,7 +378,15 @@ class TestFieldProjectImportService:
         
         mock_vector_layer.side_effect = vector_layer_side_effect
         
-        result = self.field_import_service.import_field_projects(["/test/project1"])
+        # Patch QgsFeature to return a proper mock
+        def feature_side_effect(fields):
+            return make_qgsfeature_mock(fields)
+        mock_qgsfeature = Mock()
+        mock_qgsfeature.side_effect = feature_side_effect
+        
+        # Use string path instead of mock
+        project_path = "/test/project1"
+        result = self.field_import_service.import_field_projects([project_path])
         
         assert result.is_valid is True
         assert "Successfully imported 1 layer(s)" in result.message
@@ -408,10 +466,11 @@ class TestFieldProjectImportService:
         result = self.field_import_service._get_crs_string(mock_crs)
         assert result == "EPSG:4326"
 
+    @patch('services.field_project_import_service.QgsFeature')
     @patch('os.path.exists')
     @patch('services.field_project_import_service.QgsVectorLayer')
     @patch('services.field_project_import_service.QgsProject')
-    def test_import_field_projects_archives_projects_when_configured(self, mock_project, mock_vector_layer, mock_exists):
+    def test_import_field_projects_archives_projects_when_configured(self, mock_project, mock_vector_layer, mock_exists, mock_qgsfeature):
         """Test that field projects are archived after successful import when archive folder is configured."""
         # Mock that data.gpkg exists
         def exists_side_effect(path):
@@ -436,38 +495,12 @@ class TestFieldProjectImportService:
         ]
         
         # Mock Objects sublayer
-        mock_objects_layer = Mock()
-        mock_objects_layer.isValid.return_value = True
-        mock_objects_layer.geometryType.return_value = 2  # PolygonGeometry
-        
-        # Mock feature
-        mock_feature = Mock()
-        mock_geometry = Mock()
-        mock_geometry.type.return_value = 2  # PolygonGeometry
-        mock_geometry.isMultipart.return_value = False
-        mock_geometry.isEmpty.return_value = False
-        mock_feature.geometry.return_value = mock_geometry
-        
-        # Mock feature fields
-        mock_field = Mock()
-        mock_field.name.return_value = "id"
-        mock_field.typeName.return_value = "Integer"
-        mock_feature.fields.return_value = [mock_field]
-        
-        # Mock layer fields for the merged layer
-        mock_layer_field = Mock()
-        mock_layer_field.name.return_value = "id"
-        mock_layer_field.typeName.return_value = "Integer"
-        mock_layer_fields = Mock()
-        mock_layer_fields.count.return_value = 1
-        mock_layer_fields.__iter__ = lambda self: iter([mock_layer_field])
-        
+        mock_objects_layer = create_mock_layer_with_fields()
+        mock_feature = create_iterable_mock_feature()
         mock_objects_layer.getFeatures.return_value = [mock_feature]
         
         # Mock merged layer
-        mock_merged_layer = Mock()
-        mock_merged_layer.isValid.return_value = True
-        mock_merged_layer.fields.return_value = mock_layer_fields
+        mock_merged_layer = create_mock_layer_with_fields()
         mock_merged_layer.addFeature.return_value = True
         mock_merged_layer.lastError.return_value = ""
         
@@ -495,7 +528,15 @@ class TestFieldProjectImportService:
         
         mock_vector_layer.side_effect = vector_layer_side_effect
         
-        result = self.field_import_service.import_field_projects(["/test/project1"])
+        # Patch QgsFeature to return a proper mock
+        def feature_side_effect(fields):
+            return make_qgsfeature_mock(fields)
+        mock_qgsfeature = Mock()
+        mock_qgsfeature.side_effect = feature_side_effect
+        
+        # Use string path instead of mock
+        project_path = "/test/project1"
+        result = self.field_import_service.import_field_projects([project_path])
         
         # Verify import was successful
         assert result.is_valid is True
@@ -507,10 +548,11 @@ class TestFieldProjectImportService:
         # Verify project was moved to archive
         self.file_system_service.move_directory.assert_called_once()
 
+    @patch('services.field_project_import_service.QgsFeature')
     @patch('os.path.exists')
     @patch('services.field_project_import_service.QgsVectorLayer')
     @patch('services.field_project_import_service.QgsProject')
-    def test_import_field_projects_does_not_archive_when_not_configured(self, mock_project, mock_vector_layer, mock_exists):
+    def test_import_field_projects_does_not_archive_when_not_configured(self, mock_project, mock_vector_layer, mock_exists, mock_qgsfeature):
         """Test that field projects are not archived when archive folder is not configured."""
         # Mock that data.gpkg exists
         def exists_side_effect(path):
@@ -530,38 +572,12 @@ class TestFieldProjectImportService:
         ]
         
         # Mock Objects sublayer
-        mock_objects_layer = Mock()
-        mock_objects_layer.isValid.return_value = True
-        mock_objects_layer.geometryType.return_value = 2  # PolygonGeometry
-        
-        # Mock feature
-        mock_feature = Mock()
-        mock_geometry = Mock()
-        mock_geometry.type.return_value = 2  # PolygonGeometry
-        mock_geometry.isMultipart.return_value = False
-        mock_geometry.isEmpty.return_value = False
-        mock_feature.geometry.return_value = mock_geometry
-        
-        # Mock feature fields
-        mock_field = Mock()
-        mock_field.name.return_value = "id"
-        mock_field.typeName.return_value = "Integer"
-        mock_feature.fields.return_value = [mock_field]
-        
-        # Mock layer fields for the merged layer
-        mock_layer_field = Mock()
-        mock_layer_field.name.return_value = "id"
-        mock_layer_field.typeName.return_value = "Integer"
-        mock_layer_fields = Mock()
-        mock_layer_fields.count.return_value = 1
-        mock_layer_fields.__iter__ = lambda self: iter([mock_layer_field])
-        
+        mock_objects_layer = create_mock_layer_with_fields()
+        mock_feature = create_iterable_mock_feature()
         mock_objects_layer.getFeatures.return_value = [mock_feature]
         
         # Mock merged layer
-        mock_merged_layer = Mock()
-        mock_merged_layer.isValid.return_value = True
-        mock_merged_layer.fields.return_value = mock_layer_fields
+        mock_merged_layer = create_mock_layer_with_fields()
         mock_merged_layer.addFeature.return_value = True
         mock_merged_layer.lastError.return_value = ""
         
@@ -589,7 +605,15 @@ class TestFieldProjectImportService:
         
         mock_vector_layer.side_effect = vector_layer_side_effect
         
-        result = self.field_import_service.import_field_projects(["/test/project1"])
+        # Patch QgsFeature to return a proper mock
+        def feature_side_effect(fields):
+            return make_qgsfeature_mock(fields)
+        mock_qgsfeature = Mock()
+        mock_qgsfeature.side_effect = feature_side_effect
+        
+        # Use string path instead of mock
+        project_path = "/test/project1"
+        result = self.field_import_service.import_field_projects([project_path])
         
         # Verify import was successful
         assert result.is_valid is True

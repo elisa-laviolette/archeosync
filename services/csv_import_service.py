@@ -290,10 +290,13 @@ class CSVImportService(ICSVImportService):
             # Check if all values can be converted to integers
             all_integers = True
             all_reals = True
+            non_empty_values = 0
             
             for value in sample_values:
                 if not value or value.strip() == '':
                     continue
+                
+                non_empty_values += 1
                     
                 # Try integer conversion
                 try:
@@ -309,7 +312,10 @@ class CSVImportService(ICSVImportService):
                     break
             
             # Determine field type
-            if all_integers:
+            if non_empty_values == 0:
+                # All values are empty, default to string
+                field_types[column_name] = "string"
+            elif all_integers:
                 field_types[column_name] = "integer"
             elif all_reals:
                 field_types[column_name] = "real"

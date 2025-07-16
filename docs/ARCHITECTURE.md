@@ -430,6 +430,10 @@ The filtering process ensures field projects contain only relevant data:
   - `add_variables`: Controls whether to add project variables (default: True)
   - `next_values`: Required when `add_variables=True` for field preparation
   - `extra_layers`: Support for additional read-only layers in field projects
+- **Layer Order Optimization**: Background raster layers are now added first to appear at the bottom of the layer tree
+  - Improved user experience with proper layer stacking order
+  - Background images serve as base layers for better visualization
+  - Vector layers appear above background for easier editing
 - **Code Quality**: Reduced duplication and improved maintainability
 - **Backward Compatibility**: All existing functionality preserved
 
