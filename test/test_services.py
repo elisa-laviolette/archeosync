@@ -1481,6 +1481,70 @@ class TestArcheoSyncConfigurationValidator(unittest.TestCase):
         errors = self.validator.validate_features_layer('test_layer')
         self.assertEqual(len(errors), 1)
         self.assertIn('Layer not found in current project', errors[0])
+
+    def test_validate_small_finds_layer_empty_layer_id(self):
+        """Test validation of empty small finds layer ID."""
+        errors = self.validator.validate_small_finds_layer('')
+        self.assertEqual(len(errors), 0)  # Empty layer ID is optional
+
+    def test_validate_small_finds_layer_valid_point_layer(self):
+        """Test validation of valid point/multipoint small finds layer."""
+        self.layer_service.is_valid_point_or_multipoint_layer.return_value = True
+        self.layer_service.is_valid_no_geometry_layer.return_value = False
+        self.layer_service.get_layer_info.return_value = {
+            'id': 'test_layer',
+            'name': 'Test Layer',
+            'is_valid': True
+        }
+        
+        errors = self.validator.validate_small_finds_layer('test_layer')
+        self.assertEqual(len(errors), 0)
+
+    def test_validate_small_finds_layer_valid_no_geometry_layer(self):
+        """Test validation of valid no geometry small finds layer."""
+        self.layer_service.is_valid_point_or_multipoint_layer.return_value = False
+        self.layer_service.is_valid_no_geometry_layer.return_value = True
+        self.layer_service.get_layer_info.return_value = {
+            'id': 'test_layer',
+            'name': 'Test Layer',
+            'is_valid': True
+        }
+        
+        errors = self.validator.validate_small_finds_layer('test_layer')
+        self.assertEqual(len(errors), 0)
+
+    def test_validate_small_finds_layer_invalid_layer(self):
+        """Test validation of invalid small finds layer (neither point nor no geometry)."""
+        self.layer_service.is_valid_point_or_multipoint_layer.return_value = False
+        self.layer_service.is_valid_no_geometry_layer.return_value = False
+        
+        errors = self.validator.validate_small_finds_layer('test_layer')
+        self.assertEqual(len(errors), 1)
+        self.assertIn('Selected layer is not a valid point/multipoint layer or no geometry layer', errors[0])
+
+    def test_validate_small_finds_layer_layer_not_found(self):
+        """Test validation of small finds layer that doesn't exist."""
+        self.layer_service.is_valid_point_or_multipoint_layer.return_value = True
+        self.layer_service.is_valid_no_geometry_layer.return_value = False
+        self.layer_service.get_layer_info.return_value = None
+        
+        errors = self.validator.validate_small_finds_layer('test_layer')
+        self.assertEqual(len(errors), 1)
+        self.assertIn('Layer not found in current project', errors[0])
+
+    def test_validate_small_finds_layer_invalid_layer_info(self):
+        """Test validation of small finds layer with invalid layer info."""
+        self.layer_service.is_valid_point_or_multipoint_layer.return_value = True
+        self.layer_service.is_valid_no_geometry_layer.return_value = False
+        self.layer_service.get_layer_info.return_value = {
+            'id': 'test_layer',
+            'name': 'Test Layer',
+            'is_valid': False
+        }
+        
+        errors = self.validator.validate_small_finds_layer('test_layer')
+        self.assertEqual(len(errors), 1)
+        self.assertIn('Selected layer is not valid', errors[0])
     
     def test_validate_csv_archive_folder_empty_path(self):
         """Test validation of empty CSV archive folder path."""
@@ -1764,13 +1828,13 @@ class TestArcheoSyncConfigurationValidator(unittest.TestCase):
     def test_validate_layer_relationships_no_recording_areas_layer(self):
         """Test relationship validation when no recording areas layer is set."""
         # When recording areas layer is not set, relationships are not required
-        errors = self.validator.validate_layer_relationships("", "objects_layer_id", "features_layer_id")
+        errors = self.validator.validate_layer_relationships("", "objects_layer_id", "features_layer_id", "")
         self.assertEqual(len(errors), 0)
 
     def test_validate_layer_relationships_no_child_layers(self):
         """Test relationship validation when no child layers are set."""
         # When no child layers are set, relationships are not required
-        errors = self.validator.validate_layer_relationships("recording_areas_layer_id", "", "")
+        errors = self.validator.validate_layer_relationships("recording_areas_layer_id", "", "", "")
         self.assertEqual(len(errors), 0)
 
     def test_validate_layer_relationships_missing_objects_relationship(self):
@@ -1781,6 +1845,7 @@ class TestArcheoSyncConfigurationValidator(unittest.TestCase):
         errors = self.validator.validate_layer_relationships(
             "recording_areas_layer_id", 
             "objects_layer_id", 
+            "",
             ""
         )
         
@@ -1795,12 +1860,30 @@ class TestArcheoSyncConfigurationValidator(unittest.TestCase):
         errors = self.validator.validate_layer_relationships(
             "recording_areas_layer_id", 
             "objects_layer_id", 
-            "features_layer_id"
+            "features_layer_id",
+            ""
         )
         
         self.assertEqual(len(errors), 2)
         self.assertIn("Objects layer must have a relationship with Recording areas layer", errors[0])
         self.assertIn("Features layer must have a relationship with Recording areas layer", errors[1])
+
+    def test_validate_layer_relationships_missing_small_finds_relationship(self):
+        """Test relationship validation when small finds layer relationship is missing."""
+        # Mock layer service to return no relationships
+        self.layer_service.get_layer_relationships.return_value = []
+        
+        errors = self.validator.validate_layer_relationships(
+            "recording_areas_layer_id", 
+            "objects_layer_id", 
+            "features_layer_id",
+            "small_finds_layer_id"
+        )
+        
+        self.assertEqual(len(errors), 3)
+        self.assertIn("Objects layer must have a relationship with Recording areas layer", errors[0])
+        self.assertIn("Features layer must have a relationship with Recording areas layer", errors[1])
+        self.assertIn("Small finds layer must have a relationship with Recording areas layer", errors[2])
 
     def test_validate_layer_relationships_valid_relationships(self):
         """Test relationship validation when all relationships are valid."""
@@ -1813,15 +1896,21 @@ class TestArcheoSyncConfigurationValidator(unittest.TestCase):
         mock_features_relation.referencingLayerId.return_value = "features_layer_id"
         mock_features_relation.referencedLayerId.return_value = "recording_areas_layer_id"
         
+        mock_small_finds_relation = Mock()
+        mock_small_finds_relation.referencingLayerId.return_value = "small_finds_layer_id"
+        mock_small_finds_relation.referencedLayerId.return_value = "recording_areas_layer_id"
+        
         self.layer_service.get_layer_relationships.return_value = [
             mock_objects_relation, 
-            mock_features_relation
+            mock_features_relation,
+            mock_small_finds_relation
         ]
         
         errors = self.validator.validate_layer_relationships(
             "recording_areas_layer_id", 
             "objects_layer_id", 
-            "features_layer_id"
+            "features_layer_id",
+            "small_finds_layer_id"
         )
         
         self.assertEqual(len(errors), 0)
@@ -1838,6 +1927,7 @@ class TestArcheoSyncConfigurationValidator(unittest.TestCase):
         errors = self.validator.validate_layer_relationships(
             "recording_areas_layer_id", 
             "objects_layer_id", 
+            "",
             ""
         )
         
@@ -1851,7 +1941,8 @@ class TestArcheoSyncConfigurationValidator(unittest.TestCase):
         errors = validator.validate_layer_relationships(
             "recording_areas_layer_id", 
             "objects_layer_id", 
-            "features_layer_id"
+            "features_layer_id",
+            ""
         )
         
         self.assertEqual(len(errors), 1)

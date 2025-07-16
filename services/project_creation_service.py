@@ -46,9 +46,9 @@ from qgis.core import QgsProject, QgsVectorLayer, QgsRasterLayer, QgsFeature, Qg
 from qgis.PyQt.QtWidgets import QMessageBox
 
 try:
-    from ..core.interfaces import ISettingsManager, ILayerService, IFileSystemService, IRasterProcessingService, IProjectCreationService
+    from ..core.interfaces import ISettingsManager, ILayerService, IFileSystemService, IRasterProcessingService, IProjectCreationService, ITranslationService
 except ImportError:
-    from core.interfaces import ISettingsManager, ILayerService, IFileSystemService, IRasterProcessingService, IProjectCreationService
+    from core.interfaces import ISettingsManager, ILayerService, IFileSystemService, IRasterProcessingService, IProjectCreationService, ITranslationService
 
 
 class QGISProjectCreationService(IProjectCreationService):
@@ -67,7 +67,8 @@ class QGISProjectCreationService(IProjectCreationService):
                  settings_manager: ISettingsManager, 
                  layer_service: ILayerService, 
                  file_system_service: IFileSystemService,
-                 raster_processing_service: IRasterProcessingService):
+                 raster_processing_service: IRasterProcessingService,
+                 translation_service: Optional[ITranslationService] = None):
         """
         Initialize the project creation service.
         
@@ -81,12 +82,14 @@ class QGISProjectCreationService(IProjectCreationService):
         self._layer_service = layer_service
         self._file_system_service = file_system_service
         self._raster_processing_service = raster_processing_service
+        self._translation_service = translation_service
     
     def create_field_project(self,
                            feature_data: Dict[str, Any],
                            recording_areas_layer_id: str,
                            objects_layer_id: str,
                            features_layer_id: Optional[str],
+                           small_finds_layer_id: Optional[str],
                            background_layer_id: Optional[str],
                            extra_layers: Optional[List[str]] = None,
                            destination_folder: str = "",
@@ -182,6 +185,23 @@ class QGISProjectCreationService(IProjectCreationService):
                 )
                 if not success:
                     raise RuntimeError(f"Failed to create features layer: {features_gpkg_path}")
+
+            # Create small finds layer (empty) if configured
+            if small_finds_layer_id:
+                small_finds_layer_info = self._layer_service.get_layer_info(small_finds_layer_id)
+                default_name = "Small Finds"
+                if self._translation_service:
+                    default_name = self._translation_service.translate("Small Finds")
+                small_finds_layer_name = small_finds_layer_info['name'] if small_finds_layer_info else default_name
+                small_finds_gpkg_path = os.path.join(project_dir, f"{small_finds_layer_name}.gpkg")
+                success = self._create_empty_layer_copy(
+                    source_layer_id=small_finds_layer_id,
+                    output_path=small_finds_gpkg_path,
+                    layer_name=small_finds_layer_name,
+                    project=project
+                )
+                if not success:
+                    raise RuntimeError(f"Failed to create small finds layer: {small_finds_gpkg_path}")
 
             # Process extra layers
             if extra_layers:

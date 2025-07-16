@@ -222,6 +222,10 @@ class SettingsDialog(QtWidgets.QDialog):
         self._features_widget = self._create_layer_selector()
         form_layout.addRow(self.tr("Features Layer:"), self._features_widget)
         
+        # Small finds layer
+        self._small_finds_widget = self._create_layer_selector()
+        form_layout.addRow(self.tr("Small Finds Layer:"), self._small_finds_widget)
+        
         # Extra layers for field projects
         self._extra_layers_widget = self._create_extra_layers_widget()
         form_layout.addRow(self.tr("Extra Field Layers:"), self._extra_layers_widget)
@@ -489,6 +493,7 @@ class SettingsDialog(QtWidgets.QDialog):
         self._objects_widget.refresh_button.clicked.connect(self._refresh_objects_layer_list)
         self._objects_widget.combo_box.currentIndexChanged.connect(self._on_objects_layer_changed)
         self._features_widget.refresh_button.clicked.connect(self._refresh_features_layer_list)
+        self._small_finds_widget.refresh_button.clicked.connect(self._refresh_small_finds_layer_list)
         # Extra layers connections
         self._extra_layers_widget.refresh_button.clicked.connect(self._refresh_extra_layers_list)
         # No slider signal connections needed for spinboxes
@@ -583,6 +588,40 @@ class SettingsDialog(QtWidgets.QDialog):
             
         except Exception as e:
             self._show_error(self.tr("Layer Error"), self.tr(f"Failed to refresh features layer list: {str(e)}"))
+    
+    def _refresh_small_finds_layer_list(self) -> None:
+        """Refresh the list of available point, multipoint, and no geometry layers for small finds."""
+        try:
+            combo_box = self._small_finds_widget.combo_box
+            current_layer_id = combo_box.currentData()
+            
+            # Clear existing items except the first placeholder
+            combo_box.clear()
+            combo_box.addItem(self.tr("-- Select a point, multipoint, or no geometry layer --"), "")
+            
+            # Get point and multipoint layers from the service
+            point_layers = self._layer_service.get_point_and_multipoint_layers()
+            
+            # Get no geometry layers from the service
+            no_geom_layers = self._layer_service.get_no_geometry_layers()
+            
+            # Combine and sort all layers
+            all_layers = point_layers + no_geom_layers
+            all_layers.sort(key=lambda x: x['name'].lower())
+            
+            # Add layers to combo box
+            for layer_info in all_layers:
+                display_text = self.tr(f"{layer_info['name']} ({layer_info['feature_count']} features)")
+                combo_box.addItem(display_text, layer_info['id'])
+            
+            # Restore previously selected layer if it still exists
+            if current_layer_id:
+                index = combo_box.findData(current_layer_id)
+                if index >= 0:
+                    combo_box.setCurrentIndex(index)
+            
+        except Exception as e:
+            self._show_error(self.tr("Layer Error"), self.tr(f"Failed to refresh small finds layer list: {str(e)}"))
     
     def _refresh_extra_layers_list(self) -> None:
         """Refresh the list of available vector layers for extra QField layers."""
@@ -737,6 +776,14 @@ class SettingsDialog(QtWidgets.QDialog):
                 if index >= 0:
                     self._features_widget.combo_box.setCurrentIndex(index)
             
+            # Load small finds layer
+            small_finds_layer_id = self._settings_manager.get_value('small_finds_layer', '')
+            self._refresh_small_finds_layer_list()  # Populate the combo box
+            if small_finds_layer_id:
+                index = self._small_finds_widget.combo_box.findData(small_finds_layer_id)
+                if index >= 0:
+                    self._small_finds_widget.combo_box.setCurrentIndex(index)
+            
 
             
             # Load raster clipping offset
@@ -779,6 +826,7 @@ class SettingsDialog(QtWidgets.QDialog):
                 'objects_number_field': self._settings_manager.get_value('objects_number_field', ''),
                 'objects_level_field': self._settings_manager.get_value('objects_level_field', ''),
                 'features_layer': features_layer_id,
+                'small_finds_layer': small_finds_layer_id,
 
                 'raster_clipping_offset': float(raster_offset),
                 'raster_brightness': int(brightness),
@@ -806,6 +854,7 @@ class SettingsDialog(QtWidgets.QDialog):
                 'objects_number_field': self._number_field_combo.currentData(),
                 'objects_level_field': self._level_field_combo.currentData(),
                 'features_layer': self._features_widget.combo_box.currentData(),
+                'small_finds_layer': self._small_finds_widget.combo_box.currentData(),
 
                 'raster_clipping_offset': self._raster_offset_spinbox.value(),
                 'raster_brightness': self._sliders['Brightness'].value(),

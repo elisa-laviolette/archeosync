@@ -2,6 +2,55 @@
 
 All notable changes to the ArcheoSync QGIS plugin will be documented in this file.
 
+## [0.14.0] - 2025-07-16
+
+### New Features
+
+- **Small Finds Layer Support**: Added support for small finds layers in field project creation and import
+  - **Small Finds Layer Configuration**: New layer selector in settings dialog for small finds layers
+    - Supports point, multipoint, and no geometry layer types
+    - Optional configuration with proper validation
+    - User-friendly dropdown with layer information display
+  - **Field Project Creation**: Small finds layers are automatically included in field projects
+    - Creates empty small finds layer copies for offline editing
+    - Preserves layer structure, styling, and field configurations
+    - Integrates with existing field project creation workflow
+  - **Field Project Import**: Enhanced import functionality to process small finds layers
+    - Automatic detection and processing of small finds layer files
+    - Merging of small finds layers from multiple projects
+    - Creation of "New Small Finds" layer in the current project
+    - Support for both data.gpkg and individual layer file formats
+
+### Technical Improvements
+
+- **Enhanced Layer Service**: Extended layer service with small finds support
+  - `get_point_and_multipoint_layers()` method for small finds layer detection
+  - `get_no_geometry_layers()` method for small finds without geometry
+  - `is_valid_point_or_multipoint_layer()` validation method
+  - `is_valid_no_geometry_layer()` validation method
+- **Configuration Validation**: Added comprehensive validation for small finds layers
+  - Validates layer geometry types (point, multipoint, or no geometry)
+  - Checks layer relationships with recording areas layer
+  - Integration with existing validation framework
+- **Service Architecture**: Enhanced services with translation support
+  - Project creation service now supports translated layer names
+  - Field project import service supports translated merged layer names
+  - Optional translation service integration for internationalization
+- **Internationalization**: Added French translations for small finds feature
+  - "Small Finds Layer:" → "Couche des petits objets :"
+  - "Small Finds" → "Petits objets"
+  - "New Small Finds" → "Nouveaux petits objets"
+  - Placeholder text and error messages translated
+
+### Test Coverage
+
+- **Comprehensive Testing**: Added extensive test coverage for small finds functionality
+  - Tests for small finds layer validation (point, multipoint, no geometry)
+  - Tests for layer relationship validation
+  - Tests for field project creation with small finds layers
+  - Tests for field project import with small finds layers
+  - Tests for layer detection and processing in various scenarios
+
 ## [0.13.0] - 2025-07-16
 
 ### New Features

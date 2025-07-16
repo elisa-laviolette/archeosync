@@ -303,6 +303,11 @@ class TestFieldProjectImportService:
             "0!!::!!Objects_abc123!!::!!Point!!::!!EPSG:4326"
         ]
         
+        # Mock the sublayer access properly
+        mock_data_layer.dataProvider.return_value.subLayers.return_value = [
+            "0!!::!!Objects_abc123!!::!!Point!!::!!EPSG:4326"
+        ]
+        
         # Mock individual Objects layer file
         mock_objects_individual = create_mock_layer_with_fields()
         mock_feature2 = create_iterable_mock_feature()

@@ -250,6 +250,11 @@ class IConfigurationValidator(ABC):
         pass
 
     @abstractmethod
+    def validate_small_finds_layer(self, layer_id: str) -> List[str]:
+        """Validate small finds layer configuration."""
+        pass
+
+    @abstractmethod
     def validate_objects_layer_fields(self, layer_id: str, number_field: Optional[str], level_field: Optional[str]) -> ValidationResult:
         """
         Validate the field selections for the objects layer.
@@ -265,7 +270,7 @@ class IConfigurationValidator(ABC):
         pass
 
     @abstractmethod
-    def validate_layer_relationships(self, recording_areas_layer_id: str, objects_layer_id: str, features_layer_id: str) -> List[str]:
+    def validate_layer_relationships(self, recording_areas_layer_id: str, objects_layer_id: str, features_layer_id: str, small_finds_layer_id: str) -> List[str]:
         """
         Validate that child layers have proper relationships with the recording areas layer.
         
@@ -273,6 +278,7 @@ class IConfigurationValidator(ABC):
             recording_areas_layer_id: The recording areas layer ID (parent)
             objects_layer_id: The objects layer ID (child)
             features_layer_id: The features layer ID (child, optional)
+            small_finds_layer_id: The small finds layer ID (child, optional)
             
         Returns:
             List of validation error messages (empty if valid)
@@ -291,6 +297,16 @@ class ILayerService(ABC):
     @abstractmethod
     def get_polygon_and_multipolygon_layers(self) -> List[Dict[str, Any]]:
         """Get all polygon and multipolygon layers from the current QGIS project."""
+        pass
+
+    @abstractmethod
+    def get_point_and_multipoint_layers(self) -> List[Dict[str, Any]]:
+        """Get all point and multipoint layers from the current QGIS project."""
+        pass
+
+    @abstractmethod
+    def get_no_geometry_layers(self) -> List[Dict[str, Any]]:
+        """Get all layers with no geometry from the current QGIS project."""
         pass
     
     @abstractmethod
@@ -330,6 +346,16 @@ class ILayerService(ABC):
     @abstractmethod
     def is_valid_polygon_or_multipolygon_layer(self, layer_id: str) -> bool:
         """Check if a layer is a valid polygon or multipolygon layer."""
+        pass
+
+    @abstractmethod
+    def is_valid_point_or_multipoint_layer(self, layer_id: str) -> bool:
+        """Check if a layer is a valid point or multipoint layer."""
+        pass
+
+    @abstractmethod
+    def is_valid_no_geometry_layer(self, layer_id: str) -> bool:
+        """Check if a layer has no geometry."""
         pass
     
     @abstractmethod
@@ -462,6 +488,7 @@ class IProjectCreationService(ABC):
                            recording_areas_layer_id: str,
                            objects_layer_id: str,
                            features_layer_id: Optional[str],
+                           small_finds_layer_id: Optional[str],
                            background_layer_id: Optional[str],
                            extra_layers: Optional[List[str]] = None,
                            destination_folder: str = "",
@@ -475,6 +502,7 @@ class IProjectCreationService(ABC):
             recording_areas_layer_id: ID of the recording areas layer
             objects_layer_id: ID of the objects layer
             features_layer_id: ID of the features layer (optional)
+            small_finds_layer_id: ID of the small finds layer (optional)
             background_layer_id: ID of the background image layer (optional)
             extra_layers: List of additional layer IDs to include (optional)
             destination_folder: Folder where to save the field project

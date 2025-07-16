@@ -299,6 +299,41 @@ class ArcheoSyncConfigurationValidator(IConfigurationValidator):
             errors.append(f"Selected layer is not valid: {layer_info.get('name', layer_id)}")
         
         return errors
+
+    def validate_small_finds_layer(self, layer_id: str) -> List[str]:
+        """
+        Validate small finds layer configuration.
+        
+        Args:
+            layer_id: Layer ID to validate
+            
+        Returns:
+            List of validation error messages (empty if valid)
+        """
+        errors = []
+        
+        if not layer_id:
+            # Small finds layer is optional, so no error if not set
+            return errors
+        
+        if not self._layer_service:
+            errors.append("Layer service not available for validation")
+            return errors
+        
+        # Check if it's a valid point/multipoint layer or no geometry layer
+        is_valid_point = self._layer_service.is_valid_point_or_multipoint_layer(layer_id)
+        is_valid_no_geom = self._layer_service.is_valid_no_geometry_layer(layer_id)
+        
+        if not is_valid_point and not is_valid_no_geom:
+            errors.append(f"Selected layer is not a valid point/multipoint layer or no geometry layer: {layer_id}")
+        
+        layer_info = self._layer_service.get_layer_info(layer_id)
+        if not layer_info:
+            errors.append(f"Layer not found in current project: {layer_id}")
+        elif not layer_info.get('is_valid', False):
+            errors.append(f"Selected layer is not valid: {layer_info.get('name', layer_id)}")
+        
+        return errors
     
     def validate_objects_layer_fields(self, layer_id: str, number_field: Optional[str], level_field: Optional[str]) -> ValidationResult:
         """
@@ -339,7 +374,7 @@ class ArcheoSyncConfigurationValidator(IConfigurationValidator):
         
         return ValidationResult(True, "Field validation successful")
     
-    def validate_layer_relationships(self, recording_areas_layer_id: str, objects_layer_id: str, features_layer_id: str) -> List[str]:
+    def validate_layer_relationships(self, recording_areas_layer_id: str, objects_layer_id: str, features_layer_id: str, small_finds_layer_id: str) -> List[str]:
         """
         Validate that child layers have proper relationships with the recording areas layer.
         
@@ -347,6 +382,7 @@ class ArcheoSyncConfigurationValidator(IConfigurationValidator):
             recording_areas_layer_id: The recording areas layer ID (parent)
             objects_layer_id: The objects layer ID (child)
             features_layer_id: The features layer ID (child, optional)
+            small_finds_layer_id: The small finds layer ID (child, optional)
             
         Returns:
             List of validation error messages (empty if valid)
@@ -358,7 +394,7 @@ class ArcheoSyncConfigurationValidator(IConfigurationValidator):
             return errors
         
         # If no child layers are set, relationships are not required
-        if not objects_layer_id and not features_layer_id:
+        if not objects_layer_id and not features_layer_id and not small_finds_layer_id:
             return errors
         
         if not self._layer_service:
@@ -374,6 +410,11 @@ class ArcheoSyncConfigurationValidator(IConfigurationValidator):
         if features_layer_id:
             if not self._has_valid_relationship(recording_areas_layer_id, features_layer_id):
                 errors.append("Features layer must have a relationship with Recording areas layer")
+        
+        # Validate small finds layer relationship if set
+        if small_finds_layer_id:
+            if not self._has_valid_relationship(recording_areas_layer_id, small_finds_layer_id):
+                errors.append("Small finds layer must have a relationship with Recording areas layer")
         
         return errors
 
@@ -481,16 +522,23 @@ class ArcheoSyncConfigurationValidator(IConfigurationValidator):
                 settings['features_layer']
             )
         
+        if 'small_finds_layer' in settings:
+            validation_results['small_finds_layer'] = self.validate_small_finds_layer(
+                settings['small_finds_layer']
+            )
+        
         # Validate layer relationships if layers are configured
         recording_areas_layer = settings.get('recording_areas_layer', '')
         objects_layer = settings.get('objects_layer', '')
         features_layer = settings.get('features_layer', '')
+        small_finds_layer = settings.get('small_finds_layer', '')
         
-        if recording_areas_layer or objects_layer or features_layer:
+        if recording_areas_layer or objects_layer or features_layer or small_finds_layer:
             relationship_errors = self.validate_layer_relationships(
                 recording_areas_layer,
                 objects_layer,
-                features_layer
+                features_layer,
+                small_finds_layer
             )
             if relationship_errors:
                 validation_results['layer_relationships'] = relationship_errors

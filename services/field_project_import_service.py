@@ -40,7 +40,7 @@ from dataclasses import dataclass
 try:
     from qgis.core import QgsVectorLayer, QgsFeature, QgsProject, QgsVectorFileWriter, QgsGeometry
     from qgis.PyQt.QtCore import QVariant
-    from ..core.interfaces import IFieldProjectImportService, ISettingsManager, ILayerService, IFileSystemService, ValidationResult
+    from ..core.interfaces import IFieldProjectImportService, ISettingsManager, ILayerService, IFileSystemService, ValidationResult, ITranslationService
 except ImportError:
     # For testing without QGIS
     QgsVectorLayer = None
@@ -49,7 +49,7 @@ except ImportError:
     QgsVectorFileWriter = None
     QgsGeometry = None
     QVariant = None
-    from core.interfaces import IFieldProjectImportService, ISettingsManager, ILayerService, IFileSystemService, ValidationResult
+    from core.interfaces import IFieldProjectImportService, ISettingsManager, ILayerService, IFileSystemService, ValidationResult, ITranslationService
 
 
 class FieldProjectImportService(IFieldProjectImportService):
@@ -68,7 +68,8 @@ class FieldProjectImportService(IFieldProjectImportService):
     def __init__(self, 
                  settings_manager: ISettingsManager,
                  layer_service: ILayerService,
-                 file_system_service: IFileSystemService):
+                 file_system_service: IFileSystemService,
+                 translation_service: Optional[ITranslationService] = None):
         """
         Initialize the field project import service.
         
@@ -80,6 +81,7 @@ class FieldProjectImportService(IFieldProjectImportService):
         self._settings_manager = settings_manager
         self._layer_service = layer_service
         self._file_system_service = file_system_service
+        self._translation_service = translation_service
     
     def import_field_projects(self, project_paths: List[str]) -> ValidationResult:
         """
@@ -98,6 +100,7 @@ class FieldProjectImportService(IFieldProjectImportService):
             # Collect all features from all projects
             all_objects_features = []
             all_features_features = []
+            all_small_finds_features = []
             processed_projects = 0
             failed_projects = 0
             
@@ -131,14 +134,17 @@ class FieldProjectImportService(IFieldProjectImportService):
                     # Filter out already processed layer types
                     filtered_layer_files = {
                         'objects': layer_files['objects'] if 'objects' not in processed_layers else [],
-                        'features': layer_files['features'] if 'features' not in processed_layers else []
+                        'features': layer_files['features'] if 'features' not in processed_layers else [],
+                        'small_finds': layer_files['small_finds'] if 'small_finds' not in processed_layers else []
                     }
                     
                     individual_features = self._process_individual_layers(filtered_layer_files)
                     print(f"  Individual objects: {len(individual_features.get('objects', []))}")
                     print(f"  Individual features: {len(individual_features.get('features', []))}")
+                    print(f"  Individual small finds: {len(individual_features.get('small_finds', []))}")
                     all_objects_features.extend(individual_features.get('objects', []))
                     all_features_features.extend(individual_features.get('features', []))
+                    all_small_finds_features.extend(individual_features.get('small_finds', []))
                     
                     processed_projects += 1
                     
@@ -149,6 +155,7 @@ class FieldProjectImportService(IFieldProjectImportService):
             
             print(f"Total objects features collected: {len(all_objects_features)}")
             print(f"Total features features collected: {len(all_features_features)}")
+            print(f"Total small finds features collected: {len(all_small_finds_features)}")
             
             # Create merged layers
             layers_created = 0
@@ -163,6 +170,15 @@ class FieldProjectImportService(IFieldProjectImportService):
                 features_layer = self._create_merged_layer("New Features", all_features_features)
                 if features_layer:
                     QgsProject.instance().addMapLayer(features_layer)
+                    layers_created += 1
+            
+            if all_small_finds_features:
+                layer_name = "New Small Finds"
+                if self._translation_service:
+                    layer_name = self._translation_service.translate("New Small Finds")
+                small_finds_layer = self._create_merged_layer(layer_name, all_small_finds_features)
+                if small_finds_layer:
+                    QgsProject.instance().addMapLayer(small_finds_layer)
                     layers_created += 1
             
             # Archive projects if archive folder is configured
@@ -193,7 +209,8 @@ class FieldProjectImportService(IFieldProjectImportService):
         """
         layer_files = {
             'objects': [],
-            'features': []
+            'features': [],
+            'small_finds': []
         }
         
         if not os.path.exists(project_path):
@@ -218,8 +235,12 @@ class FieldProjectImportService(IFieldProjectImportService):
             elif self._is_features_layer_file(filename):
                 print(f"    -> Recognized as Features layer")
                 layer_files['features'].append(file_path)
+            # Check for Small Finds layer files
+            elif self._is_small_finds_layer_file(filename):
+                print(f"    -> Recognized as Small Finds layer")
+                layer_files['small_finds'].append(file_path)
             else:
-                print(f"    -> Not recognized as Objects or Features layer")
+                print(f"    -> Not recognized as Objects, Features, or Small Finds layer")
         
         return layer_files
     
@@ -235,7 +256,8 @@ class FieldProjectImportService(IFieldProjectImportService):
         """
         features = {
             'objects': [],
-            'features': []
+            'features': [],
+            'small_finds': []
         }
         
         try:
@@ -270,8 +292,13 @@ class FieldProjectImportService(IFieldProjectImportService):
                             layer_features = list(layer.getFeatures())
                             print(f"  Found {len(layer_features)} features in {layer_name}")
                             features['features'].extend(layer_features)
+                        elif self._is_small_finds_layer_name(layer_name):
+                            print(f"Processing {layer_name} as Small Finds layer")
+                            layer_features = list(layer.getFeatures())
+                            print(f"  Found {len(layer_features)} features in {layer_name}")
+                            features['small_finds'].extend(layer_features)
                         else:
-                            print(f"Layer {layer_name} not recognized as Objects or Features layer")
+                            print(f"Layer {layer_name} not recognized as Objects, Features, or Small Finds layer")
         
         except Exception as e:
             print(f"Error processing data.gpkg {data_gpkg_path}: {str(e)}")
@@ -521,6 +548,12 @@ class FieldProjectImportService(IFieldProjectImportService):
         return (filename_lower.endswith('.gpkg') and 
                 ('features' in filename_lower or 'feat' in filename_lower))
     
+    def _is_small_finds_layer_file(self, filename: str) -> bool:
+        """Check if a filename represents a Small Finds layer file."""
+        filename_lower = filename.lower()
+        return (filename_lower.endswith('.gpkg') and 
+                ('small_finds' in filename_lower or 'small_finds' in filename_lower))
+    
     def _is_objects_layer_name(self, layer_name: str) -> bool:
         """Check if a layer name represents an Objects layer."""
         # Ignore log layers
@@ -554,6 +587,23 @@ class FieldProjectImportService(IFieldProjectImportService):
         # Fallback to common patterns
         layer_name_lower = layer_name.lower()
         return ('features' in layer_name_lower or 'feat' in layer_name_lower)
+    
+    def _is_small_finds_layer_name(self, layer_name: str) -> bool:
+        """Check if a layer name represents a Small Finds layer."""
+        # Ignore log layers
+        if layer_name.lower().startswith('log_'):
+            return False
+        
+        # Get configured small finds layer name
+        small_finds_layer_id = self._settings_manager.get_value('small_finds_layer', '')
+        if small_finds_layer_id:
+            layer_info = self._layer_service.get_layer_info(small_finds_layer_id)
+            if layer_info and layer_info['name'].lower() == layer_name.lower():
+                return True
+        
+        # Fallback to common patterns
+        layer_name_lower = layer_name.lower()
+        return ('small_finds' in layer_name_lower or 'small_finds' in layer_name_lower)
     
     def _get_crs_string(self, crs) -> str:
         """Get CRS string from QgsCoordinateReferenceSystem object."""

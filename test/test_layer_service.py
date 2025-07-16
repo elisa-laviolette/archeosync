@@ -311,3 +311,137 @@ class TestLayerService(unittest.TestCase):
         
         # Method should not raise exception and should handle it gracefully
         # No assertions needed as we're just testing that no exception is raised 
+
+    def test_is_valid_point_or_multipoint_layer_valid(self):
+        """Test validation of valid point/multipoint layer."""
+        # Create mock layer with point geometry
+        mock_layer = Mock()
+        mock_layer.geometryType.return_value = 1  # Point/MultiPoint geometry type
+        
+        with patch.object(self.layer_service, 'get_layer_by_id', return_value=mock_layer):
+            result = self.layer_service.is_valid_point_or_multipoint_layer("test_layer")
+            self.assertTrue(result)
+
+    def test_is_valid_point_or_multipoint_layer_invalid(self):
+        """Test validation of invalid point/multipoint layer."""
+        # Create mock layer with polygon geometry
+        mock_layer = Mock()
+        mock_layer.geometryType.return_value = 2  # Polygon geometry type
+        
+        with patch.object(self.layer_service, 'get_layer_by_id', return_value=mock_layer):
+            result = self.layer_service.is_valid_point_or_multipoint_layer("test_layer")
+            self.assertFalse(result)
+
+    def test_is_valid_point_or_multipoint_layer_not_found(self):
+        """Test validation of point/multipoint layer that doesn't exist."""
+        with patch.object(self.layer_service, 'get_layer_by_id', return_value=None):
+            result = self.layer_service.is_valid_point_or_multipoint_layer("nonexistent_layer")
+            self.assertFalse(result)
+
+    def test_is_valid_no_geometry_layer_valid(self):
+        """Test validation of valid no geometry layer."""
+        # Create mock layer with no geometry
+        mock_layer = Mock()
+        mock_layer.geometryType.return_value = 0  # NoGeometry type
+        
+        with patch.object(self.layer_service, 'get_layer_by_id', return_value=mock_layer):
+            result = self.layer_service.is_valid_no_geometry_layer("test_layer")
+            self.assertTrue(result)
+
+    def test_is_valid_no_geometry_layer_invalid(self):
+        """Test validation of invalid no geometry layer."""
+        # Create mock layer with point geometry
+        mock_layer = Mock()
+        mock_layer.geometryType.return_value = 1  # Point geometry type
+        
+        with patch.object(self.layer_service, 'get_layer_by_id', return_value=mock_layer):
+            result = self.layer_service.is_valid_no_geometry_layer("test_layer")
+            self.assertFalse(result)
+
+    def test_is_valid_no_geometry_layer_not_found(self):
+        """Test validation of no geometry layer that doesn't exist."""
+        with patch.object(self.layer_service, 'get_layer_by_id', return_value=None):
+            result = self.layer_service.is_valid_no_geometry_layer("nonexistent_layer")
+            self.assertFalse(result)
+
+    def test_get_point_and_multipoint_layers_empty_project(self):
+        """Test getting point and multipoint layers when project is empty."""
+        # Mock empty project
+        with patch('services.layer_service.QgsProject') as mock_project:
+            mock_project.instance.return_value.mapLayers.return_value = {}
+            self.layer_service = QGISLayerService()
+            point_layers = self.layer_service.get_point_and_multipoint_layers()
+            self.assertEqual(len(point_layers), 0)
+
+    def test_get_point_and_multipoint_layers_with_layers(self):
+        """Test getting point and multipoint layers when layers exist."""
+        # Create mock point layer
+        mock_point_layer = create_autospec(QgsVectorLayer)
+        mock_point_layer.id.return_value = "point_layer_1"
+        mock_point_layer.name.return_value = "Point Layer 1"
+        mock_point_layer.source.return_value = "test_source"
+        mock_crs = Mock()
+        mock_crs.authid.return_value = "EPSG:4326"
+        mock_point_layer.crs.return_value = mock_crs
+        mock_point_layer.featureCount.return_value = 5
+        mock_point_layer.geometryType.return_value = 1  # Point/MultiPoint geometry type
+        mock_point_layer.isValid.return_value = True
+
+        # Prepare the layers dict
+        layers_dict = {"point_layer_1": mock_point_layer}
+
+        # Patch isinstance to return True for any layer in layers_dict
+        def mock_isinstance(obj, cls):
+            return obj in layers_dict.values()
+
+        # Mock project with layers
+        with patch('services.layer_service.QgsProject') as mock_project, \
+             patch('services.layer_service.isinstance', side_effect=mock_isinstance):
+            mock_project.instance.return_value.mapLayers.return_value = layers_dict
+            self.layer_service = QGISLayerService()
+            point_layers = self.layer_service.get_point_and_multipoint_layers()
+            
+            self.assertEqual(len(point_layers), 1)
+            self.assertEqual(point_layers[0]['id'], "point_layer_1")
+            self.assertEqual(point_layers[0]['name'], "Point Layer 1")
+
+    def test_get_no_geometry_layers_empty_project(self):
+        """Test getting no geometry layers when project is empty."""
+        # Mock empty project
+        with patch('services.layer_service.QgsProject') as mock_project:
+            mock_project.instance.return_value.mapLayers.return_value = {}
+            self.layer_service = QGISLayerService()
+            no_geom_layers = self.layer_service.get_no_geometry_layers()
+            self.assertEqual(len(no_geom_layers), 0)
+
+    def test_get_no_geometry_layers_with_layers(self):
+        """Test getting no geometry layers when layers exist."""
+        # Create mock no geometry layer
+        mock_no_geom_layer = create_autospec(QgsVectorLayer)
+        mock_no_geom_layer.id.return_value = "no_geom_layer_1"
+        mock_no_geom_layer.name.return_value = "No Geometry Layer 1"
+        mock_no_geom_layer.source.return_value = "test_source"
+        mock_crs = Mock()
+        mock_crs.authid.return_value = "EPSG:4326"
+        mock_no_geom_layer.crs.return_value = mock_crs
+        mock_no_geom_layer.featureCount.return_value = 10
+        mock_no_geom_layer.geometryType.return_value = 0  # NoGeometry type
+        mock_no_geom_layer.isValid.return_value = True
+
+        # Prepare the layers dict
+        layers_dict = {"no_geom_layer_1": mock_no_geom_layer}
+
+        # Patch isinstance to return True for any layer in layers_dict
+        def mock_isinstance(obj, cls):
+            return obj in layers_dict.values()
+
+        # Mock project with layers
+        with patch('services.layer_service.QgsProject') as mock_project, \
+             patch('services.layer_service.isinstance', side_effect=mock_isinstance):
+            mock_project.instance.return_value.mapLayers.return_value = layers_dict
+            self.layer_service = QGISLayerService()
+            no_geom_layers = self.layer_service.get_no_geometry_layers()
+            
+            self.assertEqual(len(no_geom_layers), 1)
+            self.assertEqual(no_geom_layers[0]['id'], "no_geom_layer_1")
+            self.assertEqual(no_geom_layers[0]['name'], "No Geometry Layer 1") 

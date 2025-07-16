@@ -166,6 +166,59 @@ class QGISLayerService(ILayerService):
                 layers.append(layer_info)
         
         return layers
+
+    def get_point_and_multipoint_layers(self) -> List[Dict[str, Any]]:
+        """
+        Get all point and multipoint layers from the current QGIS project.
+        This method is specifically for small finds layers which can be
+        either point or multipoint geometry types.
+        
+        Returns:
+            List of dictionaries containing layer information
+        """
+        layers = []
+        project = QgsProject.instance()
+        
+        for layer in project.mapLayers().values():
+            # Check if it's a vector layer with point or multipoint geometry
+            # Geometry types: 1 = Point/MultiPoint
+            if isinstance(layer, QgsVectorLayer) and layer.geometryType() == 1:
+                layer_info = {
+                    'id': layer.id(),
+                    'name': layer.name(),
+                    'source': layer.source(),
+                    'crs': layer.crs().authid() if layer.crs() else 'Unknown',
+                    'feature_count': layer.featureCount()
+                }
+                layers.append(layer_info)
+        
+        return layers
+
+    def get_no_geometry_layers(self) -> List[Dict[str, Any]]:
+        """
+        Get all layers with no geometry from the current QGIS project.
+        This method is specifically for small finds layers without geometry.
+        
+        Returns:
+            List of dictionaries containing layer information
+        """
+        layers = []
+        project = QgsProject.instance()
+        
+        for layer in project.mapLayers().values():
+            # Check if it's a vector layer with no geometry
+            # Geometry types: 0 = NoGeometry
+            if isinstance(layer, QgsVectorLayer) and layer.geometryType() == 0:
+                layer_info = {
+                    'id': layer.id(),
+                    'name': layer.name(),
+                    'source': layer.source(),
+                    'crs': layer.crs().authid() if layer.crs() else 'Unknown',
+                    'feature_count': layer.featureCount()
+                }
+                layers.append(layer_info)
+        
+        return layers
     
     def get_vector_layers(self) -> List[Dict[str, Any]]:
         """
@@ -242,6 +295,42 @@ class QGISLayerService(ILayerService):
         
         # Geometry types: 2 = Polygon/MultiPolygon, 3 = Polygon
         return layer.geometryType() in [2, 3]
+
+    def is_valid_point_or_multipoint_layer(self, layer_id: str) -> bool:
+        """
+        Check if a layer is a valid point or multipoint layer.
+        This method is specifically for small finds layers.
+        
+        Args:
+            layer_id: The layer ID to check
+            
+        Returns:
+            True if the layer is a valid point or multipoint layer, False otherwise
+        """
+        layer = self.get_layer_by_id(layer_id)
+        if layer is None:
+            return False
+        
+        # Geometry types: 1 = Point/MultiPoint
+        return layer.geometryType() == 1
+
+    def is_valid_no_geometry_layer(self, layer_id: str) -> bool:
+        """
+        Check if a layer has no geometry.
+        This method is specifically for small finds layers without geometry.
+        
+        Args:
+            layer_id: The layer ID to check
+            
+        Returns:
+            True if the layer has no geometry, False otherwise
+        """
+        layer = self.get_layer_by_id(layer_id)
+        if layer is None:
+            return False
+        
+        # Geometry types: 0 = NoGeometry
+        return layer.geometryType() == 0
     
     def get_layer_info(self, layer_id: str) -> Optional[Dict[str, Any]]:
         """

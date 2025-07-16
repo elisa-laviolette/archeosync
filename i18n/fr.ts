@@ -133,6 +133,16 @@ Consultez la console pour plus de détails sur les erreurs.</translation>
         <source>Field Project Import Error</source>
         <translation>Erreur d'importation du projet de terrain</translation>
     </message>
+    <message>
+        <location filename="../services/project_creation_service.py" line="189"/>
+        <source>Small Finds</source>
+        <translation>Petits objets</translation>
+    </message>
+    <message>
+        <location filename="../services/field_project_import_service.py" line="173"/>
+        <source>New Small Finds</source>
+        <translation>Nouveaux petits objets</translation>
+    </message>
 </context>
 <context>
     <name>ColumnMappingDialog</name>
@@ -495,6 +505,11 @@ Consultez la console pour plus de détails sur les erreurs.</translation>
         <translation>Champs supplémentaires :</translation>
     </message>
     <message>
+        <location filename="../ui/settings_dialog.py" line="226"/>
+        <source>Small Finds Layer:</source>
+        <translation>Couche des petits objets :</translation>
+    </message>
+    <message>
         <location filename="../ui/settings_dialog.py" line="233"/>
         <source>Layers &amp; Fields</source>
         <translation>Couches et champs</translation>
@@ -595,6 +610,11 @@ Consultez la console pour plus de détails sur les erreurs.</translation>
         <translation>-- Sélectionnez un champ niveau --</translation>
     </message>
     <message>
+        <location filename="../ui/settings_dialog.py" line="600"/>
+        <source>-- Select a point, multipoint, or no geometry layer --</source>
+        <translation>-- Sélectionnez une couche ponctuelle, multiponctuelle ou sans géométrie --</translation>
+    </message>
+    <message>
         <location filename="../ui/settings_dialog.py" line="372"/>
         <source>Select additional vector layers to include in field projects. </source>
         <translation>Sélectionnez des couches vectorielles supplémentaires à inclure dans les projets de terrain.</translation>
@@ -683,6 +703,11 @@ Consultez la console pour plus de détails sur les erreurs.</translation>
         <location filename="../ui/settings_dialog.py" line="580"/>
         <source>Failed to refresh features layer list: {str(e)}</source>
         <translation>Échec du rafraîchissement de la liste des couches d'entités : {str(e)}</translation>
+    </message>
+    <message>
+        <location filename="../ui/settings_dialog.py" line="623"/>
+        <source>Failed to refresh small finds layer list: {str(e)}</source>
+        <translation>Échec du rafraîchissement de la liste des couches de petits objets : {str(e)}</translation>
     </message>
     <message>
         <location filename="../ui/settings_dialog.py" line="616"/>

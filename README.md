@@ -14,9 +14,10 @@ A QGIS plugin for archaeologists to prepare data for field work and import it ba
 - **Background Image Selection**: Intelligent selection of overlapping raster layers for each recording area
 - **Raster Processing**: Automatic clipping of background images to recording areas with configurable offsets
 - **Smart Field Validation**: Automatic detection and validation of object numbering and level fields
-- **Empty Layer Creation**: Automatic creation of empty "Objects" and "Features" layers for offline editing
+- **Empty Layer Creation**: Automatic creation of empty "Objects", "Features", and "Small Finds" layers for offline editing
+- **Small Finds Support**: Comprehensive support for small finds layers with point, multipoint, and no geometry types
 - **CSV Import Service**: Comprehensive CSV import with column mapping and validation
-- **Field Project Import**: Import completed field projects and merge Objects/Features layers
+- **Field Project Import**: Import completed field projects and merge Objects/Features/Small Finds layers
 - **Column Mapping Dialog**: Interactive column mapping for CSV files with different structures
 - **Intelligent Data Filtering**: Automatic filtering of field projects to include only relevant data:
   - **Recording Area Filtering**: Keeps only the selected recording area feature
@@ -47,6 +48,7 @@ A QGIS plugin for archaeologists to prepare data for field work and import it ba
    - **Recording Areas Layer**: Select the layer containing recording area polygons
    - **Objects Layer**: Select the layer for archaeological objects
    - **Features Layer**: Select the layer for archaeological features
+   - **Small Finds Layer**: Select the layer for small finds (supports point, multipoint, and no geometry types)
    - **Objects Field Configuration**: Configure number and level fields for the objects layer
    - **Extra Layers for Field Projects**: Select additional vector layers to include in field projects
 
@@ -112,8 +114,8 @@ The raster processing service uses GDAL for high-quality clipping operations and
 
 #### Field Project Import Features
 - **Data.gpkg Processing**: Automatically processes data.gpkg files from field projects
-- **Layer Merging**: Merges Objects and Features layers from multiple projects
-- **Layer Creation**: Creates new "New Objects" and "New Features" layers in the project
+- **Layer Merging**: Merges Objects, Features, and Small Finds layers from multiple projects
+- **Layer Creation**: Creates new "New Objects", "New Features", and "New Small Finds" layers in the project
 - **Feature Collection**: Collects all features from completed field recordings
 - **Automatic Archiving**: Moves imported field projects to the configured archive folder after successful import
 - **Validation**: Validates project structure and data integrity
@@ -165,7 +167,21 @@ The project includes comprehensive test coverage with robust validation and qual
 
 ## Recent Updates
 
-### Version 0.13.0 (Latest)
+### Version 0.14.0 (Latest)
+- **Small Finds Layer Support**: Added comprehensive support for small finds layers in field project creation and import
+  - **Small Finds Configuration**: New layer selector in settings dialog supporting point, multipoint, and no geometry types
+  - **Field Project Creation**: Small finds layers automatically included in field projects with empty layer creation
+  - **Field Project Import**: Enhanced import functionality to process and merge small finds layers from multiple projects
+  - **Layer Validation**: Comprehensive validation for small finds layer geometry types and relationships
+  - **Internationalization**: Complete French translations for small finds feature ("Petits objets")
+  - **Service Architecture**: Enhanced services with optional translation support for internationalization
+- **Technical Improvements**: Extended layer service with small finds support
+  - New methods for point/multipoint and no geometry layer detection
+  - Enhanced configuration validation for small finds layers
+  - Comprehensive test coverage for all small finds functionality
+  - Integration with existing field project workflow
+
+### Version 0.13.0
 - **Raster Enhancement Settings**: Added comprehensive raster enhancement capabilities for field projects
   - **Brightness Control**: Adjust brightness from -255 to +255 with slider controls
   - **Contrast Control**: Adjust contrast from -100 to +100 for better feature distinction

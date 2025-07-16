@@ -129,7 +129,7 @@ class TestSettingsDialog:
         assert hasattr(self.dialog, '_tab_widget')
         assert self.dialog._tab_widget.count() == 3
         assert self.dialog._tab_widget.tabText(0) == "Folders"
-        assert self.dialog._tab_widget.tabText(1) == "Layers"
+        assert self.dialog._tab_widget.tabText(1) == "Layers & Fields"
         assert self.dialog._tab_widget.tabText(2) == "Raster"
 
     def test_field_projects_input_properties(self):

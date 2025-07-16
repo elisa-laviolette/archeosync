@@ -116,7 +116,7 @@ class TestSettingsDialog(unittest.TestCase):
             call('recording_areas_layer', ''),
             call('objects_layer', ''),
             call('features_layer', ''),
-
+            call('small_finds_layer', ''),
             call('raster_clipping_offset', 0.2)
         ]
         self.mock_settings_manager.get_value.assert_has_calls(expected_calls)
@@ -203,6 +203,7 @@ class TestSettingsDialog(unittest.TestCase):
             'objects_number_field': '',
             'objects_level_field': '',
             'features_layer': 'test_features_layer_id',
+            'small_finds_layer': '',
             'raster_clipping_offset': 0.2,
             'raster_brightness': 0,
             'raster_contrast': 0,
@@ -254,6 +255,7 @@ class TestSettingsDialog(unittest.TestCase):
             'objects_number_field': '',
             'objects_level_field': '',
             'features_layer': 'test_features_layer_id',
+            'small_finds_layer': '',
             'raster_clipping_offset': 0.2,
             'raster_brightness': 0,
             'raster_contrast': 0,
@@ -413,6 +415,7 @@ class TestSettingsDialog(unittest.TestCase):
             call('objects_number_field', ''),
             call('objects_level_field', ''),
             call('features_layer', ''),
+            call('small_finds_layer', ''),
             call('raster_clipping_offset', 0.2),
             call('raster_brightness', 0),
             call('raster_contrast', 0),

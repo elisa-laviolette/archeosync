@@ -98,7 +98,8 @@ class ArcheoSyncPlugin:
             self._settings_manager,
             self._layer_service,
             self._file_system_service,
-            self._raster_processing_service
+            self._raster_processing_service,
+            self._translation_service
         )
         
         # Initialize CSV import service
@@ -108,7 +109,8 @@ class ArcheoSyncPlugin:
         self._field_project_import_service = FieldProjectImportService(
             self._settings_manager,
             self._layer_service,
-            self._file_system_service
+            self._file_system_service,
+            self._translation_service
         )
         
         # Initialize configuration validator
