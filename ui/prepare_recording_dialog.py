@@ -44,8 +44,7 @@ class PrepareRecordingDialog(QtWidgets.QDialog):
     """
     Dialog for preparing recording data.
     
-    This dialog shows the number of selected entities in the Recording areas layer
-    and provides a clean interface for recording preparation.
+    All user-facing strings are wrapped in self.tr() for translation.
     """
     
     def __init__(self, 
@@ -72,7 +71,7 @@ class PrepareRecordingDialog(QtWidgets.QDialog):
     
     def _setup_ui(self) -> None:
         """Set up the user interface components."""
-        self.setWindowTitle("Prepare Recording")
+        self.setWindowTitle(self.tr("Prepare Recording"))
         self.setGeometry(0, 0, 400, 200)
         self.setModal(True)
         
@@ -80,7 +79,7 @@ class PrepareRecordingDialog(QtWidgets.QDialog):
         main_layout = QtWidgets.QVBoxLayout(self)
         
         # Add title
-        title_label = QtWidgets.QLabel("Prepare Recording")
+        title_label = QtWidgets.QLabel(self.tr("Prepare Recording"))
         title_label.setAlignment(Qt.AlignCenter)
         title_label.setStyleSheet("font-size: 16px; font-weight: bold; margin: 10px;")
         main_layout.addWidget(title_label)
@@ -93,15 +92,15 @@ class PrepareRecordingDialog(QtWidgets.QDialog):
     
     def _create_info_section(self, parent_layout: QtWidgets.QVBoxLayout) -> None:
         """Create the information display section."""
-        info_group = QtWidgets.QGroupBox("Recording Areas Information")
+        info_group = QtWidgets.QGroupBox(self.tr("Recording Areas Information"))
         info_layout = QtWidgets.QVBoxLayout(info_group)
         
         # Recording areas layer info
-        self._recording_areas_label = QtWidgets.QLabel("Recording Areas Layer: Not configured")
+        self._recording_areas_label = QtWidgets.QLabel(self.tr("Recording Areas Layer: Not configured"))
         info_layout.addWidget(self._recording_areas_label)
         
         # Selected features count
-        self._selected_count_label = QtWidgets.QLabel("Selected Entities: 0")
+        self._selected_count_label = QtWidgets.QLabel(self.tr("Selected Entities: 0"))
         self._selected_count_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #2E86AB;")
         info_layout.addWidget(self._selected_count_label)
         
@@ -110,9 +109,7 @@ class PrepareRecordingDialog(QtWidgets.QDialog):
         
         # Instructions
         instructions = QtWidgets.QLabel(
-            "To prepare recording:\n"
-            "1. Select entities in the Recording areas layer\n"
-            "2. Click 'Prepare Recording' to continue"
+            self.tr("To prepare recording:\n1. Select entities in the Recording areas layer\n2. Click 'Prepare Recording' to continue")
         )
         instructions.setStyleSheet("color: #666; margin-top: 10px;")
         info_layout.addWidget(instructions)
@@ -131,6 +128,9 @@ class PrepareRecordingDialog(QtWidgets.QDialog):
         self._button_box.accepted.connect(self.accept)
         self._button_box.rejected.connect(self.reject)
         
+        # Set button texts for translation
+        self._button_box.button(QtWidgets.QDialogButtonBox.Cancel).setText(self.tr("Cancel"))
+        
         # Initially hide the OK button - it will be shown when features are selected
         self._button_box.button(QtWidgets.QDialogButtonBox.Ok).setVisible(False)
         
@@ -147,15 +147,15 @@ class PrepareRecordingDialog(QtWidgets.QDialog):
         level_field = self._settings_manager.get_value('objects_level_field', '')
         
         # Set up columns
-        columns = ["Name"]
+        columns = [self.tr("Name")]
         if objects_layer_id and number_field:
-            columns.append("Last object number")
-            columns.append("Next object number")
+            columns.append(self.tr("Last object number"))
+            columns.append(self.tr("Next object number"))
         if objects_layer_id and level_field:
-            columns.append("Last level")
-            columns.append("Next level")
+            columns.append(self.tr("Last level"))
+            columns.append(self.tr("Next level"))
         # Always add Background image column
-        columns.append("Background image")
+        columns.append(self.tr("Background image"))
         
         self._entities_table.setColumnCount(len(columns))
         self._entities_table.setHorizontalHeaderLabels(columns)
@@ -178,8 +178,8 @@ class PrepareRecordingDialog(QtWidgets.QDialog):
             recording_areas_layer_id = self._settings_manager.get_value('recording_areas_layer', '')
             
             if not recording_areas_layer_id:
-                self._recording_areas_label.setText("Recording Areas Layer: Not configured")
-                self._selected_count_label.setText("Selected Entities: 0")
+                self._recording_areas_label.setText(self.tr("Recording Areas Layer: Not configured"))
+                self._selected_count_label.setText(self.tr("Selected Entities: 0"))
                 self._populate_entities_table([])
                 self._button_box.button(QtWidgets.QDialogButtonBox.Ok).setVisible(False)
                 return
@@ -187,20 +187,20 @@ class PrepareRecordingDialog(QtWidgets.QDialog):
             # Get layer info
             layer_info = self._layer_service.get_layer_info(recording_areas_layer_id)
             if layer_info is None:
-                self._recording_areas_label.setText("Recording Areas Layer: Layer not found")
-                self._selected_count_label.setText("Selected Entities: 0")
+                self._recording_areas_label.setText(self.tr("Recording Areas Layer: Layer not found"))
+                self._selected_count_label.setText(self.tr("Selected Entities: 0"))
                 self._populate_entities_table([])
                 self._button_box.button(QtWidgets.QDialogButtonBox.Ok).setVisible(False)
                 return
             
             # Update layer name
-            self._recording_areas_label.setText(f"Recording Areas Layer: {layer_info['name']}")
+            self._recording_areas_label.setText(self.tr(f"Recording Areas Layer: {layer_info['name']}"))
             
             # Get the actual layer to access selected features
             recording_layer = self._layer_service.get_layer_by_id(recording_areas_layer_id)
             if recording_layer is None:
-                self._recording_areas_label.setText("Recording Areas Layer: Layer not found")
-                self._selected_count_label.setText("Selected Entities: 0")
+                self._recording_areas_label.setText(self.tr("Recording Areas Layer: Layer not found"))
+                self._selected_count_label.setText(self.tr("Selected Entities: 0"))
                 self._populate_entities_table([])
                 self._button_box.button(QtWidgets.QDialogButtonBox.Ok).setVisible(False)
                 return
@@ -210,7 +210,7 @@ class PrepareRecordingDialog(QtWidgets.QDialog):
             selected_count = len(selected_features)
             
             # Update count label
-            self._selected_count_label.setText(f"Selected Entities: {selected_count}")
+            self._selected_count_label.setText(self.tr(f"Selected Entities: {selected_count}"))
             
             # Populate table with actual features
             self._populate_entities_table(selected_features)
@@ -222,15 +222,15 @@ class PrepareRecordingDialog(QtWidgets.QDialog):
             if has_selection:
                 ok_button.setVisible(True)
                 ok_button.setEnabled(True)
-                ok_button.setText("Prepare Recording")
+                ok_button.setText(self.tr("Prepare Recording"))
             else:
                 ok_button.setVisible(False)
                 ok_button.setEnabled(False)
                 
         except Exception as e:
             print("PrepareRecordingDialog error:", e)
-            self._recording_areas_label.setText("Recording Areas Layer: Error")
-            self._selected_count_label.setText("Selected Entities: Error")
+            self._recording_areas_label.setText(self.tr("Recording Areas Layer: Error"))
+            self._selected_count_label.setText(self.tr("Selected Entities: Error"))
             self._populate_entities_table([])
             self._button_box.button(QtWidgets.QDialogButtonBox.Ok).setVisible(False)
     

@@ -26,12 +26,12 @@
 #Add iso code for any locales you want to support here (space separated)
 # default is no locales
 # LOCALES = af
-LOCALES =
+LOCALES = fr
 
 # If locales are enabled, set the name of the lrelease binary on your system. If
 # you have trouble compiling the translations, you may have to specify the full path to
 # lrelease
-#LRELEASE = lrelease
+LRELEASE = lrelease
 #LRELEASE = lrelease-qt4
 
 
@@ -246,6 +246,13 @@ transup:
 	@echo "------------------------------------------------"
 	@chmod +x scripts/update-strings.sh
 	@scripts/update-strings.sh $(LOCALES)
+
+# Convenient rule to update and compile translations in one step
+translations: transup transcompile
+	@echo
+	@echo "----------------------------------------"
+	@echo "Translation files updated and compiled."
+	@echo "----------------------------------------"
 
 transcompile:
 	@echo

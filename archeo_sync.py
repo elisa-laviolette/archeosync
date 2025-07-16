@@ -51,30 +51,7 @@ class ArcheoSyncPlugin:
     """
     ArcheoSync QGIS Plugin.
     
-    This plugin provides functionality for archaeologists to prepare data for field work
-    and import it back into the project. It follows clean architecture principles with
-    dependency injection and separation of concerns.
-    
-    Key Features:
-    - Field project preparation from templates
-    - Total station data import from CSV files
-    - Completed project import and processing
-    - QField integration for mobile data collection
-    - Recording areas layer selection from QGIS project
-    
-    Architecture:
-    - Dependency Injection: All services are injected for testability
-    - Interface Segregation: Services depend on interfaces, not concretions
-    - Single Responsibility: Each class has a single, well-defined purpose
-    - Clean Separation: UI, business logic, and data access are separated
-    
-    Usage:
-        # Plugin is automatically initialized by QGIS
-        # Access settings through the settings manager
-        settings = plugin.settings_manager.get_value('field_projects_folder')
-        
-        # Access translation service
-        translated_text = plugin.translation_service.translate('Hello World')
+    All user-facing strings are wrapped in self.tr() for translation.
     """
     
     def __init__(self, iface):
@@ -101,7 +78,7 @@ class ArcheoSyncPlugin:
         # Initialize translation service
         self._translation_service = QGISTranslationService(
             self._plugin_dir, 
-            'ArcheoSync'
+            'ArcheoSyncPlugin'
         )
         
         # Initialize settings manager
@@ -187,10 +164,10 @@ class ArcheoSyncPlugin:
         action.setEnabled(enabled_flag)
         
         if status_tip is not None:
-            action.setStatusTip(status_tip)
+            action.setStatusTip(self.tr(status_tip))
         
         if whats_this is not None:
-            action.setWhatsThis(whats_this)
+            action.setWhatsThis(self.tr(whats_this))
         
         if add_to_toolbar:
             self._iface.addToolBarIcon(action)
@@ -289,8 +266,8 @@ class ArcheoSyncPlugin:
                 from qgis.PyQt.QtWidgets import QMessageBox
                 QMessageBox.warning(
                     self._iface.mainWindow(),
-                    "Configuration Error",
-                    "Required configuration is missing. Please check your settings."
+                    self.tr("Configuration Error"),
+                    self.tr("Required configuration is missing. Please check your settings.")
                 )
                 return
             
@@ -300,8 +277,8 @@ class ArcheoSyncPlugin:
                 from qgis.PyQt.QtWidgets import QMessageBox
                 QMessageBox.warning(
                     self._iface.mainWindow(),
-                    "Layer Error",
-                    "Recording areas layer not found."
+                    self.tr("Layer Error"),
+                    self.tr("Recording areas layer not found.")
                 )
                 return
             
@@ -310,8 +287,8 @@ class ArcheoSyncPlugin:
                 from qgis.PyQt.QtWidgets import QMessageBox
                 QMessageBox.warning(
                     self._iface.mainWindow(),
-                    "No Selection",
-                    "No recording areas are selected."
+                    self.tr("No Selection"),
+                    self.tr("No recording areas are selected.")
                 )
                 return
             
@@ -432,22 +409,22 @@ class ArcheoSyncPlugin:
             if error_count == 0:
                 QMessageBox.information(
                     self._iface.mainWindow(),
-                    "Field Project Preparation Complete",
-                    f"Successfully created {success_count} field project(s) in:\n{destination_folder}"
+                    self.tr("Field Project Preparation Complete"),
+                    self.tr(f"Successfully created {success_count} field project(s) in:\n{destination_folder}")
                 )
             else:
                 QMessageBox.warning(
                     self._iface.mainWindow(),
-                    "Field Project Preparation Results",
-                    f"Created {success_count} field project(s) successfully.\n{error_count} project(s) failed.\n\nCheck the console for error details."
+                    self.tr("Field Project Preparation Results"),
+                    self.tr(f"Created {success_count} field project(s) successfully.\n{error_count} project(s) failed.\n\nCheck the console for error details.")
                 )
                 
         except Exception as e:
             from qgis.PyQt.QtWidgets import QMessageBox
             QMessageBox.critical(
                 self._iface.mainWindow(),
-                "Error",
-                f"An error occurred during field project preparation:\n{str(e)}"
+                self.tr("Error"),
+                self.tr(f"An error occurred during field project preparation:\n{str(e)}")
             )
     
     def run_import_data(self) -> None:
@@ -486,8 +463,8 @@ class ArcheoSyncPlugin:
             from qgis.PyQt.QtWidgets import QMessageBox
             QMessageBox.critical(
                 self._iface.mainWindow(),
-                "Error",
-                f"An error occurred during import data processing:\n{str(e)}"
+                self.tr("Error"),
+                self.tr(f"An error occurred during import data processing:\n{str(e)}")
             )
     
     def _process_csv_files(self, csv_files: List[str]) -> None:
@@ -499,7 +476,7 @@ class ArcheoSyncPlugin:
         if not validation_result.is_valid:
             QMessageBox.critical(
                 self._iface.mainWindow(),
-                "CSV Validation Error",
+                self.tr("CSV Validation Error"),
                 validation_result.message
             )
             return
@@ -535,13 +512,13 @@ class ArcheoSyncPlugin:
         if import_result.is_valid:
             QMessageBox.information(
                 self._iface.mainWindow(),
-                "CSV Import Complete",
+                self.tr("CSV Import Complete"),
                 import_result.message
             )
         else:
             QMessageBox.critical(
                 self._iface.mainWindow(),
-                "CSV Import Error",
+                self.tr("CSV Import Error"),
                 import_result.message
             )
     
@@ -555,13 +532,13 @@ class ArcheoSyncPlugin:
         if import_result.is_valid:
             QMessageBox.information(
                 self._iface.mainWindow(),
-                "Field Project Import Complete",
+                self.tr("Field Project Import Complete"),
                 import_result.message
             )
         else:
             QMessageBox.critical(
                 self._iface.mainWindow(),
-                "Field Project Import Error",
+                self.tr("Field Project Import Error"),
                 import_result.message
             )
     

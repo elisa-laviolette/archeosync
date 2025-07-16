@@ -49,9 +49,7 @@ class ImportDataDialog(QtWidgets.QDialog):
     """
     Import Data dialog for ArcheoSync plugin.
     
-    This dialog provides a clean interface for selecting CSV files and completed field projects
-    for import, following the Single Responsibility Principle by focusing only on UI presentation
-    and delegating business logic to injected services.
+    All user-facing strings are wrapped in self.tr() for translation.
     """
     
     def __init__(self, 
@@ -84,22 +82,20 @@ class ImportDataDialog(QtWidgets.QDialog):
     
     def _setup_ui(self) -> None:
         """Set up the user interface components."""
-        self.setWindowTitle("Import Data")
+        self.setWindowTitle(self.tr("Import Data"))
         self.setGeometry(0, 0, 800, 600)
         
         # Create main layout
         main_layout = QtWidgets.QVBoxLayout(self)
         
         # Add title
-        title_label = QtWidgets.QLabel("Import Data")
+        title_label = QtWidgets.QLabel(self.tr("Import Data"))
         title_label.setAlignment(Qt.AlignCenter)
         title_label.setStyleSheet("font-size: 16px; font-weight: bold; margin: 10px;")
         main_layout.addWidget(title_label)
         
         # Add description
-        description_label = QtWidgets.QLabel(
-            "Select CSV files from Total Station data and/or completed field projects to import."
-        )
+        description_label = QtWidgets.QLabel(self.tr("Select CSV files from Total Station data and/or completed field projects to import."))
         description_label.setWordWrap(True)
         description_label.setStyleSheet("margin: 5px; color: #666;")
         main_layout.addWidget(description_label)
@@ -127,14 +123,14 @@ class ImportDataDialog(QtWidgets.QDialog):
     
     def _create_csv_files_section(self) -> QtWidgets.QGroupBox:
         """Create the CSV files selection section."""
-        group = QtWidgets.QGroupBox("Total Station CSV Files")
+        group = QtWidgets.QGroupBox(self.tr("Total Station CSV Files"))
         layout = QtWidgets.QVBoxLayout(group)
         
         # Header with refresh button
         header_layout = QtWidgets.QHBoxLayout()
-        header_label = QtWidgets.QLabel("Available CSV files:")
-        self._csv_refresh_button = QtWidgets.QPushButton("Refresh")
-        self._csv_refresh_button.setToolTip("Refresh the list of CSV files")
+        header_label = QtWidgets.QLabel(self.tr("Available CSV files:"))
+        self._csv_refresh_button = QtWidgets.QPushButton(self.tr("Refresh"))
+        self._csv_refresh_button.setToolTip(self.tr("Refresh the list of CSV files"))
         header_layout.addWidget(header_label)
         header_layout.addStretch()
         header_layout.addWidget(self._csv_refresh_button)
@@ -142,10 +138,10 @@ class ImportDataDialog(QtWidgets.QDialog):
         
         # Select/Deselect all buttons
         select_buttons_layout = QtWidgets.QHBoxLayout()
-        self._csv_select_all_button = QtWidgets.QPushButton("Select All")
-        self._csv_select_all_button.setToolTip("Select all CSV files")
-        self._csv_deselect_all_button = QtWidgets.QPushButton("Deselect All")
-        self._csv_deselect_all_button.setToolTip("Deselect all CSV files")
+        self._csv_select_all_button = QtWidgets.QPushButton(self.tr("Select All"))
+        self._csv_select_all_button.setToolTip(self.tr("Select all CSV files"))
+        self._csv_deselect_all_button = QtWidgets.QPushButton(self.tr("Deselect All"))
+        self._csv_deselect_all_button.setToolTip(self.tr("Deselect all CSV files"))
         select_buttons_layout.addWidget(self._csv_select_all_button)
         select_buttons_layout.addWidget(self._csv_deselect_all_button)
         select_buttons_layout.addStretch()
@@ -157,7 +153,7 @@ class ImportDataDialog(QtWidgets.QDialog):
         layout.addWidget(self._csv_list_widget)
         
         # CSV files info
-        self._csv_info_label = QtWidgets.QLabel("No CSV files found")
+        self._csv_info_label = QtWidgets.QLabel(self.tr("No CSV files found"))
         self._csv_info_label.setStyleSheet("color: #666; font-style: italic;")
         layout.addWidget(self._csv_info_label)
         
@@ -165,14 +161,14 @@ class ImportDataDialog(QtWidgets.QDialog):
     
     def _create_completed_projects_section(self) -> QtWidgets.QGroupBox:
         """Create the completed projects selection section."""
-        group = QtWidgets.QGroupBox("Completed Field Projects")
+        group = QtWidgets.QGroupBox(self.tr("Completed Field Projects"))
         layout = QtWidgets.QVBoxLayout(group)
         
         # Header with refresh button
         header_layout = QtWidgets.QHBoxLayout()
-        header_label = QtWidgets.QLabel("Available completed projects:")
-        self._projects_refresh_button = QtWidgets.QPushButton("Refresh")
-        self._projects_refresh_button.setToolTip("Refresh the list of completed projects")
+        header_label = QtWidgets.QLabel(self.tr("Available completed projects:"))
+        self._projects_refresh_button = QtWidgets.QPushButton(self.tr("Refresh"))
+        self._projects_refresh_button.setToolTip(self.tr("Refresh the list of completed projects"))
         header_layout.addWidget(header_label)
         header_layout.addStretch()
         header_layout.addWidget(self._projects_refresh_button)
@@ -180,10 +176,10 @@ class ImportDataDialog(QtWidgets.QDialog):
         
         # Select/Deselect all buttons
         select_buttons_layout = QtWidgets.QHBoxLayout()
-        self._projects_select_all_button = QtWidgets.QPushButton("Select All")
-        self._projects_select_all_button.setToolTip("Select all completed projects")
-        self._projects_deselect_all_button = QtWidgets.QPushButton("Deselect All")
-        self._projects_deselect_all_button.setToolTip("Deselect all completed projects")
+        self._projects_select_all_button = QtWidgets.QPushButton(self.tr("Select All"))
+        self._projects_select_all_button.setToolTip(self.tr("Select all completed projects"))
+        self._projects_deselect_all_button = QtWidgets.QPushButton(self.tr("Deselect All"))
+        self._projects_deselect_all_button.setToolTip(self.tr("Deselect all completed projects"))
         select_buttons_layout.addWidget(self._projects_select_all_button)
         select_buttons_layout.addWidget(self._projects_deselect_all_button)
         select_buttons_layout.addStretch()
@@ -195,7 +191,7 @@ class ImportDataDialog(QtWidgets.QDialog):
         layout.addWidget(self._projects_list_widget)
         
         # Projects info
-        self._projects_info_label = QtWidgets.QLabel("No completed projects found")
+        self._projects_info_label = QtWidgets.QLabel(self.tr("No completed projects found"))
         self._projects_info_label.setStyleSheet("color: #666; font-style: italic;")
         layout.addWidget(self._projects_info_label)
         
@@ -206,12 +202,12 @@ class ImportDataDialog(QtWidgets.QDialog):
         button_layout = QtWidgets.QHBoxLayout()
         
         # Create Import button
-        self._import_button = QtWidgets.QPushButton("Import")
+        self._import_button = QtWidgets.QPushButton(self.tr("Import"))
         self._import_button.setDefault(True)
         self._import_button.setEnabled(False)  # Initially disabled
         
         # Create Cancel button
-        self._cancel_button = QtWidgets.QPushButton("Cancel")
+        self._cancel_button = QtWidgets.QPushButton(self.tr("Cancel"))
         
         # Add buttons to layout
         button_layout.addStretch()
@@ -257,7 +253,7 @@ class ImportDataDialog(QtWidgets.QDialog):
             self._csv_files = []
             
             if not self._total_station_folder or not self._file_system_service.path_exists(self._total_station_folder):
-                self._csv_info_label.setText("Total Station folder not configured or does not exist")
+                self._csv_info_label.setText(self.tr("Total Station folder not configured or does not exist"))
                 return
             
             # Get CSV files
@@ -280,15 +276,15 @@ class ImportDataDialog(QtWidgets.QDialog):
             
             # Update info label
             if csv_files:
-                self._csv_info_label.setText(f"Found {len(csv_files)} CSV file(s)")
+                self._csv_info_label.setText(self.tr(f"Found {len(csv_files)} CSV file(s)"))
             else:
-                self._csv_info_label.setText("No CSV files found in the Total Station folder")
+                self._csv_info_label.setText(self.tr("No CSV files found in the Total Station folder"))
             
             # Update import button state
             self._update_import_button_state()
                 
         except Exception as e:
-            self._csv_info_label.setText(f"Error scanning CSV files: {str(e)}")
+            self._csv_info_label.setText(self.tr(f"Error scanning CSV files: {str(e)}"))
             self._update_import_button_state()
     
     def _refresh_completed_projects(self) -> None:
@@ -298,7 +294,7 @@ class ImportDataDialog(QtWidgets.QDialog):
             self._completed_projects = []
             
             if not self._completed_projects_folder or not self._file_system_service.path_exists(self._completed_projects_folder):
-                self._projects_info_label.setText("Completed Projects folder not configured or does not exist")
+                self._projects_info_label.setText(self.tr("Completed Projects folder not configured or does not exist"))
                 return
             
             # Get all directories
@@ -327,15 +323,15 @@ class ImportDataDialog(QtWidgets.QDialog):
             
             # Update info label
             if completed_projects:
-                self._projects_info_label.setText(f"Found {len(completed_projects)} completed project(s)")
+                self._projects_info_label.setText(self.tr(f"Found {len(completed_projects)} completed project(s)"))
             else:
-                self._projects_info_label.setText("No completed projects found in the Completed Projects folder")
+                self._projects_info_label.setText(self.tr("No completed projects found in the Completed Projects folder"))
             
             # Update import button state
             self._update_import_button_state()
                 
         except Exception as e:
-            self._projects_info_label.setText(f"Error scanning completed projects: {str(e)}")
+            self._projects_info_label.setText(self.tr(f"Error scanning completed projects: {str(e)}"))
             self._update_import_button_state()
     
     def _select_all_csv_files(self) -> None:

@@ -36,11 +36,9 @@ from qgis.PyQt.QtCore import Qt
 
 class ColumnMappingDialog(QtWidgets.QDialog):
     """
-    Dialog for mapping columns across multiple CSV files.
+    Column Mapping dialog for ArcheoSync plugin.
     
-    This dialog provides a clean interface for users to specify how columns
-    should be matched and combined when importing multiple CSV files with
-    different column structures.
+    All user-facing strings are wrapped in self.tr() for translation.
     """
     
     def __init__(self, column_mapping: Dict[str, List[Optional[str]]], 
@@ -69,22 +67,20 @@ class ColumnMappingDialog(QtWidgets.QDialog):
     
     def _setup_ui(self) -> None:
         """Set up the user interface components."""
-        self.setWindowTitle("Column Mapping")
+        self.setWindowTitle(self.tr("Column Mapping"))
         self.setGeometry(0, 0, 800, 600)
         
         # Create main layout
         main_layout = QtWidgets.QVBoxLayout(self)
         
         # Add title
-        title_label = QtWidgets.QLabel("Map Columns Across CSV Files")
+        title_label = QtWidgets.QLabel(self.tr("Map Columns Across CSV Files"))
         title_label.setAlignment(Qt.AlignCenter)
         title_label.setStyleSheet("font-size: 16px; font-weight: bold; margin: 10px;")
         main_layout.addWidget(title_label)
         
         # Add description
-        description_label = QtWidgets.QLabel(
-            "Your CSV files have different column names. Please specify how columns should be matched:"
-        )
+        description_label = QtWidgets.QLabel(self.tr("Your CSV files have different column names. Please specify how columns should be matched:"))
         description_label.setWordWrap(True)
         description_label.setStyleSheet("margin: 5px; color: #666;")
         main_layout.addWidget(description_label)
@@ -152,11 +148,11 @@ class ColumnMappingDialog(QtWidgets.QDialog):
             # Column mapping dropdowns
             for col_index, column_name in enumerate(column_list):
                 dropdown = QtWidgets.QComboBox()
-                dropdown.addItem("-- No mapping --", None)
+                dropdown.addItem(self.tr("-- No mapping --"), None)
                 # Add all available columns from this file
                 available_columns = self._file_columns[col_index] if col_index < len(self._file_columns) else []
                 for col in available_columns:
-                    dropdown.addItem(col, col)
+                    dropdown.addItem(self.tr(col), col)
                 # Set current selection to the value from column_mapping if present
                 if column_name:
                     index = dropdown.findData(column_name)
@@ -199,11 +195,7 @@ class ColumnMappingDialog(QtWidgets.QDialog):
         missing_required = [col for col in required_columns if col not in self._final_mapping]
         
         if missing_required:
-            QtWidgets.QMessageBox.warning(
-                self,
-                "Missing Required Columns",
-                f"The following required columns must be included: {', '.join(missing_required)}"
-            )
+            self._show_warning(f"The following required columns must be included: {', '.join(missing_required)}")
             return
         
         self.accept()
@@ -216,3 +208,6 @@ class ColumnMappingDialog(QtWidgets.QDialog):
             Dictionary mapping unified column names to lists of column names from each file
         """
         return self._final_mapping 
+
+    def _show_warning(self, message: str) -> None:
+        QtWidgets.QMessageBox.warning(self, self.tr("Column Mapping Warning"), self.tr(message)) 

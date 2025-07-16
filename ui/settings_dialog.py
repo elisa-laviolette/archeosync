@@ -68,6 +68,8 @@ class SettingsDialog(QtWidgets.QDialog):
     following the Single Responsibility Principle by focusing only on UI presentation
     and delegating business logic to injected services. The interface is organized
     into three tabs for better user experience.
+    
+    All user-facing strings are wrapped in self.tr() for translation.
     """
     
     def __init__(self, settings_manager: ISettingsManager, 
@@ -102,14 +104,14 @@ class SettingsDialog(QtWidgets.QDialog):
     
     def _setup_ui(self) -> None:
         """Set up the user interface components."""
-        self.setWindowTitle("ArcheoSync Settings")
+        self.setWindowTitle(self.tr("ArcheoSync Settings"))
         self.setGeometry(0, 0, 700, 600)
         
         # Create main layout
         main_layout = QtWidgets.QVBoxLayout(self)
         
         # Add title
-        title_label = QtWidgets.QLabel("ArcheoSync Plugin Settings")
+        title_label = QtWidgets.QLabel(self.tr("ArcheoSync Plugin Settings"))
         title_label.setAlignment(Qt.AlignCenter)
         title_label.setStyleSheet("font-size: 16px; font-weight: bold; margin: 10px;")
         main_layout.addWidget(title_label)
@@ -138,7 +140,7 @@ class SettingsDialog(QtWidgets.QDialog):
         
         # Add description
         description_label = QtWidgets.QLabel(
-            "Configure the folders used by ArcheoSync for managing field projects and data."
+            self.tr("Configure the folders used by ArcheoSync for managing field projects and data.")
         )
         description_label.setWordWrap(True)
         description_label.setStyleSheet("color: gray; font-size: 11px; margin-bottom: 10px;")
@@ -149,44 +151,44 @@ class SettingsDialog(QtWidgets.QDialog):
         
         # Field projects destination
         self._field_projects_widget = self._create_folder_selector(
-            "Select destination folder for new field projects..."
+            self.tr("Select destination folder for new field projects...")
         )
-        form_layout.addRow("Field Projects Destination:", self._field_projects_widget)
+        form_layout.addRow(self.tr("Field Projects Destination:"), self._field_projects_widget)
         
         # Total station CSV files
         self._total_station_widget = self._create_folder_selector(
-            "Select folder containing total station CSV files..."
+            self.tr("Select folder containing total station CSV files...")
         )
-        form_layout.addRow("Total Station CSV Files:", self._total_station_widget)
+        form_layout.addRow(self.tr("Total Station CSV Files:"), self._total_station_widget)
         
         # Completed field projects
         self._completed_projects_widget = self._create_folder_selector(
-            "Select folder containing completed field projects..."
+            self.tr("Select folder containing completed field projects...")
         )
-        form_layout.addRow("Completed Field Projects:", self._completed_projects_widget)
+        form_layout.addRow(self.tr("Completed Field Projects:"), self._completed_projects_widget)
         
         # Archive folders section
-        archive_label = QtWidgets.QLabel("Archive Folders")
+        archive_label = QtWidgets.QLabel(self.tr("Archive Folders"))
         archive_label.setStyleSheet("font-weight: bold; margin-top: 15px; margin-bottom: 5px;")
         form_layout.addRow(archive_label)
         
         # CSV archive folder
         self._csv_archive_widget = self._create_folder_selector(
-            "Select folder to archive imported CSV files..."
+            self.tr("Select folder to archive imported CSV files...")
         )
-        form_layout.addRow("CSV Archive Folder:", self._csv_archive_widget)
+        form_layout.addRow(self.tr("CSV Archive Folder:"), self._csv_archive_widget)
         
         # Field project archive folder
         self._field_project_archive_widget = self._create_folder_selector(
-            "Select folder to archive imported field projects..."
+            self.tr("Select folder to archive imported field projects...")
         )
-        form_layout.addRow("Field Project Archive Folder:", self._field_project_archive_widget)
+        form_layout.addRow(self.tr("Field Project Archive Folder:"), self._field_project_archive_widget)
         
         folders_layout.addLayout(form_layout)
         folders_layout.addStretch()
         
         # Add tab to widget
-        self._tab_widget.addTab(folders_widget, "Folders")
+        self._tab_widget.addTab(folders_widget, self.tr("Folders"))
     
     def _create_layers_fields_tab(self) -> None:
         """Create the layers and fields configuration tab."""
@@ -195,7 +197,7 @@ class SettingsDialog(QtWidgets.QDialog):
         
         # Add description
         description_label = QtWidgets.QLabel(
-            "Configure the QGIS layers and fields used for recording areas, objects, and features."
+            self.tr("Configure the QGIS layers and fields used for recording areas, objects, and features.")
         )
         description_label.setWordWrap(True)
         description_label.setStyleSheet("color: gray; font-size: 11px; margin-bottom: 10px;")
@@ -206,11 +208,11 @@ class SettingsDialog(QtWidgets.QDialog):
         
         # Recording areas layer
         self._recording_areas_widget = self._create_layer_selector()
-        form_layout.addRow("Recording Areas Layer:", self._recording_areas_widget)
+        form_layout.addRow(self.tr("Recording Areas Layer:"), self._recording_areas_widget)
         
         # Objects layer
         self._objects_widget = self._create_layer_selector()
-        form_layout.addRow("Objects Layer:", self._objects_widget)
+        form_layout.addRow(self.tr("Objects Layer:"), self._objects_widget)
         
         # Objects layer field selections (initially hidden)
         self._objects_fields_widget = self._create_objects_fields_widget()
@@ -218,17 +220,17 @@ class SettingsDialog(QtWidgets.QDialog):
         
         # Features layer
         self._features_widget = self._create_layer_selector()
-        form_layout.addRow("Features Layer:", self._features_widget)
+        form_layout.addRow(self.tr("Features Layer:"), self._features_widget)
         
         # Extra layers for field projects
         self._extra_layers_widget = self._create_extra_layers_widget()
-        form_layout.addRow("Extra Field Layers:", self._extra_layers_widget)
+        form_layout.addRow(self.tr("Extra Field Layers:"), self._extra_layers_widget)
         
         layers_layout.addLayout(form_layout)
         layers_layout.addStretch()
         
         # Add tab to widget
-        self._tab_widget.addTab(layers_widget, "Layers")
+        self._tab_widget.addTab(layers_widget, self.tr("Layers & Fields"))
     
     def _create_raster_tab(self) -> None:
         """Create the raster configuration tab."""
@@ -237,7 +239,7 @@ class SettingsDialog(QtWidgets.QDialog):
         
         # Add description
         description_label = QtWidgets.QLabel(
-            "Configure raster processing settings for field project creation."
+            self.tr("Configure raster processing settings for field project creation.")
         )
         description_label.setWordWrap(True)
         description_label.setStyleSheet("color: gray; font-size: 11px; margin-bottom: 10px;")
@@ -248,36 +250,36 @@ class SettingsDialog(QtWidgets.QDialog):
         
         # Raster clipping offset for field projects
         self._raster_offset_widget = self._create_raster_offset_widget()
-        form_layout.addRow("Raster Clipping Offset:", self._raster_offset_widget)
+        form_layout.addRow(self.tr("Raster Clipping Offset:"), self._raster_offset_widget)
         
         # Raster enhancement settings section
-        enhancement_label = QtWidgets.QLabel("Raster Enhancement Settings")
+        enhancement_label = QtWidgets.QLabel(self.tr("Raster Enhancement Settings"))
         enhancement_label.setStyleSheet("font-weight: bold; margin-top: 15px; margin-bottom: 5px;")
         form_layout.addRow(enhancement_label)
         
         # Brightness slider
         self._brightness_widget = self._create_slider_widget(
-            "Brightness", -255, 255, 0, "Adjust the brightness of clipped raster layers"
+            "Brightness", -255, 255, 0, self.tr("Adjust the brightness of clipped raster layers")
         )
-        form_layout.addRow("Brightness:", self._brightness_widget)
+        form_layout.addRow(self.tr("Brightness:"), self._brightness_widget)
         
         # Contrast slider
         self._contrast_widget = self._create_slider_widget(
-            "Contrast", -100, 100, 0, "Adjust the contrast of clipped raster layers"
+            "Contrast", -100, 100, 0, self.tr("Adjust the contrast of clipped raster layers")
         )
-        form_layout.addRow("Contrast:", self._contrast_widget)
+        form_layout.addRow(self.tr("Contrast:"), self._contrast_widget)
         
         # Saturation slider
         self._saturation_widget = self._create_slider_widget(
-            "Saturation", -100, 100, 0, "Adjust the saturation of clipped raster layers"
+            "Saturation", -100, 100, 0, self.tr("Adjust the saturation of clipped raster layers")
         )
-        form_layout.addRow("Saturation:", self._saturation_widget)
+        form_layout.addRow(self.tr("Saturation:"), self._saturation_widget)
         
         raster_layout.addLayout(form_layout)
         raster_layout.addStretch()
         
         # Add tab to widget
-        self._tab_widget.addTab(raster_widget, "Raster")
+        self._tab_widget.addTab(raster_widget, self.tr("Raster"))
     
     def _create_folder_selector(self, placeholder: str) -> QtWidgets.QWidget:
         """Create a folder selection widget."""
@@ -291,7 +293,7 @@ class SettingsDialog(QtWidgets.QDialog):
         input_field.setReadOnly(True)
         
         # Browse button
-        browse_button = QtWidgets.QPushButton("Browse...")
+        browse_button = QtWidgets.QPushButton(self.tr("Browse..."))
         
         layout.addWidget(input_field)
         layout.addWidget(browse_button)
@@ -311,11 +313,11 @@ class SettingsDialog(QtWidgets.QDialog):
         # Combo box for layer selection
         combo_box = QtWidgets.QComboBox()
         combo_box.setMinimumWidth(300)
-        combo_box.addItem("-- Select a polygon layer --", "")
+        combo_box.addItem(self.tr("-- Select a polygon layer --"), "")
         
         # Refresh button
-        refresh_button = QtWidgets.QPushButton("Refresh")
-        refresh_button.setToolTip("Refresh the list of available polygon layers")
+        refresh_button = QtWidgets.QPushButton(self.tr("Refresh"))
+        refresh_button.setToolTip(self.tr("Refresh the list of available polygon layers"))
         
         layout.addWidget(combo_box)
         layout.addWidget(refresh_button)
@@ -334,9 +336,9 @@ class SettingsDialog(QtWidgets.QDialog):
         
         # Number field selection
         number_layout = QtWidgets.QHBoxLayout()
-        number_label = QtWidgets.QLabel("Number Field:")
+        number_label = QtWidgets.QLabel(self.tr("Number Field:"))
         self._number_field_combo = QtWidgets.QComboBox()
-        self._number_field_combo.addItem("-- Select number field --", "")
+        self._number_field_combo.addItem(self.tr("-- Select number field --"), "")
         self._number_field_combo.setMinimumWidth(200)
         number_layout.addWidget(number_label)
         number_layout.addWidget(self._number_field_combo)
@@ -344,9 +346,9 @@ class SettingsDialog(QtWidgets.QDialog):
         
         # Level field selection
         level_layout = QtWidgets.QHBoxLayout()
-        level_label = QtWidgets.QLabel("Level Field:")
+        level_label = QtWidgets.QLabel(self.tr("Level Field:"))
         self._level_field_combo = QtWidgets.QComboBox()
-        self._level_field_combo.addItem("-- Select level field --", "")
+        self._level_field_combo.addItem(self.tr("-- Select level field --"), "")
         self._level_field_combo.setMinimumWidth(200)
         level_layout.addWidget(level_label)
         level_layout.addWidget(self._level_field_combo)
@@ -368,8 +370,8 @@ class SettingsDialog(QtWidgets.QDialog):
         
         # Description label
         description_label = QtWidgets.QLabel(
-            "Select additional vector layers to include in field projects. "
-            "The recording areas layer is always included and cannot be modified."
+            self.tr("Select additional vector layers to include in field projects. ") +
+            self.tr("The recording areas layer is always included and cannot be modified.")
         )
         description_label.setWordWrap(True)
         description_label.setStyleSheet("color: gray; font-size: 11px;")
@@ -382,8 +384,8 @@ class SettingsDialog(QtWidgets.QDialog):
         layout.addWidget(self._extra_layers_list)
         
         # Refresh button
-        refresh_button = QtWidgets.QPushButton("Refresh Layers")
-        refresh_button.setToolTip("Refresh the list of available vector layers")
+        refresh_button = QtWidgets.QPushButton(self.tr("Refresh Layers"))
+        refresh_button.setToolTip(self.tr("Refresh the list of available vector layers"))
         layout.addWidget(refresh_button)
         
         # Store reference to refresh button
@@ -399,8 +401,8 @@ class SettingsDialog(QtWidgets.QDialog):
         
         # Description label
         description_label = QtWidgets.QLabel(
-            "Offset in meters to expand the clipping area around recording areas when creating field projects. "
-            "This ensures the background image extends slightly beyond the recording area boundary."
+            self.tr("Offset in meters to expand the clipping area around recording areas when creating field projects. ") +
+            self.tr("This ensures the background image extends slightly beyond the recording area boundary.")
         )
         description_label.setWordWrap(True)
         description_label.setStyleSheet("color: gray; font-size: 11px;")
@@ -415,7 +417,7 @@ class SettingsDialog(QtWidgets.QDialog):
         self._raster_offset_spinbox.setMaximum(100.0)
         self._raster_offset_spinbox.setSingleStep(0.1)
         self._raster_offset_spinbox.setDecimals(2)
-        self._raster_offset_spinbox.setSuffix(" m")
+        self._raster_offset_spinbox.setSuffix(self.tr(" m"))
         self._raster_offset_spinbox.setValue(0.2)  # Default 20 cm
         self._raster_offset_spinbox.setMinimumWidth(100)
         layout.addWidget(self._raster_offset_spinbox)
@@ -436,7 +438,7 @@ class SettingsDialog(QtWidgets.QDialog):
         spinbox.setToolTip(tooltip)
         layout.addWidget(spinbox)
 
-        # Store reference
+        # Store reference with English key for consistent access
         self._sliders[title] = spinbox
         # Remove value label, not needed for spinbox
         return widget
@@ -448,6 +450,11 @@ class SettingsDialog(QtWidgets.QDialog):
             Qt.Horizontal,
             self
         )
+        
+        # Set button texts for translation
+        self._button_box.button(QtWidgets.QDialogButtonBox.Ok).setText(self.tr("OK"))
+        self._button_box.button(QtWidgets.QDialogButtonBox.Cancel).setText(self.tr("Cancel"))
+        
         parent_layout.addWidget(self._button_box)
     
     def _setup_connections(self) -> None:
@@ -459,23 +466,23 @@ class SettingsDialog(QtWidgets.QDialog):
         # Browse button connections
         self._field_projects_widget.browse_button.clicked.connect(
             lambda: self._browse_folder(self._field_projects_widget.input_field, 
-                                      "Select Destination Folder for New Field Projects")
+                                      self.tr("Select Destination Folder for New Field Projects"))
         )
         self._total_station_widget.browse_button.clicked.connect(
             lambda: self._browse_folder(self._total_station_widget.input_field,
-                                      "Select Folder for Total Station CSV Files")
+                                      self.tr("Select Folder for Total Station CSV Files"))
         )
         self._completed_projects_widget.browse_button.clicked.connect(
             lambda: self._browse_folder(self._completed_projects_widget.input_field,
-                                      "Select Folder for Completed Field Projects")
+                                      self.tr("Select Folder for Completed Field Projects"))
         )
         self._csv_archive_widget.browse_button.clicked.connect(
             lambda: self._browse_folder(self._csv_archive_widget.input_field,
-                                      "Select Folder for CSV Archive")
+                                      self.tr("Select Folder for CSV Archive"))
         )
         self._field_project_archive_widget.browse_button.clicked.connect(
             lambda: self._browse_folder(self._field_project_archive_widget.input_field,
-                                      "Select Folder for Field Project Archive")
+                                      self.tr("Select Folder for Field Project Archive"))
         )
         # Layer selector connections
         self._recording_areas_widget.refresh_button.clicked.connect(self._refresh_layer_list)
@@ -489,7 +496,7 @@ class SettingsDialog(QtWidgets.QDialog):
     def _browse_folder(self, input_field: QtWidgets.QLineEdit, title: str) -> None:
         """Browse for a folder and update the input field."""
         folder_path = self._file_system_service.select_directory(
-            title, 
+            self.tr(title), 
             input_field.text() if input_field.text() else None
         )
         
@@ -504,14 +511,14 @@ class SettingsDialog(QtWidgets.QDialog):
             
             # Clear existing items except the first placeholder
             combo_box.clear()
-            combo_box.addItem("-- Select a polygon layer --", "")
+            combo_box.addItem(self.tr("-- Select a polygon layer --"), "")
             
             # Get polygon layers from the service
             polygon_layers = self._layer_service.get_polygon_layers()
             
             # Add layers to combo box
             for layer_info in polygon_layers:
-                display_text = f"{layer_info['name']} ({layer_info['feature_count']} features)"
+                display_text = self.tr(f"{layer_info['name']} ({layer_info['feature_count']} features)")
                 combo_box.addItem(display_text, layer_info['id'])
             
             # Restore previously selected layer if it still exists
@@ -521,7 +528,7 @@ class SettingsDialog(QtWidgets.QDialog):
                     combo_box.setCurrentIndex(index)
             
         except Exception as e:
-            self._show_error("Layer Error", f"Failed to refresh layer list: {str(e)}")
+            self._show_error(self.tr("Layer Error"), self.tr(f"Failed to refresh layer list: {str(e)}"))
     
     def _refresh_objects_layer_list(self) -> None:
         """Refresh the list of available polygon and multipolygon layers for objects."""
@@ -531,14 +538,14 @@ class SettingsDialog(QtWidgets.QDialog):
             
             # Clear existing items except the first placeholder
             combo_box.clear()
-            combo_box.addItem("-- Select a polygon or multipolygon layer --", "")
+            combo_box.addItem(self.tr("-- Select a polygon or multipolygon layer --"), "")
             
             # Get polygon and multipolygon layers from the service
             layers = self._layer_service.get_polygon_and_multipolygon_layers()
             
             # Add layers to combo box
             for layer_info in layers:
-                display_text = f"{layer_info['name']} ({layer_info['feature_count']} features)"
+                display_text = self.tr(f"{layer_info['name']} ({layer_info['feature_count']} features)")
                 combo_box.addItem(display_text, layer_info['id'])
             
             # Restore previously selected layer if it still exists
@@ -548,7 +555,7 @@ class SettingsDialog(QtWidgets.QDialog):
                     combo_box.setCurrentIndex(index)
             
         except Exception as e:
-            self._show_error("Layer Error", f"Failed to refresh objects layer list: {str(e)}")
+            self._show_error(self.tr("Layer Error"), self.tr(f"Failed to refresh objects layer list: {str(e)}"))
     
     def _refresh_features_layer_list(self) -> None:
         """Refresh the list of available polygon and multipolygon layers for features."""
@@ -558,14 +565,14 @@ class SettingsDialog(QtWidgets.QDialog):
             
             # Clear existing items except the first placeholder
             combo_box.clear()
-            combo_box.addItem("-- Select a polygon or multipolygon layer --", "")
+            combo_box.addItem(self.tr("-- Select a polygon or multipolygon layer --"), "")
             
             # Get polygon and multipolygon layers from the service
             layers = self._layer_service.get_polygon_and_multipolygon_layers()
             
             # Add layers to combo box
             for layer_info in layers:
-                display_text = f"{layer_info['name']} ({layer_info['feature_count']} features)"
+                display_text = self.tr(f"{layer_info['name']} ({layer_info['feature_count']} features)")
                 combo_box.addItem(display_text, layer_info['id'])
             
             # Restore previously selected layer if it still exists
@@ -575,7 +582,7 @@ class SettingsDialog(QtWidgets.QDialog):
                     combo_box.setCurrentIndex(index)
             
         except Exception as e:
-            self._show_error("Layer Error", f"Failed to refresh features layer list: {str(e)}")
+            self._show_error(self.tr("Layer Error"), self.tr(f"Failed to refresh features layer list: {str(e)}"))
     
     def _refresh_extra_layers_list(self) -> None:
         """Refresh the list of available vector layers for extra QField layers."""
@@ -598,7 +605,7 @@ class SettingsDialog(QtWidgets.QDialog):
             
             for layer_info in vector_layers:
                 item = QtWidgets.QListWidgetItem()
-                display_text = f"{layer_info['name']} ({layer_info['feature_count']} features)"
+                display_text = self.tr(f"{layer_info['name']} ({layer_info['feature_count']} features)")
                 item.setText(display_text)
                 item.setData(Qt.UserRole, layer_info['id'])
                 item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
@@ -611,7 +618,7 @@ class SettingsDialog(QtWidgets.QDialog):
                     item.setCheckState(Qt.Checked if layer_info['id'] in checked_layer_ids else Qt.Unchecked)
                 self._extra_layers_list.addItem(item)
         except Exception as e:
-            self._show_error("Layer Error", f"Failed to refresh extra layers list: {str(e)}")
+            self._show_error(self.tr("Layer Error"), self.tr(f"Failed to refresh extra layers list: {str(e)}"))
     
     def _get_selected_extra_layers(self) -> List[str]:
         """Get the list of checked extra layer IDs (excluding the recording areas layer)."""
@@ -641,7 +648,7 @@ class SettingsDialog(QtWidgets.QDialog):
             # Get fields from the layer
             fields = self._layer_service.get_layer_fields(layer_id)
             if fields is None:
-                self._show_error("Field Error", f"Could not retrieve fields for layer {layer_id}")
+                self._show_error(self.tr("Field Error"), self.tr(f"Could not retrieve fields for layer {layer_id}"))
                 return
             
             # Clear existing items
@@ -649,22 +656,22 @@ class SettingsDialog(QtWidgets.QDialog):
             self._level_field_combo.clear()
             
             # Add placeholder items
-            self._number_field_combo.addItem("-- Select number field --", "")
-            self._level_field_combo.addItem("-- Select level field --", "")
+            self._number_field_combo.addItem(self.tr("-- Select number field --"), "")
+            self._level_field_combo.addItem(self.tr("-- Select level field --"), "")
             
             # Add fields to number field combo (only integer fields)
             integer_fields = [field for field in fields if field['is_integer']]
             for field in integer_fields:
-                display_text = f"{field['name']} ({field['type']})"
+                display_text = self.tr(f"{field['name']} ({field['type']})")
                 self._number_field_combo.addItem(display_text, field['name'])
             
             # Add all fields to level field combo
             for field in fields:
-                display_text = f"{field['name']} ({field['type']})"
+                display_text = self.tr(f"{field['name']} ({field['type']})")
                 self._level_field_combo.addItem(display_text, field['name'])
             
         except Exception as e:
-            self._show_error("Field Error", f"Failed to populate field lists: {str(e)}")
+            self._show_error(self.tr("Field Error"), self.tr(f"Failed to populate field lists: {str(e)}"))
     
     def _update_ui_state(self) -> None:
         """Update UI state based on current settings."""
@@ -782,7 +789,7 @@ class SettingsDialog(QtWidgets.QDialog):
             }
             
         except Exception as e:
-            self._show_error("Settings Error", f"Failed to load settings: {str(e)}")
+            self._show_error(self.tr("Settings Error"), self.tr(f"Failed to load settings: {str(e)}"))
     
     def _save_and_accept(self) -> None:
         """Save settings and accept the dialog."""
@@ -814,7 +821,7 @@ class SettingsDialog(QtWidgets.QDialog):
             if self._configuration_validator.has_validation_errors(validation_results):
                 errors = self._configuration_validator.get_all_errors(validation_results)
                 error_message = "\n".join(errors)
-                self._show_error("Validation Error", f"Please fix the following issues:\n\n{error_message}")
+                self._show_error(self.tr("Validation Error"), self.tr(f"Please fix the following issues:\n\n{error_message}"))
                 return
             
             # Save settings
@@ -824,7 +831,7 @@ class SettingsDialog(QtWidgets.QDialog):
             self.accept()
             
         except Exception as e:
-            self._show_error("Settings Error", f"Failed to save settings: {str(e)}")
+            self._show_error(self.tr("Settings Error"), self.tr(f"Failed to save settings: {str(e)}"))
     
     def _reject(self) -> None:
         """Handle dialog rejection by resetting to original values."""
@@ -909,12 +916,12 @@ class SettingsDialog(QtWidgets.QDialog):
                 self._settings_manager.set_value(key, value)
                 
         except Exception as e:
-            self._show_error("Settings Error", f"Failed to revert settings: {str(e)}")
+            self._show_error(self.tr("Settings Error"), self.tr(f"Failed to revert settings: {str(e)}"))
         
         super().reject()
     
     def _show_error(self, title: str, message: str) -> None:
         """Show an error message to the user."""
-        QtWidgets.QMessageBox.critical(self, title, message) 
+        QtWidgets.QMessageBox.critical(self, self.tr(title), self.tr(message)) 
 
         
