@@ -233,6 +233,10 @@ QGIS-specific implementation for CSV import operations including:
 
 ### SettingsDialog
 Clean, testable settings dialog with dependency injection and real-time validation including:
+- **Tabbed Interface**: Organized into 3 logical tabs for better user experience
+  - **Folders Tab**: All folder-related settings (field projects, total station, archives)
+  - **Layers Tab**: Layer selection, field configuration, and extra layers
+  - **Raster Tab**: Raster processing configuration (clipping offset)
 - Archive folder configuration for CSV files and QField projects
 - Folder selection widgets with browse functionality
 - Real-time validation of archive folder paths

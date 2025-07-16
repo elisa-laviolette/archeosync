@@ -13,6 +13,7 @@ Key Features:
 - Revert functionality for cancelled changes
 - Responsive UI with conditional visibility
 - QGIS layer selection for recording areas
+- Organized into 3 tabs: Folders, Layers & Fields, and Raster
 
 Architecture Benefits:
 - Single Responsibility: Only handles UI presentation
@@ -45,6 +46,7 @@ The dialog provides:
 - Clear error messages
 - Consistent user experience
 - Proper state management
+- Organized tabbed interface for better UX
 """
 
 from typing import Optional, Dict, Any, List
@@ -63,7 +65,8 @@ class SettingsDialog(QtWidgets.QDialog):
     
     This dialog provides a clean interface for managing plugin settings,
     following the Single Responsibility Principle by focusing only on UI presentation
-    and delegating business logic to injected services.
+    and delegating business logic to injected services. The interface is organized
+    into three tabs for better user experience.
     """
     
     def __init__(self, 
@@ -102,7 +105,7 @@ class SettingsDialog(QtWidgets.QDialog):
     def _setup_ui(self) -> None:
         """Set up the user interface components."""
         self.setWindowTitle("ArcheoSync Settings")
-        self.setGeometry(0, 0, 600, 500)
+        self.setGeometry(0, 0, 700, 600)
         
         # Create main layout
         main_layout = QtWidgets.QVBoxLayout(self)
@@ -113,83 +116,142 @@ class SettingsDialog(QtWidgets.QDialog):
         title_label.setStyleSheet("font-size: 16px; font-weight: bold; margin: 10px;")
         main_layout.addWidget(title_label)
         
-        # Add settings section
-        self._create_settings_section(main_layout)
+        # Create tab widget
+        self._tab_widget = QtWidgets.QTabWidget()
+        main_layout.addWidget(self._tab_widget)
+        
+        # Create tabs
+        self._create_folders_tab()
+        self._create_layers_fields_tab()
+        self._create_raster_tab()
         
         # Add button box
         self._create_button_box(main_layout)
     
-    def _create_settings_section(self, parent_layout: QtWidgets.QVBoxLayout) -> None:
-        """Create the settings configuration section."""
-        settings_group = QtWidgets.QGroupBox("Configuration Settings")
-        settings_layout = QtWidgets.QFormLayout(settings_group)
+    def _create_folders_tab(self) -> None:
+        """Create the folders configuration tab."""
+        folders_widget = QtWidgets.QWidget()
+        folders_layout = QtWidgets.QVBoxLayout(folders_widget)
+        
+        # Add description
+        description_label = QtWidgets.QLabel(
+            "Configure the folders used by ArcheoSync for managing field projects and data."
+        )
+        description_label.setWordWrap(True)
+        description_label.setStyleSheet("color: gray; font-size: 11px; margin-bottom: 10px;")
+        folders_layout.addWidget(description_label)
+        
+        # Create form layout for folder settings
+        form_layout = QtWidgets.QFormLayout()
         
         # Field projects destination
         self._field_projects_widget = self._create_folder_selector(
             "Select destination folder for new field projects..."
         )
-        settings_layout.addRow("Field Projects Destination:", self._field_projects_widget)
+        form_layout.addRow("Field Projects Destination:", self._field_projects_widget)
         
         # Total station CSV files
         self._total_station_widget = self._create_folder_selector(
             "Select folder containing total station CSV files..."
         )
-        settings_layout.addRow("Total Station CSV Files:", self._total_station_widget)
+        form_layout.addRow("Total Station CSV Files:", self._total_station_widget)
         
         # Completed field projects
         self._completed_projects_widget = self._create_folder_selector(
             "Select folder containing completed field projects..."
         )
-        settings_layout.addRow("Completed Field Projects:", self._completed_projects_widget)
+        form_layout.addRow("Completed Field Projects:", self._completed_projects_widget)
         
         # Archive folders section
         archive_label = QtWidgets.QLabel("Archive Folders")
-        archive_label.setStyleSheet("font-weight: bold; margin-top: 10px;")
-        settings_layout.addRow(archive_label)
+        archive_label.setStyleSheet("font-weight: bold; margin-top: 15px; margin-bottom: 5px;")
+        form_layout.addRow(archive_label)
         
         # CSV archive folder
         self._csv_archive_widget = self._create_folder_selector(
             "Select folder to archive imported CSV files..."
         )
-        settings_layout.addRow("CSV Archive Folder:", self._csv_archive_widget)
+        form_layout.addRow("CSV Archive Folder:", self._csv_archive_widget)
         
         # Field project archive folder
         self._field_project_archive_widget = self._create_folder_selector(
             "Select folder to archive imported field projects..."
         )
-        settings_layout.addRow("Field Project Archive Folder:", self._field_project_archive_widget)
+        form_layout.addRow("Field Project Archive Folder:", self._field_project_archive_widget)
         
-
+        folders_layout.addLayout(form_layout)
+        folders_layout.addStretch()
+        
+        # Add tab to widget
+        self._tab_widget.addTab(folders_widget, "Folders")
+    
+    def _create_layers_fields_tab(self) -> None:
+        """Create the layers and fields configuration tab."""
+        layers_widget = QtWidgets.QWidget()
+        layers_layout = QtWidgets.QVBoxLayout(layers_widget)
+        
+        # Add description
+        description_label = QtWidgets.QLabel(
+            "Configure the QGIS layers and fields used for recording areas, objects, and features."
+        )
+        description_label.setWordWrap(True)
+        description_label.setStyleSheet("color: gray; font-size: 11px; margin-bottom: 10px;")
+        layers_layout.addWidget(description_label)
+        
+        # Create form layout for layer settings
+        form_layout = QtWidgets.QFormLayout()
         
         # Recording areas layer
         self._recording_areas_widget = self._create_layer_selector()
-        settings_layout.addRow("Recording Areas Layer:", self._recording_areas_widget)
+        form_layout.addRow("Recording Areas Layer:", self._recording_areas_widget)
         
         # Objects layer
         self._objects_widget = self._create_layer_selector()
-        settings_layout.addRow("Objects Layer:", self._objects_widget)
+        form_layout.addRow("Objects Layer:", self._objects_widget)
         
         # Objects layer field selections (initially hidden)
         self._objects_fields_widget = self._create_objects_fields_widget()
-        settings_layout.addRow("", self._objects_fields_widget)  # Empty label for indentation
+        form_layout.addRow("", self._objects_fields_widget)  # Empty label for indentation
         
         # Features layer
         self._features_widget = self._create_layer_selector()
-        settings_layout.addRow("Features Layer:", self._features_widget)
-        
-
-        
-        # Raster clipping offset for field projects
-        self._raster_offset_widget = self._create_raster_offset_widget()
-        settings_layout.addRow("Raster Clipping Offset:", self._raster_offset_widget)
+        form_layout.addRow("Features Layer:", self._features_widget)
         
         # Extra layers for field projects
         self._extra_layers_widget = self._create_extra_layers_widget()
-        settings_layout.addRow("Extra Field Layers:", self._extra_layers_widget)
+        form_layout.addRow("Extra Field Layers:", self._extra_layers_widget)
         
-
+        layers_layout.addLayout(form_layout)
+        layers_layout.addStretch()
         
-        parent_layout.addWidget(settings_group)
+        # Add tab to widget
+        self._tab_widget.addTab(layers_widget, "Layers")
+    
+    def _create_raster_tab(self) -> None:
+        """Create the raster configuration tab."""
+        raster_widget = QtWidgets.QWidget()
+        raster_layout = QtWidgets.QVBoxLayout(raster_widget)
+        
+        # Add description
+        description_label = QtWidgets.QLabel(
+            "Configure raster processing settings for field project creation."
+        )
+        description_label.setWordWrap(True)
+        description_label.setStyleSheet("color: gray; font-size: 11px; margin-bottom: 10px;")
+        raster_layout.addWidget(description_label)
+        
+        # Create form layout for raster settings
+        form_layout = QtWidgets.QFormLayout()
+        
+        # Raster clipping offset for field projects
+        self._raster_offset_widget = self._create_raster_offset_widget()
+        form_layout.addRow("Raster Clipping Offset:", self._raster_offset_widget)
+        
+        raster_layout.addLayout(form_layout)
+        raster_layout.addStretch()
+        
+        # Add tab to widget
+        self._tab_widget.addTab(raster_widget, "Raster")
     
     def _create_folder_selector(self, placeholder: str) -> QtWidgets.QWidget:
         """Create a folder selection widget."""

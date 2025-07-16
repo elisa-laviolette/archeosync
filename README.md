@@ -34,16 +34,24 @@ A QGIS plugin for archaeologists to prepare data for field work and import it ba
 ### Configuration
 
 1. Go to **Plugins > ArcheoSync > Configuration**
-2. Set up the following folders:
+2. The configuration dialog is organized into three tabs for better organization:
+
+   **Folders Tab:**
    - **Field Projects Destination**: Where new field projects will be created
    - **Total Station CSV Files**: Folder containing CSV files from total station data
    - **Completed Field Projects**: Folder containing completed field projects (with .qgs files)
-     - **Template QGIS Project**: Template project for field work
-  - **CSV Archive Folder**: Folder where imported CSV files will be moved after successful import
-  - **Field Project Archive Folder**: Folder where imported field projects will be moved after successful import
-3. Select the appropriate layers for recording areas, objects, and features
-4. Configure field mappings for objects layer (number and level fields)
-5. **Extra Layers for Field Projects**: Select additional vector layers to include in field projects
+   - **CSV Archive Folder**: Folder where imported CSV files will be moved after successful import
+   - **Field Project Archive Folder**: Folder where imported field projects will be moved after successful import
+
+   **Layers Tab:**
+   - **Recording Areas Layer**: Select the layer containing recording area polygons
+   - **Objects Layer**: Select the layer for archaeological objects
+   - **Features Layer**: Select the layer for archaeological features
+   - **Objects Field Configuration**: Configure number and level fields for the objects layer
+   - **Extra Layers for Field Projects**: Select additional vector layers to include in field projects
+
+   **Raster Tab:**
+   - **Raster Clipping Offset**: Configure the offset (in meters) for clipping background images to recording areas
 
 ### Prepare Recording
 

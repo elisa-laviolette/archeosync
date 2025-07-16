@@ -124,6 +124,13 @@ class TestSettingsDialog:
         assert hasattr(self.dialog, '_total_station_widget')
         assert hasattr(self.dialog, '_completed_projects_widget')
         assert hasattr(self.dialog, '_recording_areas_widget')
+        
+        # Test that the tab widget exists and has the expected tabs
+        assert hasattr(self.dialog, '_tab_widget')
+        assert self.dialog._tab_widget.count() == 3
+        assert self.dialog._tab_widget.tabText(0) == "Folders"
+        assert self.dialog._tab_widget.tabText(1) == "Layers"
+        assert self.dialog._tab_widget.tabText(2) == "Raster"
 
     def test_field_projects_input_properties(self):
         assert self.dialog._field_projects_widget.input_field.isReadOnly() is True
