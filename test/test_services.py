@@ -492,7 +492,7 @@ class TestQGISLayerService(unittest.TestCase):
         self.assertEqual(layer_info['source'], "/path/to/test.shp")
         self.assertEqual(layer_info['crs'], "EPSG:4326")
         self.assertEqual(layer_info['feature_count'], 15)
-        self.assertEqual(layer_info['geometry_type'], "Polygon")
+        self.assertEqual(layer_info['geometry_type'], 2)  # Polygon geometry type
         self.assertTrue(layer_info['is_valid'])
 
     @patch('services.layer_service.QgsProject')

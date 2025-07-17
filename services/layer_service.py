@@ -346,13 +346,16 @@ class QGISLayerService(ILayerService):
         if layer is None:
             return None
         
+        # Get the actual geometry type from the layer
+        geometry_type = layer.geometryType()
+        
         return {
             'id': layer.id(),
             'name': layer.name(),
             'source': layer.source(),
             'crs': layer.crs().authid() if layer.crs() else 'Unknown',
             'feature_count': layer.featureCount(),
-            'geometry_type': 'Polygon',
+            'geometry_type': geometry_type,
             'is_valid': layer.isValid()
         }
     

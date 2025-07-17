@@ -673,7 +673,7 @@ class IFieldProjectImportService(ABC):
         Import completed field projects and merge their Objects and Features layers.
         
         Args:
-            project_paths: List of paths to completed field project directories
+            project_paths: List of paths to the completed field project directories
             
         Returns:
             ValidationResult indicating if import was successful and any error messages
@@ -694,41 +694,15 @@ class IFieldProjectImportService(ABC):
         pass
     
     @abstractmethod
-    def _process_data_gpkg(self, data_gpkg_path: str) -> Dict[str, List[Any]]:
+    def _process_individual_layers_with_matching(self, layer_files: Dict[str, List[str]], configured_layers: Dict[str, Any]) -> Dict[str, List[Any]]:
         """
-        Process a data.gpkg file to extract Objects and Features layers.
-        
-        Args:
-            data_gpkg_path: Path to the data.gpkg file
-            
-        Returns:
-            Dictionary mapping layer types to lists of features
-        """
-        pass
-    
-    @abstractmethod
-    def _process_individual_layers(self, layer_files: Dict[str, List[str]]) -> Dict[str, List[Any]]:
-        """
-        Process individual layer files (not in data.gpkg).
+        Process individual layer files and match them to configured layers.
         
         Args:
             layer_files: Dictionary mapping layer types to lists of file paths
+            configured_layers: Dictionary containing configured layer info (name, geometry type)
             
         Returns:
             Dictionary mapping layer types to lists of features
-        """
-        pass
-    
-    @abstractmethod
-    def _create_merged_layer(self, layer_name: str, features: List[Any]) -> Optional[Any]:
-        """
-        Create a merged layer from a list of features.
-        
-        Args:
-            layer_name: Name for the merged layer
-            features: List of features to merge
-            
-        Returns:
-            QGIS layer object, or None if failed
         """
         pass 

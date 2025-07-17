@@ -138,11 +138,7 @@ Consultez la console pour plus de détails sur les erreurs.</translation>
         <source>Small Finds</source>
         <translation>Petits objets</translation>
     </message>
-    <message>
-        <location filename="../services/field_project_import_service.py" line="173"/>
-        <source>New Small Finds</source>
-        <translation>Nouveaux petits objets</translation>
-    </message>
+
 </context>
 <context>
     <name>ColumnMappingDialog</name>

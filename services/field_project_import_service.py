@@ -2,12 +2,13 @@
 Field Project Import Service for ArcheoSync plugin.
 
 This module provides functionality for importing completed field projects and merging
-their Objects and Features layers. It can process both data.gpkg files and individual
-layer files that are not contained within a data.gpkg file.
+their Objects and Features layers. It processes individual layer files that match
+the configured layer names and have the same geometry type.
 
 Key Features:
-- Processes data.gpkg files from field projects
 - Processes individual layer files (Objects.gpkg, Features.gpkg, etc.)
+- Only imports layers with names matching the configured objects, features, and small finds layers
+- Only imports layers with the same geometry type as the configured layers
 - Merges Objects and Features layers from multiple projects
 - Creates new "New Objects" and "New Features" layers in the project
 - Handles layer validation and error recovery
@@ -38,7 +39,7 @@ from typing import List, Dict, Optional, Any
 from dataclasses import dataclass
 
 try:
-    from qgis.core import QgsVectorLayer, QgsFeature, QgsProject, QgsVectorFileWriter, QgsGeometry
+    from qgis.core import QgsVectorLayer, QgsFeature, QgsProject, QgsVectorFileWriter, QgsGeometry, QgsWkbTypes
     from qgis.PyQt.QtCore import QVariant
     from ..core.interfaces import IFieldProjectImportService, ISettingsManager, ILayerService, IFileSystemService, ValidationResult, ITranslationService
 except ImportError:
@@ -58,8 +59,8 @@ class FieldProjectImportService(IFieldProjectImportService):
     
     This service imports completed field projects by:
     1. Scanning project directories for layer files
-    2. Processing data.gpkg files and individual layer files
-    3. Extracting Objects and Features layers
+    2. Processing individual layer files that match configured layer names and geometry types
+    3. Extracting Objects, Features, and Small Finds layers
     4. Merging layers from multiple projects
     5. Creating new layers in the current QGIS project
     6. Archiving imported projects
@@ -102,6 +103,9 @@ class FieldProjectImportService(IFieldProjectImportService):
             existing_features_layer = self._get_existing_layer('features_layer')
             existing_small_finds_layer = self._get_existing_layer('small_finds_layer')
             
+            # Get configured layer info for name and geometry type matching
+            configured_layers = self._get_configured_layer_info()
+            
             # Collect all features from all projects
             all_objects_features = []
             all_features_features = []
@@ -114,36 +118,10 @@ class FieldProjectImportService(IFieldProjectImportService):
                     # Scan for layer files in the project
                     layer_files = self._scan_project_layers(project_path)
                     
-                    # Track which layers we've already processed from data.gpkg
-                    processed_layers = set()
-                    
-                    # Process data.gpkg if it exists
-                    data_gpkg_path = os.path.join(project_path, "data.gpkg")
-                    if os.path.exists(data_gpkg_path):
-                        print(f"Processing data.gpkg: {data_gpkg_path}")
-                        data_features = self._process_data_gpkg(data_gpkg_path)
-                        print(f"  Data.gpkg objects: {len(data_features.get('objects', []))}")
-                        print(f"  Data.gpkg features: {len(data_features.get('features', []))}")
-                        all_objects_features.extend(data_features.get('objects', []))
-                        all_features_features.extend(data_features.get('features', []))
-                        
-                        # Mark that we've processed objects and features layers from data.gpkg
-                        if data_features.get('objects'):
-                            processed_layers.add('objects')
-                        if data_features.get('features'):
-                            processed_layers.add('features')
-                    
-                    # Process individual layer files (skip if already processed from data.gpkg)
+                    # Process individual layer files that match configured layers
                     print(f"Processing individual layer files: {len(layer_files.get('objects', []))} objects, {len(layer_files.get('features', []))} features")
                     
-                    # Filter out already processed layer types
-                    filtered_layer_files = {
-                        'objects': layer_files['objects'] if 'objects' not in processed_layers else [],
-                        'features': layer_files['features'] if 'features' not in processed_layers else [],
-                        'small_finds': layer_files['small_finds'] if 'small_finds' not in processed_layers else []
-                    }
-                    
-                    individual_features = self._process_individual_layers(filtered_layer_files)
+                    individual_features = self._process_individual_layers_with_matching(layer_files, configured_layers)
                     print(f"  Individual objects: {len(individual_features.get('objects', []))}")
                     print(f"  Individual features: {len(individual_features.get('features', []))}")
                     print(f"  Individual small finds: {len(individual_features.get('small_finds', []))}")
@@ -185,10 +163,7 @@ class FieldProjectImportService(IFieldProjectImportService):
                     layers_created += 1
             
             if filtered_small_finds_features:
-                layer_name = "New Small Finds"
-                if self._translation_service:
-                    layer_name = self._translation_service.translate("New Small Finds")
-                small_finds_layer = self._create_merged_layer(layer_name, filtered_small_finds_features)
+                small_finds_layer = self._create_merged_layer("New Small Finds", filtered_small_finds_features)
                 if small_finds_layer:
                     QgsProject.instance().addMapLayer(small_finds_layer)
                     layers_created += 1
@@ -288,73 +263,52 @@ class FieldProjectImportService(IFieldProjectImportService):
         
         return layer_files
     
-    def _process_data_gpkg(self, data_gpkg_path: str) -> Dict[str, List[Any]]:
+    def _get_configured_layer_info(self) -> Dict[str, Any]:
         """
-        Process a data.gpkg file to extract Objects and Features layers.
+        Get the configured layer information (name and geometry type) from settings.
         
-        Args:
-            data_gpkg_path: Path to the data.gpkg file
-            
         Returns:
-            Dictionary mapping layer types to lists of features
+            Dictionary mapping layer types to their names and geometry types.
         """
-        features = {
-            'objects': [],
-            'features': [],
-            'small_finds': []
+        configured_layers = {
+            'objects': {'name': None, 'geometry_type': None},
+            'features': {'name': None, 'geometry_type': None},
+            'small_finds': {'name': None, 'geometry_type': None}
         }
         
-        try:
-            # Load the data.gpkg as a vector layer
-            data_layer = QgsVectorLayer(data_gpkg_path, "temp_data", "ogr")
-            if not data_layer.isValid():
-                return features
-            
-            # Get sublayers from the data.gpkg
-            sublayers = data_layer.dataProvider().subLayers()
-            
-            for sublayer in sublayers:
-                # Parse sublayer info: "0!!::!!LayerName!!::!!GeometryType!!::!!CRS"
-                parts = sublayer.split("!!::!!")
-                if len(parts) >= 2:
-                    layer_name = parts[1]
-                    print(f"Found sublayer: {layer_name}")
-                    
-                    # Create layer URI for the sublayer
-                    layer_uri = f"{data_gpkg_path}|layername={layer_name}"
-                    layer = QgsVectorLayer(layer_uri, layer_name, "ogr")
-                    
-                    if layer.isValid():
-                        print(f"Layer {layer_name} is valid, geometry type: {layer.geometryType()}")
-                        if self._is_objects_layer_name(layer_name):
-                            print(f"Processing {layer_name} as Objects layer")
-                            layer_features = list(layer.getFeatures())
-                            print(f"  Found {len(layer_features)} features in {layer_name}")
-                            features['objects'].extend(layer_features)
-                        elif self._is_features_layer_name(layer_name):
-                            print(f"Processing {layer_name} as Features layer")
-                            layer_features = list(layer.getFeatures())
-                            print(f"  Found {len(layer_features)} features in {layer_name}")
-                            features['features'].extend(layer_features)
-                        elif self._is_small_finds_layer_name(layer_name):
-                            print(f"Processing {layer_name} as Small Finds layer")
-                            layer_features = list(layer.getFeatures())
-                            print(f"  Found {len(layer_features)} features in {layer_name}")
-                            features['small_finds'].extend(layer_features)
-                        else:
-                            print(f"Layer {layer_name} not recognized as Objects, Features, or Small Finds layer")
+        # Get objects layer info
+        objects_layer_id = self._settings_manager.get_value('objects_layer', '')
+        if objects_layer_id:
+            layer_info = self._layer_service.get_layer_info(objects_layer_id)
+            if layer_info:
+                configured_layers['objects']['name'] = layer_info['name']
+                configured_layers['objects']['geometry_type'] = layer_info.get('geometry_type', 2)  # Default to polygon
         
-        except Exception as e:
-            print(f"Error processing data.gpkg {data_gpkg_path}: {str(e)}")
+        # Get features layer info
+        features_layer_id = self._settings_manager.get_value('features_layer', '')
+        if features_layer_id:
+            layer_info = self._layer_service.get_layer_info(features_layer_id)
+            if layer_info:
+                configured_layers['features']['name'] = layer_info['name']
+                configured_layers['features']['geometry_type'] = layer_info.get('geometry_type', 2)  # Default to polygon
         
-        return features
-    
-    def _process_individual_layers(self, layer_files: Dict[str, List[str]]) -> Dict[str, List[Any]]:
+        # Get small finds layer info
+        small_finds_layer_id = self._settings_manager.get_value('small_finds_layer', '')
+        if small_finds_layer_id:
+            layer_info = self._layer_service.get_layer_info(small_finds_layer_id)
+            if layer_info:
+                configured_layers['small_finds']['name'] = layer_info['name']
+                configured_layers['small_finds']['geometry_type'] = layer_info.get('geometry_type', 0)  # Default to point
+        
+        return configured_layers
+
+    def _process_individual_layers_with_matching(self, layer_files: Dict[str, List[str]], configured_layers: Dict[str, Any]) -> Dict[str, List[Any]]:
         """
-        Process individual layer files (not in data.gpkg).
+        Process individual layer files and match them to configured layers.
         
         Args:
             layer_files: Dictionary mapping layer types to lists of file paths
+            configured_layers: Dictionary containing configured layer info (name, geometry type)
             
         Returns:
             Dictionary mapping layer types to lists of features
@@ -367,32 +321,61 @@ class FieldProjectImportService(IFieldProjectImportService):
         
         # Process Objects layer files
         for file_path in layer_files['objects']:
-            try:
-                layer = QgsVectorLayer(file_path, "temp_objects", "ogr")
-                if layer.isValid():
-                    features['objects'].extend(list(layer.getFeatures()))
-            except Exception as e:
-                print(f"Error processing Objects layer {file_path}: {str(e)}")
+            expected_name = configured_layers['objects']['name']
+            layer = self._load_layer(f"{file_path}|layername={expected_name}", expected_name)
+            if not layer:
+                print(f"Skipping Objects layer {expected_name} in {file_path} (not found or invalid)")
+                continue
+            if not self._is_valid_geometry_type(layer, configured_layers['objects']['geometry_type']):
+                print(f"Skipping Objects layer {layer.name()} with incompatible geometry type: {layer.geometryType()} (expected: {configured_layers['objects']['geometry_type']})")
+                continue
+            features['objects'].extend(list(layer.getFeatures()))
+            print(f"Imported Objects layer {layer.name()} with {layer.featureCount()} features")
         
         # Process Features layer files
         for file_path in layer_files['features']:
-            try:
-                layer = QgsVectorLayer(file_path, "temp_features", "ogr")
-                if layer.isValid():
-                    features['features'].extend(list(layer.getFeatures()))
-            except Exception as e:
-                print(f"Error processing Features layer {file_path}: {str(e)}")
+            expected_name = configured_layers['features']['name']
+            layer = self._load_layer(f"{file_path}|layername={expected_name}", expected_name)
+            if not layer:
+                print(f"Skipping Features layer {expected_name} in {file_path} (not found or invalid)")
+                continue
+            if not self._is_valid_geometry_type(layer, configured_layers['features']['geometry_type']):
+                print(f"Skipping Features layer {layer.name()} with incompatible geometry type: {layer.geometryType()} (expected: {configured_layers['features']['geometry_type']})")
+                continue
+            features['features'].extend(list(layer.getFeatures()))
+            print(f"Imported Features layer {layer.name()} with {layer.featureCount()} features")
         
         # Process Small Finds layer files
         for file_path in layer_files['small_finds']:
-            try:
-                layer = QgsVectorLayer(file_path, "temp_small_finds", "ogr")
-                if layer.isValid():
-                    features['small_finds'].extend(list(layer.getFeatures()))
-            except Exception as e:
-                print(f"Error processing Small Finds layer {file_path}: {str(e)}")
+            expected_name = configured_layers['small_finds']['name']
+            layer = self._load_layer(f"{file_path}|layername={expected_name}", expected_name)
+            if not layer:
+                print(f"Skipping Small Finds layer {expected_name} in {file_path} (not found or invalid)")
+                continue
+            if not self._is_valid_geometry_type(layer, configured_layers['small_finds']['geometry_type']):
+                print(f"Skipping Small Finds layer {layer.name()} with incompatible geometry type: {layer.geometryType()} (expected: {configured_layers['small_finds']['geometry_type']})")
+                continue
+            features['small_finds'].extend(list(layer.getFeatures()))
+            print(f"Imported Small Finds layer {layer.name()} with {layer.featureCount()} features")
         
         return features
+
+    def _matches_configured_layer_name(self, layer_name: str, configured_name: Optional[str]) -> bool:
+        """
+        Check if a layer name matches the configured layer name.
+        
+        Args:
+            layer_name: The layer name to check
+            configured_name: The configured layer name to match against
+            
+        Returns:
+            True if the names match, False otherwise
+        """
+        if not configured_name:
+            return False
+        
+        # Exact match (case-insensitive)
+        return layer_name.lower() == configured_name.lower()
     
     def _create_merged_layer(self, layer_name: str, features: List[Any]) -> Optional[Any]:
         """
@@ -415,7 +398,9 @@ class FieldProjectImportService(IFieldProjectImportService):
             field_types = {}
             
             for feature in features:
-                if feature.geometry() and not feature.geometry().isEmpty():
+                # Check if feature has geometry
+                has_geometry = feature.geometry() and not feature.geometry().isEmpty()
+                if has_geometry:
                     geometry_types.add(feature.geometry().type())
                     # Debug: print geometry type for first few features
                     if len(geometry_types) <= 3:
@@ -442,12 +427,19 @@ class FieldProjectImportService(IFieldProjectImportService):
             point_features = []
             
             for feature in features:
-                if feature.geometry() and not feature.geometry().isEmpty():
+                # Check if feature has geometry
+                has_geometry = feature.geometry() and not feature.geometry().isEmpty()
+                if has_geometry:
                     geom_type = feature.geometry().type()
                     if geom_type == 2:  # PolygonGeometry (type 2 can be either Line or Polygon, but in this context it's Polygon)
                         polygon_features.append(feature)
                     elif geom_type == 1:  # PointGeometry
                         point_features.append(feature)
+                    elif geom_type == 0:  # NoGeometry - but check if it's actually a point
+                        # For small finds, geometry type 0 might actually be Point geometry
+                        # Check if this is a small finds layer and assume Point geometry
+                        if "petits objets" in layer_name.lower() or "small" in layer_name.lower():
+                            point_features.append(feature)
                     # Note: LineGeometry would be type 2 as well, but we're assuming these are polygons based on user input
             
             # Determine geometry type based on actual features
@@ -462,8 +454,9 @@ class FieldProjectImportService(IFieldProjectImportService):
                 geom_string = "MultiPoint" if has_multipart_points else "Point"
                 print(f"Creating {layer_name} layer with {len(point_features)} point features, multipart: {has_multipart_points}")
             else:
-                geom_string = "Point"  # Default fallback
-                print(f"Creating {layer_name} layer with default Point geometry (no features with geometry found)")
+                # No features have geometry, create a layer without geometry
+                geom_string = "None"  # No geometry
+                print(f"Creating {layer_name} layer with no geometry (all features are attribute-only)")
             
             # Get CRS - try project CRS first, then fall back to default
             project_crs = QgsProject.instance().crs()
@@ -507,7 +500,14 @@ class FieldProjectImportService(IFieldProjectImportService):
             print(f"Attempting to add {len(features)} features to {layer_name} layer")
             
             for feature in features:
-                if feature.geometry() and not feature.geometry().isEmpty():
+                # Create a new feature with the correct field structure
+                new_feature = QgsFeature(layer.fields())
+                
+                # Handle geometry based on layer type and feature geometry
+                if geom_string == "None":
+                    # Layer has no geometry, so don't set any geometry
+                    pass
+                elif feature.geometry() and not feature.geometry().isEmpty():
                     # Check if geometry type is compatible
                     feature_geom_type = feature.geometry().type()
                     
@@ -523,59 +523,43 @@ class FieldProjectImportService(IFieldProjectImportService):
                     elif geom_string == "MultiPolygon" and feature_geom_type == 2:
                         # MultiPolygon layers can accept both single and multipart polygon features
                         is_compatible = True
+                    elif geom_string == "Point" and feature_geom_type == 0:
+                        # For small finds, geometry type 0 might actually be Point geometry
+                        is_compatible = True
                     
                     if is_compatible:
-                        # Create a new feature with the correct field structure
-                        new_feature = QgsFeature(layer.fields())
-                        
                         # Copy geometry
                         new_feature.setGeometry(feature.geometry())
-                        
-                        # Copy attributes by field name
-                        for i, field in enumerate(layer.fields()):
-                            field_name = field.name()
-                            source_field_idx = feature.fields().indexOf(field_name)
-                            if source_field_idx >= 0:
-                                new_feature[field_name] = feature[field_name]
-                            else:
-                                # Field doesn't exist in source, set to NULL
-                                new_feature[field_name] = None
-                        
-                        # Add the new feature
-                        success = layer.addFeature(new_feature)
-                        if success:
-                            added_count += 1
-                        else:
-                            skipped_count += 1
-                            print(f"Failed to add feature with geometry: type={feature_geom_type}, multipart={feature.geometry().isMultipart()}")
-                            # Get more details about the failure
-                            print(f"  Layer error: {layer.lastError()}")
                     else:
                         skipped_count += 1
                         print(f"Skipped feature with incompatible geometry: type={feature_geom_type}, multipart={feature.geometry().isMultipart()} for layer type {geom_string}")
+                        continue
                 else:
-                    # Create a new feature with the correct field structure for features without geometry
-                    new_feature = QgsFeature(layer.fields())
-                    
-                    # Copy attributes by field name
-                    for i, field in enumerate(layer.fields()):
-                        field_name = field.name()
-                        source_field_idx = feature.fields().indexOf(field_name)
-                        if source_field_idx >= 0:
-                            new_feature[field_name] = feature[field_name]
-                        else:
-                            # Field doesn't exist in source, set to NULL
-                            new_feature[field_name] = None
-                    
-                    # Add the new feature
-                    success = layer.addFeature(new_feature)
-                    if success:
-                        added_count += 1
+                    # Feature has no geometry, which is fine for layers with geometry (will be NULL)
+                    pass
+                
+                # Copy attributes by field name
+                for i, field in enumerate(layer.fields()):
+                    field_name = field.name()
+                    source_field_idx = feature.fields().indexOf(field_name)
+                    if source_field_idx >= 0:
+                        new_feature[field_name] = feature[field_name]
                     else:
-                        skipped_count += 1
+                        # Field doesn't exist in source, set to NULL
+                        new_feature[field_name] = None
+                
+                # Add the new feature
+                success = layer.addFeature(new_feature)
+                if success:
+                    added_count += 1
+                else:
+                    skipped_count += 1
+                    if feature.geometry() and not feature.geometry().isEmpty():
+                        print(f"Failed to add feature with geometry: type={feature.geometry().type()}, multipart={feature.geometry().isMultipart()}")
+                    else:
                         print(f"Failed to add feature without geometry")
-                        # Get more details about the failure
-                        print(f"  Layer error: {layer.lastError()}")
+                    # Get more details about the failure
+                    print(f"  Layer error: {layer.lastError()}")
             
             print(f"Added {added_count} features, skipped {skipped_count} features to {layer_name} layer")
             
@@ -593,20 +577,71 @@ class FieldProjectImportService(IFieldProjectImportService):
     def _is_objects_layer_file(self, filename: str) -> bool:
         """Check if a filename represents an Objects layer file."""
         filename_lower = filename.lower()
-        return (filename_lower.endswith('.gpkg') and 
-                ('objects' in filename_lower or 'obj' in filename_lower))
+        
+        # Check if it's a .gpkg file
+        if not filename_lower.endswith('.gpkg'):
+            return False
+        
+        # Remove .gpkg extension for name comparison
+        name_without_ext = filename_lower[:-5]  # Remove '.gpkg'
+        
+        # First, check against configured objects layer name
+        objects_layer_id = self._settings_manager.get_value('objects_layer', '')
+        if objects_layer_id:
+            layer_info = self._layer_service.get_layer_info(objects_layer_id)
+            if layer_info and layer_info['name'].lower() == name_without_ext:
+                return True
+        
+        # Fallback to common patterns (but be more specific)
+        return (name_without_ext == 'objects' or 
+                name_without_ext == 'objets' or 
+                name_without_ext == 'obj')
     
     def _is_features_layer_file(self, filename: str) -> bool:
         """Check if a filename represents a Features layer file."""
         filename_lower = filename.lower()
-        return (filename_lower.endswith('.gpkg') and 
-                ('features' in filename_lower or 'feat' in filename_lower))
+        
+        # Check if it's a .gpkg file
+        if not filename_lower.endswith('.gpkg'):
+            return False
+        
+        # Remove .gpkg extension for name comparison
+        name_without_ext = filename_lower[:-5]  # Remove '.gpkg'
+        
+        # First, check against configured features layer name
+        features_layer_id = self._settings_manager.get_value('features_layer', '')
+        if features_layer_id:
+            layer_info = self._layer_service.get_layer_info(features_layer_id)
+            if layer_info and layer_info['name'].lower() == name_without_ext:
+                return True
+        
+        # Fallback to common patterns (but be more specific)
+        return (name_without_ext == 'features' or 
+                name_without_ext == 'feat' or
+                name_without_ext == 'fugaces')
     
     def _is_small_finds_layer_file(self, filename: str) -> bool:
         """Check if a filename represents a Small Finds layer file."""
         filename_lower = filename.lower()
-        return (filename_lower.endswith('.gpkg') and 
-                ('small_finds' in filename_lower or 'small_finds' in filename_lower))
+        
+        # Check if it's a .gpkg file
+        if not filename_lower.endswith('.gpkg'):
+            return False
+        
+        # Remove .gpkg extension for name comparison
+        name_without_ext = filename_lower[:-5]  # Remove '.gpkg'
+        
+        # First, check against configured small finds layer name
+        small_finds_layer_id = self._settings_manager.get_value('small_finds_layer', '')
+        if small_finds_layer_id:
+            layer_info = self._layer_service.get_layer_info(small_finds_layer_id)
+            if layer_info and layer_info['name'].lower() == name_without_ext:
+                return True
+        
+        # Fallback to common patterns (but be more specific)
+        return (name_without_ext == 'small_finds' or 
+                name_without_ext == 'smallfinds' or
+                name_without_ext == 'esquilles')
     
     def _is_objects_layer_name(self, layer_name: str) -> bool:
         """Check if a layer name represents an Objects layer."""
@@ -788,3 +823,48 @@ class FieldProjectImportService(IFieldProjectImportService):
         
         # Combine attributes and geometry signatures
         return f"{attr_signature}|GEOM:{geom_signature}" 
+
+    def _load_layer(self, file_path: str, layer_name: str) -> Optional[QgsVectorLayer]:
+        """
+        Load a layer from a file path.
+        
+        Args:
+            file_path: Path to the layer file (e.g., 'Objects.gpkg')
+            layer_name: Name to give to the loaded layer in QGIS
+            
+        Returns:
+            QGIS VectorLayer object, or None if loading failed
+        """
+        try:
+            layer = QgsVectorLayer(file_path, layer_name, "ogr")
+            if layer.isValid():
+                return layer
+            else:
+                print(f"Failed to load layer {layer_name} from {file_path}: {layer.lastError().message()}")
+                return None
+        except Exception as e:
+            print(f"Error loading layer {layer_name} from {file_path}: {str(e)}")
+            return None
+
+    def _is_valid_geometry_type(self, layer, expected_type):
+        """
+        Check if the layer's geometry type matches the expected type(s).
+        Accepts both string and integer representations for backward compatibility.
+        """
+        geom_type = layer.geometryType()
+        
+        # Accept both string and int for expected_type
+        if isinstance(expected_type, str):
+            expected_type = expected_type.lower()
+        
+        # Objects and Features: Polygon or MultiPolygon
+        if expected_type in ("polygon", QgsWkbTypes.PolygonGeometry, 2):
+            return geom_type in (QgsWkbTypes.PolygonGeometry, 2)
+        # Small Finds: Point, MultiPoint, or NoGeometry
+        elif expected_type in ("point", QgsWkbTypes.PointGeometry, 0):
+            return geom_type in (QgsWkbTypes.PointGeometry, QgsWkbTypes.NoGeometry, 0, 4)
+        # Features: LineString or MultiLineString (if needed in future)
+        elif expected_type in ("linestring", QgsWkbTypes.LineGeometry, 1):
+            return geom_type in (QgsWkbTypes.LineGeometry, 1)
+        # Fallback: strict equality
+        return geom_type == expected_type 
