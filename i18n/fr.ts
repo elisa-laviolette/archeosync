@@ -857,6 +857,26 @@ Consultez la console pour plus de détails sur les erreurs.</translation>
         <source>Skipped Numbers Warnings:</source>
         <translation>Avertissements de numéros manqués :</translation>
     </message>
+    <message>
+        <location filename="../ui/import_summary_dialog.py" line="350"/>
+        <source>Open Attribute Table</source>
+        <translation>Ouvrir la table attributaire</translation>
+    </message>
+    <message>
+        <location filename="../ui/import_summary_dialog.py" line="380"/>
+        <source>Attribute Table Opened</source>
+        <translation>Table attributaire ouverte</translation>
+    </message>
+    <message>
+        <location filename="../ui/import_summary_dialog.py" line="382"/>
+        <source>Attribute table for '{layer_name}' has been opened with filter:\n{filter_expression}</source>
+        <translation>La table attributaire pour '{layer_name}' a été ouverte avec le filtre :\n{filter_expression}</translation>
+    </message>
+    <message>
+        <location filename="../ui/import_summary_dialog.py" line="390"/>
+        <source>Could not open attribute table: {error}</source>
+        <translation>Impossible d'ouvrir la table attributaire : {error}</translation>
+    </message>
 </context>
 <context>
     <name>DuplicateObjectsDetectorService</name>

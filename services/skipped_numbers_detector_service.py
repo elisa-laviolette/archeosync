@@ -10,6 +10,7 @@ Key Features:
 - Provides detailed warnings about skipped numbers
 - Supports translation for warning messages
 - Integrates with existing warning display system
+- Returns structured warning data for attribute table filtering
 
 Architecture Benefits:
 - Single Responsibility: Only handles skipped number detection
@@ -27,7 +28,13 @@ Usage:
     warnings = service.detect_skipped_numbers()
 """
 
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Union
+
+try:
+    from ..ui.import_summary_dialog import WarningData
+except ImportError:
+    from ui.import_summary_dialog import WarningData
+
 from qgis.core import QgsProject
 
 
@@ -53,12 +60,12 @@ class SkippedNumbersDetectorService:
         self._layer_service = layer_service
         self._translation_service = translation_service
     
-    def detect_skipped_numbers(self) -> List[str]:
+    def detect_skipped_numbers(self) -> List[Union[str, WarningData]]:
         """
         Detect skipped numbers in recording areas.
         
         Returns:
-            List of warning messages about skipped numbers
+            List of warning messages or structured warning data about skipped numbers
         """
         warnings = []
         
@@ -106,7 +113,7 @@ class SkippedNumbersDetectorService:
                                            recording_areas_layer: Any, 
                                            number_field: str, 
                                            recording_area_field: str, 
-                                           layer_name: str) -> List[str]:
+                                           layer_name: str) -> List[Union[str, WarningData]]:
         """
         Detect skipped numbers within a single layer.
         
@@ -118,7 +125,7 @@ class SkippedNumbersDetectorService:
             layer_name: The name of the layer for warning messages
             
         Returns:
-            List of warning messages
+            List of warning messages or structured warning data
         """
         warnings = []
         
@@ -168,11 +175,21 @@ class SkippedNumbersDetectorService:
                     # Get recording area name
                     recording_area_name = self._get_recording_area_name(recording_areas_layer, recording_area_id)
                     
-                    warning = self._create_skipped_numbers_warning(
-                        recording_area_name, gaps, layer_name
+                    # Get context numbers (gaps + before/after)
+                    context_numbers = self._get_context_numbers_for_gaps(numbers, gaps)
+                    
+                    # Create structured warning data
+                    warning_data = WarningData(
+                        message=self._create_skipped_numbers_warning(
+                            recording_area_name, gaps, layer_name
+                        ),
+                        recording_area_name=recording_area_name,
+                        layer_name=layer_name,
+                        filter_expression=f'"{recording_area_field}" = \'{recording_area_id}\' AND "{number_field}" IN ({",".join(map(str, context_numbers))})',
+                        skipped_numbers=gaps
                     )
-                    warnings.append(warning)
-                    print(f"[DEBUG] Found skipped numbers in {layer_name}: {warning}")
+                    warnings.append(warning_data)
+                    print(f"[DEBUG] Found skipped numbers in {layer_name}: {warning_data.message}")
             
             print(f"[DEBUG] Found {len(warnings)} skipped number warnings within {layer_name}")
             
@@ -203,20 +220,53 @@ class SkippedNumbersDetectorService:
             current = numbers[i]
             next_num = numbers[i + 1]
             
-            # Check for gaps (missing numbers between current and next)
+            # Check for gaps between current and next number
             for missing in range(current + 1, next_num):
                 gaps.append(missing)
         
         return gaps
+    
+    def _get_context_numbers_for_gaps(self, numbers: List[int], gaps: List[int]) -> List[int]:
+        """
+        Get the numbers before and after gaps to provide context.
+        
+        Args:
+            numbers: List of sorted integers
+            gaps: List of missing numbers (gaps)
+            
+        Returns:
+            List of numbers including gaps and their context (before/after)
+        """
+        if not gaps or not numbers:
+            return gaps
+        
+        context_numbers = set(gaps)  # Start with the gaps
+        
+        # Find numbers before and after each gap
+        for gap in gaps:
+            # Find the number before the gap
+            for num in numbers:
+                if num < gap:
+                    context_numbers.add(num)
+                else:
+                    break
+            
+            # Find the number after the gap
+            for num in numbers:
+                if num > gap:
+                    context_numbers.add(num)
+                    break
+        
+        return sorted(list(context_numbers))
     
     def _detect_skipped_numbers_between_layers(self, 
                                              original_objects_layer: Any, 
                                              new_objects_layer: Any, 
                                              recording_areas_layer: Any, 
                                              number_field: str, 
-                                             recording_area_field: str) -> List[str]:
+                                             recording_area_field: str) -> List[Union[str, WarningData]]:
         """
-        Detect skipped numbers between original objects and new objects layers.
+        Detect skipped numbers between original and new objects layers.
         
         Args:
             original_objects_layer: The original objects layer
@@ -226,7 +276,7 @@ class SkippedNumbersDetectorService:
             recording_area_field: The field name for recording area
             
         Returns:
-            List of warning messages
+            List of warning messages or structured warning data
         """
         warnings = []
         
@@ -249,65 +299,78 @@ class SkippedNumbersDetectorService:
                 print(f"[DEBUG] Recording area field '{recording_area_field}' not found in one or both layers")
                 return warnings
             
-            print(f"[DEBUG] Field indices - original number: {original_number_field_idx}, new number: {new_number_field_idx}")
-            print(f"[DEBUG] Field indices - original recording area: {original_recording_area_field_idx}, new recording area: {new_recording_area_field_idx}")
+            # Group objects by recording area for both layers
+            original_recording_area_objects = {}
+            new_recording_area_objects = {}
             
-            # Collect all numbers by recording area from both layers
-            combined_recording_area_objects = {}
-            
-            # Add numbers from original objects layer
+            # Process original objects
             for feature in original_objects_layer.getFeatures():
                 recording_area_id = feature.attribute(original_recording_area_field_idx)
                 number = feature.attribute(original_number_field_idx)
                 
                 if recording_area_id and number:
-                    if recording_area_id not in combined_recording_area_objects:
-                        combined_recording_area_objects[recording_area_id] = []
+                    if recording_area_id not in original_recording_area_objects:
+                        original_recording_area_objects[recording_area_id] = []
                     
                     try:
                         number_int = int(number)
-                        combined_recording_area_objects[recording_area_id].append(number_int)
+                        original_recording_area_objects[recording_area_id].append(number_int)
                     except (ValueError, TypeError):
-                        # Skip non-numeric numbers
                         pass
             
-            # Add numbers from new objects layer
+            # Process new objects
             for feature in new_objects_layer.getFeatures():
                 recording_area_id = feature.attribute(new_recording_area_field_idx)
                 number = feature.attribute(new_number_field_idx)
                 
                 if recording_area_id and number:
-                    if recording_area_id not in combined_recording_area_objects:
-                        combined_recording_area_objects[recording_area_id] = []
+                    if recording_area_id not in new_recording_area_objects:
+                        new_recording_area_objects[recording_area_id] = []
                     
                     try:
                         number_int = int(number)
-                        combined_recording_area_objects[recording_area_id].append(number_int)
+                        new_recording_area_objects[recording_area_id].append(number_int)
                     except (ValueError, TypeError):
-                        # Skip non-numeric numbers
                         pass
             
-            print(f"[DEBUG] Found {len(combined_recording_area_objects)} recording areas with combined objects")
+            # Check for gaps in each recording area
+            all_recording_areas = set(original_recording_area_objects.keys()) | set(new_recording_area_objects.keys())
             
-            # Check for skipped numbers in each recording area
-            for recording_area_id, numbers in combined_recording_area_objects.items():
-                if len(numbers) < 2:
-                    # Need at least 2 numbers to detect gaps
+            for recording_area_id in all_recording_areas:
+                original_numbers = original_recording_area_objects.get(recording_area_id, [])
+                new_numbers = new_recording_area_objects.get(recording_area_id, [])
+                
+                # Combine all numbers for this recording area
+                all_numbers = original_numbers + new_numbers
+                
+                if len(all_numbers) < 2:
                     continue
                 
-                # Sort numbers and find gaps
-                numbers.sort()
-                gaps = self._find_gaps_in_sequence(numbers)
+                # Sort and find gaps
+                all_numbers.sort()
+                gaps = self._find_gaps_in_sequence(all_numbers)
                 
                 if gaps:
                     # Get recording area name
                     recording_area_name = self._get_recording_area_name(recording_areas_layer, recording_area_id)
                     
-                    warning = self._create_skipped_numbers_warning(
-                        recording_area_name, gaps, "Objects and New Objects"
+                    # Get context numbers (gaps + before/after)
+                    context_numbers = self._get_context_numbers_for_gaps(all_numbers, gaps)
+                    
+                    # Create structured warning data for between-layer skipped numbers
+                    warning_data = WarningData(
+                        message=self._create_skipped_numbers_warning(
+                            recording_area_name, gaps, f"{original_objects_layer.name()} and New Objects"
+                        ),
+                        recording_area_name=recording_area_name,
+                        layer_name=original_objects_layer.name(),
+                        filter_expression=f'"{recording_area_field}" = \'{recording_area_id}\' AND "{number_field}" IN ({",".join(map(str, context_numbers))})',
+                        skipped_numbers=gaps,
+                        second_layer_name="New Objects",
+                        second_filter_expression=f'"{recording_area_field}" = \'{recording_area_id}\' AND "{number_field}" IN ({",".join(map(str, context_numbers))})'
                     )
-                    warnings.append(warning)
-                    print(f"[DEBUG] Found skipped numbers between layers: {warning}")
+                    warnings.append(warning_data)
+                    print(f"[DEBUG] Found skipped numbers: {warning_data.message}")
             
             print(f"[DEBUG] Found {len(warnings)} skipped number warnings between layers")
             
@@ -320,16 +383,21 @@ class SkippedNumbersDetectorService:
     
     def _get_recording_area_field(self, objects_layer: Any, recording_areas_layer: Any) -> Optional[str]:
         """
-        Get the recording area field name from the relation between objects and recording areas layers.
+        Get the field name in the objects layer that references the recording areas layer.
         
         Args:
             objects_layer: The objects layer
             recording_areas_layer: The recording areas layer
             
         Returns:
-            The recording area field name, or None if not found
+            The field name that references the recording areas layer, or None if not found
         """
         try:
+            print(f"[DEBUG] _get_recording_area_field called")
+            print(f"[DEBUG] Objects layer: {objects_layer.name() if objects_layer else 'None'}")
+            print(f"[DEBUG] Recording areas layer: {recording_areas_layer.name() if recording_areas_layer else 'None'}")
+            
+            # Get the relation manager
             project = QgsProject.instance()
             relation_manager = project.relationManager()
             
@@ -369,33 +437,31 @@ class SkippedNumbersDetectorService:
             recording_area_id: The ID of the recording area
             
         Returns:
-            The name of the recording area, or the ID as string if not found
+            The name of the recording area, or the ID as string if name not found
         """
         try:
-            # Try to find the recording area by ID
-            for feature in recording_areas_layer.getFeatures():
-                if feature.id() == recording_area_id:
-                    # Try to get a name field (common field names for names)
-                    for field_name in ['name', 'Name', 'NAME', 'label', 'Label', 'LABEL']:
-                        field_idx = recording_areas_layer.fields().indexOf(field_name)
-                        if field_idx >= 0:
-                            name = feature.attribute(field_idx)
-                            if name:
-                                return str(name)
-                    
-                    # If no name field found, return the ID
-                    return str(recording_area_id)
+            # Try to find a name field
+            name_fields = ['name', 'title', 'label', 'description', 'comment']
+            for field_name in name_fields:
+                field_idx = recording_areas_layer.fields().indexOf(field_name)
+                if field_idx >= 0:
+                    # Find the feature with this ID
+                    for feature in recording_areas_layer.getFeatures():
+                        if feature.id() == recording_area_id:
+                            name_value = feature[field_idx]
+                            if name_value and str(name_value) != 'NULL':
+                                return str(name_value)
             
-            # If not found, return the ID as string
+            # Fallback to ID if no name found
             return str(recording_area_id)
             
         except Exception as e:
-            print(f"[DEBUG] Error getting recording area name: {e}")
+            print(f"Error getting recording area name: {e}")
             return str(recording_area_id)
     
     def _find_layer_by_name(self, layer_name: str) -> Optional[Any]:
         """
-        Find a layer by name.
+        Find a layer by name in the current QGIS project.
         
         Args:
             layer_name: The name of the layer to find
@@ -405,10 +471,12 @@ class SkippedNumbersDetectorService:
         """
         try:
             project = QgsProject.instance()
-            layers = project.mapLayersByName(layer_name)
-            return layers[0] if layers else None
+            for layer in project.mapLayers().values():
+                if layer.name() == layer_name:
+                    return layer
+            return None
         except Exception as e:
-            print(f"[DEBUG] Error finding layer by name: {e}")
+            print(f"Error finding layer by name: {e}")
             return None
     
     def _create_skipped_numbers_warning(self, 
@@ -420,29 +488,23 @@ class SkippedNumbersDetectorService:
         
         Args:
             recording_area_name: The name of the recording area
-            gaps: List of missing numbers
+            gaps: List of skipped numbers
             layer_name: The name of the layer where gaps were found
             
         Returns:
             The warning message
         """
         try:
-            # Format the gaps list
-            if len(gaps) == 1:
-                gaps_text = str(gaps[0])
-            else:
-                gaps_text = ", ".join(map(str, gaps))
-            
             # Try to translate the message
             message = self._translation_service.tr(
                 "Recording Area '{recording_area_name}' has skipped numbers: {gaps} in {layer_name}"
             ).format(
                 recording_area_name=recording_area_name,
-                gaps=gaps_text,
+                gaps=gaps,
                 layer_name=layer_name
             )
         except Exception:
             # Fallback to English if translation fails
-            message = f"Recording Area '{recording_area_name}' has skipped numbers: {gaps_text} in {layer_name}"
+            message = f"Recording Area '{recording_area_name}' has skipped numbers: {gaps} in {layer_name}"
         
         return message 

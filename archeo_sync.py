@@ -607,8 +607,8 @@ class ArcheoSyncPlugin:
                 skipped_numbers_warnings=skipped_numbers_warnings
             )
             
-            # Show the dialog
-            dialog = ImportSummaryDialog(summary)
+            # Show the dialog with QGIS interface for attribute table functionality
+            dialog = ImportSummaryDialog(summary, iface=self._iface)
             dialog.exec_()
             
         except Exception as e:

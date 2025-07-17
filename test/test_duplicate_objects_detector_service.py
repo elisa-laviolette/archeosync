@@ -85,7 +85,7 @@ class TestDuplicateObjectsDetectorService(unittest.TestCase):
         mock_recording_areas_layer = Mock()
         
         warnings = self.service._detect_duplicates_within_layer(
-            mock_layer, mock_recording_areas_layer, "number_field", "Test Layer"
+            mock_layer, mock_recording_areas_layer, "number_field", "recording_area", "Test Layer"
         )
         
         self.assertEqual(len(warnings), 1)
@@ -107,10 +107,17 @@ class TestDuplicateObjectsDetectorService(unittest.TestCase):
         """Test getting recording area name using display expression."""
         # Mock layer with display expression
         mock_recording_areas_layer = Mock()
-        mock_recording_areas_layer.displayExpression.return_value = "name"
         
-        # Mock the evaluation of display expression
-        mock_recording_areas_layer.attribute.return_value = "Display Name"
+        # Mock fields to return a field at index 0
+        mock_fields = Mock()
+        mock_fields.indexOf.return_value = 0  # Name field found at index 0
+        mock_recording_areas_layer.fields.return_value = mock_fields
+        
+        # Mock feature with name
+        mock_feature = Mock()
+        mock_feature.id.return_value = 1
+        mock_feature.__getitem__.return_value = "Display Name"  # Use __getitem__ instead of attribute
+        mock_recording_areas_layer.getFeatures.return_value = [mock_feature]
         
         name = self.service._get_recording_area_name(mock_recording_areas_layer, 1)
         
@@ -118,17 +125,18 @@ class TestDuplicateObjectsDetectorService(unittest.TestCase):
     
     def test_create_duplicate_warning_with_translation(self):
         """Test creating duplicate warning with translation."""
-        self.mock_translation_service.translate.return_value = "Translated Warning"
+        # Mock the translation service to return the expected string
+        self.mock_translation_service.tr.return_value = "Recording Area '{recording_area_name}' has {count} objects with number {number} in {layer_name}"
         
         warning = self.service._create_duplicate_warning(
             recording_area_name="Test Area",
+            count=2,
             number="123",
-            layer_name="Test Layer",
-            count=2
+            layer_name="Test Layer"
         )
         
-        self.assertEqual(warning, "Translated Warning")
-        self.mock_translation_service.translate.assert_called_once()
+        self.assertEqual(warning, "Recording Area 'Test Area' has 2 objects with number 123 in Test Layer")
+        self.mock_translation_service.tr.assert_called_once()
     
     def test_create_duplicate_warning_without_translation(self):
         """Test creating duplicate warning without translation service."""

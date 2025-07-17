@@ -10,6 +10,7 @@ Key Features:
 - Provides detailed warnings for each duplicate found
 - Integrates with existing layer service and settings
 - Supports translation for warning messages
+- Returns structured warning data for attribute table filtering
 
 Architecture Benefits:
 - Single Responsibility: Only handles duplicate object detection
@@ -27,12 +28,14 @@ Usage:
     warnings = detector.detect_duplicate_objects()
 """
 
-from typing import List, Optional, Any
+from typing import List, Optional, Any, Union
 
 try:
     from ..core.interfaces import ISettingsManager, ILayerService, ITranslationService
+    from ..ui.import_summary_dialog import WarningData
 except ImportError:
     from core.interfaces import ISettingsManager, ILayerService, ITranslationService
+    from ui.import_summary_dialog import WarningData
 
 
 class DuplicateObjectsDetectorService:
@@ -83,12 +86,12 @@ class DuplicateObjectsDetectorService:
             print(f"Error finding layer by name: {e}")
             return None
 
-    def detect_duplicate_objects(self) -> List[str]:
+    def detect_duplicate_objects(self) -> List[Union[str, WarningData]]:
         """
         Detect duplicate objects with the same recording area and number.
         
         Returns:
-            List of warning messages about duplicate objects
+            List of warning messages or structured warning data about duplicate objects
         """
         warnings = []
         
@@ -115,7 +118,7 @@ class DuplicateObjectsDetectorService:
             
             # Check for duplicates within the original objects layer
             original_warnings = self._detect_duplicates_within_layer(
-                objects_layer, recording_areas_layer, number_field, recording_area_field, "Objects"
+                objects_layer, recording_areas_layer, number_field, recording_area_field, objects_layer.name()
             )
             warnings.extend(original_warnings)
             
@@ -146,7 +149,7 @@ class DuplicateObjectsDetectorService:
                                       recording_areas_layer: Any, 
                                       number_field: str, 
                                       recording_area_field: str, 
-                                      layer_name: str) -> List[str]:
+                                      layer_name: str) -> List[Union[str, WarningData]]:
         """
         Detect duplicates within a single layer.
         
@@ -158,7 +161,7 @@ class DuplicateObjectsDetectorService:
             layer_name: The name of the layer for warning messages
             
         Returns:
-            List of warning messages
+            List of warning messages or structured warning data
         """
         warnings = []
         
@@ -195,11 +198,18 @@ class DuplicateObjectsDetectorService:
                     # Get recording area name
                     recording_area_name = self._get_recording_area_name(recording_areas_layer, recording_area_id)
                     
-                    warning = self._create_duplicate_warning(
-                        recording_area_name, len(features), number, layer_name
+                    # Create structured warning data
+                    warning_data = WarningData(
+                        message=self._create_duplicate_warning(
+                            recording_area_name, len(features), number, layer_name
+                        ),
+                        recording_area_name=recording_area_name,
+                        layer_name=layer_name,
+                        filter_expression=f'"{recording_area_field}" = \'{recording_area_id}\' AND "{number_field}" = {number}',
+                        object_number=number
                     )
-                    warnings.append(warning)
-                    print(f"[DEBUG] Found duplicate in {layer_name}: {warning}")
+                    warnings.append(warning_data)
+                    print(f"[DEBUG] Found duplicate in {layer_name}: {warning_data.message}")
             
             print(f"[DEBUG] Found {len(warnings)} duplicates within {layer_name}")
             
@@ -215,7 +225,7 @@ class DuplicateObjectsDetectorService:
                                         new_objects_layer: Any, 
                                         recording_areas_layer: Any, 
                                         number_field: str, 
-                                        recording_area_field: str) -> List[str]:
+                                        recording_area_field: str) -> List[Union[str, WarningData]]:
         """
         Detect duplicates between "New Objects" and original objects layers.
         
@@ -227,7 +237,7 @@ class DuplicateObjectsDetectorService:
             recording_area_field: The field name for recording area
             
         Returns:
-            List of warning messages
+            List of warning messages or structured warning data
         """
         warnings = []
         
@@ -278,11 +288,20 @@ class DuplicateObjectsDetectorService:
                         # Get recording area name
                         recording_area_name = self._get_recording_area_name(recording_areas_layer, recording_area_id)
                         
-                        warning = self._create_duplicate_warning(
-                            recording_area_name, len(original_objects[key]), number, "Objects"
+                        # Create structured warning data for between-layer duplicates
+                        warning_data = WarningData(
+                            message=self._create_duplicate_warning(
+                                recording_area_name, len(original_objects[key]), number, f"{original_objects_layer.name()} and New Objects"
+                            ),
+                            recording_area_name=recording_area_name,
+                            layer_name=original_objects_layer.name(),
+                            filter_expression=f'"{recording_area_field}" = \'{recording_area_id}\' AND "{number_field}" = {number}',
+                            object_number=number,
+                            second_layer_name="New Objects",
+                            second_filter_expression=f'"{recording_area_field}" = \'{recording_area_id}\' AND "{number_field}" = {number}'
                         )
-                        warnings.append(warning)
-                        print(f"[DEBUG] Found duplicate: {warning}")
+                        warnings.append(warning_data)
+                        print(f"[DEBUG] Found duplicate: {warning_data.message}")
             
             print(f"[DEBUG] Found {len(warnings)} duplicates between layers")
             
@@ -350,28 +369,26 @@ class DuplicateObjectsDetectorService:
             recording_area_id: The ID of the recording area
             
         Returns:
-            The name of the recording area, or the ID as string if not found
+            The name of the recording area, or the ID as string if name not found
         """
         try:
-            # Try to find the recording area by ID
-            for feature in recording_areas_layer.getFeatures():
-                if feature.id() == recording_area_id:
-                    # Try to get a name field (common field names for names)
-                    for field_name in ['name', 'Name', 'NAME', 'label', 'Label', 'LABEL']:
-                        field_idx = recording_areas_layer.fields().indexOf(field_name)
-                        if field_idx >= 0:
-                            name = feature[field_idx]
-                            if name:
-                                return str(name)
-                    
-                    # If no name field found, return the ID
-                    return str(recording_area_id)
+            # Try to find a name field
+            name_fields = ['name', 'title', 'label', 'description', 'comment']
+            for field_name in name_fields:
+                field_idx = recording_areas_layer.fields().indexOf(field_name)
+                if field_idx >= 0:
+                    # Find the feature with this ID
+                    for feature in recording_areas_layer.getFeatures():
+                        if feature.id() == recording_area_id:
+                            name_value = feature[field_idx]
+                            if name_value and str(name_value) != 'NULL':
+                                return str(name_value)
             
-            # If not found, return the ID as string
+            # Fallback to ID if no name found
             return str(recording_area_id)
             
         except Exception as e:
-            print(f"[DEBUG] Error getting recording area name: {e}")
+            print(f"Error getting recording area name: {e}")
             return str(recording_area_id)
     
     def _create_duplicate_warning(self, 
