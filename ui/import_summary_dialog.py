@@ -52,11 +52,14 @@ class ImportSummaryData:
     objects_duplicates: int = 0
     small_finds_duplicates: int = 0
     duplicate_objects_warnings: List[str] = None
+    skipped_numbers_warnings: List[str] = None
     
     def __post_init__(self):
         """Initialize default values for mutable fields."""
         if self.duplicate_objects_warnings is None:
             self.duplicate_objects_warnings = []
+        if self.skipped_numbers_warnings is None:
+            self.skipped_numbers_warnings = []
 
 
 class ImportSummaryDialog(QtWidgets.QDialog):
@@ -244,6 +247,21 @@ class ImportSummaryDialog(QtWidgets.QDialog):
             for warning in self._summary_data.duplicate_objects_warnings:
                 warning_item = QtWidgets.QLabel(f"• {warning}")
                 warning_item.setStyleSheet("color: #FF4500; margin-left: 10px;")
+                warning_item.setWordWrap(True)
+                warnings_layout.addWidget(warning_item)
+            
+            layout.addLayout(warnings_layout)
+        
+        # Skipped numbers warnings
+        if self._summary_data.skipped_numbers_warnings:
+            warnings_layout = QtWidgets.QVBoxLayout()
+            warnings_label = QtWidgets.QLabel(self.tr("Skipped Numbers Warnings:"))
+            warnings_label.setStyleSheet("font-weight: bold; color: #FF8C00;")
+            warnings_layout.addWidget(warnings_label)
+            
+            for warning in self._summary_data.skipped_numbers_warnings:
+                warning_item = QtWidgets.QLabel(f"• {warning}")
+                warning_item.setStyleSheet("color: #FF8C00; margin-left: 10px;")
                 warning_item.setWordWrap(True)
                 warnings_layout.addWidget(warning_item)
             

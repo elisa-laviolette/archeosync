@@ -571,6 +571,7 @@ class ArcheoSyncPlugin:
         try:
             from .ui.import_summary_dialog import ImportSummaryDialog, ImportSummaryData
             from .services.duplicate_objects_detector_service import DuplicateObjectsDetectorService
+            from .services.skipped_numbers_detector_service import SkippedNumbersDetectorService
             
             # Detect duplicate objects if objects were imported
             duplicate_objects_warnings = []
@@ -582,6 +583,16 @@ class ArcheoSyncPlugin:
                 )
                 duplicate_objects_warnings = detector.detect_duplicate_objects()
             
+            # Detect skipped numbers if objects were imported
+            skipped_numbers_warnings = []
+            if summary_data.get('objects_count', 0) > 0:
+                skipped_detector = SkippedNumbersDetectorService(
+                    settings_manager=self._settings_manager,
+                    layer_service=self._layer_service,
+                    translation_service=self._translation_service
+                )
+                skipped_numbers_warnings = skipped_detector.detect_skipped_numbers()
+            
             # Create summary data
             summary = ImportSummaryData(
                 csv_points_count=summary_data.get('csv_points_count', 0),
@@ -592,7 +603,8 @@ class ArcheoSyncPlugin:
                 features_duplicates=summary_data.get('features_duplicates', 0),
                 objects_duplicates=summary_data.get('objects_duplicates', 0),
                 small_finds_duplicates=summary_data.get('small_finds_duplicates', 0),
-                duplicate_objects_warnings=duplicate_objects_warnings
+                duplicate_objects_warnings=duplicate_objects_warnings,
+                skipped_numbers_warnings=skipped_numbers_warnings
             )
             
             # Show the dialog

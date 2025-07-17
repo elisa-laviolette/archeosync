@@ -852,12 +852,24 @@ Consultez la console pour plus de détails sur les erreurs.</translation>
         <source>Duplicate Objects Warnings:</source>
         <translation>Avertissements d'objets en double :</translation>
     </message>
+    <message>
+        <location filename="../ui/import_summary_dialog.py" line="260"/>
+        <source>Skipped Numbers Warnings:</source>
+        <translation>Avertissements de numéros manqués :</translation>
+    </message>
 </context>
 <context>
     <name>DuplicateObjectsDetectorService</name>
     <message>
         <source>Recording Area '{recording_area_name}' has {count} objects with number {number} in {layer_name}</source>
         <translation>Zone d'enregistrement '{recording_area_name}' a {count} objets avec le numéro {number} dans {layer_name}</translation>
+    </message>
+</context>
+<context>
+    <name>SkippedNumbersDetectorService</name>
+    <message>
+        <source>Recording Area '{recording_area_name}' has skipped numbers: {gaps} in {layer_name}</source>
+        <translation>Zone d'enregistrement '{recording_area_name}' a des numéros manqués : {gaps} dans {layer_name}</translation>
     </message>
 </context>
 </TS>
