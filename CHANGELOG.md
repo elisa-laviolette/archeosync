@@ -2,6 +2,16 @@
 
 All notable changes to the ArcheoSync QGIS plugin will be documented in this file.
 
+## [0.16.0] - 2025-07-17
+
+### Bug Fixes
+
+- **Small Finds Duplicate Detection Fix**: Fixed issue where Small Finds features with virtual "Metre" fields were not being detected as duplicates during import
+  - **Virtual Field Detection**: Enhanced `_is_virtual_field` method to better detect virtual expression fields, including common field names like "Metre", "Meter", "Area", etc.
+  - **Signature Comparison**: Improved feature signature creation to exclude known virtual fields that are added during import process but don't represent actual data differences
+  - **Duplicate Filtering**: Small Finds features with virtual "Metre" fields are now properly filtered out when they already exist in the current project
+  - **Test Coverage**: Added comprehensive test to verify virtual field detection and signature comparison works correctly
+
 ## [0.15.0] - 2025-07-16
 
 ### New Features

@@ -769,20 +769,31 @@ class FieldProjectImportService(IFieldProjectImportService):
         
         # Create a set of existing feature signatures for fast lookup
         existing_signatures = set()
-        for existing_feature in existing_features:
+        for i, existing_feature in enumerate(existing_features):
             signature = self._create_feature_signature(existing_feature)
             existing_signatures.add(signature)
+            # Debug: Print first few existing feature signatures
+            if i < 3:  # Only print first 3 for brevity
+                print(f"  Existing {layer_type} feature {i+1} signature: {signature[:200]}...")
+        
+        print(f"  Total existing signatures: {len(existing_signatures)}")
         
         # Filter out duplicates
         filtered_features = []
         duplicates_count = 0
         
-        for feature in features:
+        for i, feature in enumerate(features):
             signature = self._create_feature_signature(feature)
+            # Debug: Print new feature signatures
+            print(f"  New {layer_type} feature {i+1} signature: {signature[:200]}...")
             if signature not in existing_signatures:
                 filtered_features.append(feature)
+                print(f"    -> Not a duplicate")
             else:
                 duplicates_count += 1
+                # Debug: Print the signature of the duplicate feature
+                print(f"    -> DUPLICATE FOUND!")
+                print(f"  Duplicate {layer_type} feature {i+1} signature: {signature[:200]}...")
         
         print(f"Filtered out {duplicates_count} duplicate {layer_type} features")
         return filtered_features
@@ -797,32 +808,114 @@ class FieldProjectImportService(IFieldProjectImportService):
         Returns:
             String signature representing the feature
         """
-        # Create signature from attributes
+        # Create signature from attributes (excluding fid field and virtual fields)
         attributes = []
         for field in feature.fields():
             field_name = field.name()
+            # Skip the fid field as it's layer-specific and not part of the data
+            if field_name.lower() == 'fid':
+                continue
+            # Skip virtual/computed fields that might be NULL in exports
+            if self._is_virtual_field(feature, field_name):
+                continue
             value = feature[field_name]
             # Convert value to string, handling None values
             if value is None:
-                attr_str = f"{field_name}:NULL"
+                # Skip NULL values to avoid signature mismatches due to computed fields
+                # that might be NULL in new data but populated in existing data
+                continue
             else:
                 attr_str = f"{field_name}:{str(value)}"
-            attributes.append(attr_str)
+                attributes.append(attr_str)
         
         # Sort attributes for consistent signature
         attributes.sort()
         attr_signature = "|".join(attributes)
         
-        # Create signature from geometry
+        # Create signature from geometry (normalized to handle Polygon vs MultiPolygon)
         geometry = feature.geometry()
         if geometry and not geometry.isEmpty():
-            # Use WKT (Well-Known Text) representation for geometry
-            geom_signature = geometry.asWkt()
+            # Normalize geometry by converting to single geometry type
+            if geometry.isMultipart():
+                # For multipart geometries, use the first part
+                geom_parts = geometry.asGeometryCollection()
+                if geom_parts:
+                    geom_signature = geom_parts[0].asWkt()
+                else:
+                    geom_signature = geometry.asWkt()
+            else:
+                geom_signature = geometry.asWkt()
         else:
             geom_signature = "NO_GEOMETRY"
         
         # Combine attributes and geometry signatures
-        return f"{attr_signature}|GEOM:{geom_signature}" 
+        return f"{attr_signature}|GEOM:{geom_signature}"
+    
+    def _is_virtual_field(self, feature: Any, field_name: str) -> bool:
+        """
+        Check if a field is a virtual/computed field that might be NULL in exports.
+        
+        Args:
+            feature: QGIS feature to check
+            field_name: Name of the field to check
+            
+        Returns:
+            True if the field appears to be virtual/computed
+        """
+        try:
+            # Get the field index
+            field_idx = feature.fields().indexOf(field_name)
+            if field_idx < 0:
+                return False
+            
+            # Get the field definition
+            field_def = feature.fields().at(field_idx)
+            
+            # Check if it's a virtual field (computed field)
+            if hasattr(field_def, 'isVirtual') and field_def.isVirtual():
+                return True
+            
+            # Check if it's a computed field (QVariant.Invalid type)
+            if hasattr(field_def, 'type') and field_def.type() == 100:  # QVariant.Invalid
+                return True
+            
+            # Check if the field has an expression (computed field)
+            if hasattr(field_def, 'expression') and field_def.expression():
+                return True
+            
+            # Check if the field has a default value expression
+            if hasattr(field_def, 'defaultValueDefinition') and field_def.defaultValueDefinition():
+                default_def = field_def.defaultValueDefinition()
+                if hasattr(default_def, 'expression') and default_def.expression():
+                    return True
+            
+            # Check if the field has a comment indicating it's computed
+            if hasattr(field_def, 'comment') and field_def.comment():
+                comment = field_def.comment().lower()
+                if any(keyword in comment for keyword in ['computed', 'virtual', 'expression', 'calculated']):
+                    return True
+            
+            # Check if the field has an alias that suggests it's computed
+            if hasattr(field_def, 'alias') and field_def.alias():
+                alias = field_def.alias().lower()
+                if any(keyword in alias for keyword in ['computed', 'virtual', 'expression', 'calculated']):
+                    return True
+            
+            # Check for known virtual field names that are commonly expression fields
+            # These fields are typically computed from other fields and shouldn't be used for duplicate detection
+            known_virtual_fields = [
+                'metre', 'meter', 'metre_carre', 'square_meter', 'area', 'perimeter',
+                'length', 'width', 'height', 'volume', 'distance', 'bearing',
+                'x_coord', 'y_coord', 'z_coord', 'latitude', 'longitude',
+                'easting', 'northing', 'elevation', 'depth'
+            ]
+            if field_name.lower() in known_virtual_fields:
+                return True
+            
+            return False
+        except Exception:
+            # If we can't determine, assume it's not virtual
+            return False
 
     def _load_layer(self, file_path: str, layer_name: str) -> Optional[QgsVectorLayer]:
         """

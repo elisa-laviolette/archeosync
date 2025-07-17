@@ -941,3 +941,90 @@ class TestFieldProjectImportService:
                 "New Small Finds",
                 "memory"
             ) 
+
+    def test_create_feature_signature_excludes_fid(self):
+        """Test that feature signature creation excludes the fid field to avoid false negatives."""
+        # Create a mock feature with fid field
+        mock_feature = MagicMock()
+        
+        # Mock fields including fid
+        mock_fid_field = MagicMock()
+        mock_fid_field.name.return_value = 'fid'
+        mock_name_field = MagicMock()
+        mock_name_field.name.return_value = 'name'
+        mock_type_field = MagicMock()
+        mock_type_field.name.return_value = 'type'
+        
+        mock_feature.fields.return_value = [mock_fid_field, mock_name_field, mock_type_field]
+        
+        # Mock attribute values
+        mock_feature.__getitem__.side_effect = lambda key: {
+            'fid': 1,
+            'name': 'Test Feature',
+            'type': 'Feature'
+        }.get(key)
+        
+        # Mock geometry
+        mock_geometry = MagicMock()
+        mock_geometry.isEmpty.return_value = False
+        mock_geometry.asWkt.return_value = 'POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))'
+        mock_feature.geometry.return_value = mock_geometry
+        
+        # Create signature
+        signature = self.field_import_service._create_feature_signature(mock_feature)
+        
+        # Verify that fid is NOT included in the signature
+        assert 'fid:1' not in signature
+        assert 'name:Test Feature' in signature
+        assert 'type:Feature' in signature
+        assert 'GEOM:POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))' in signature 
+
+    def test_debug_metre_field_behavior(self):
+        """Test to verify that the Metre field is now correctly detected as virtual."""
+        # Create a mock feature with Metre field
+        from qgis.core import QgsFeature, QgsFields, QgsField, QgsGeometry
+        from PyQt5.QtCore import QVariant
+        
+        # Create fields
+        fields = QgsFields()
+        fields.append(QgsField("fid", QVariant.Int))
+        fields.append(QgsField("Sous-carre", QVariant.String))
+        fields.append(QgsField("Metre", QVariant.String))
+        fields.append(QgsField("Materiau", QVariant.String))
+        
+        # Create a feature with NULL Metre field (like in new data)
+        feature_new = QgsFeature(fields)
+        feature_new.setAttribute("fid", 1)
+        feature_new.setAttribute("Sous-carre", "46_A125_8")
+        feature_new.setAttribute("Metre", None)  # NULL in new data
+        feature_new.setAttribute("Materiau", "Coquille œuf")
+        feature_new.setGeometry(QgsGeometry.fromPointXY(QgsPointXY(149.35478723404256129, 130.55088652482268685)))
+        
+        # Create a feature with populated Metre field (like in existing data)
+        feature_existing = QgsFeature(fields)
+        feature_existing.setAttribute("fid", 1)
+        feature_existing.setAttribute("Sous-carre", "46_A125_8")
+        feature_existing.setAttribute("Metre", "46_A125")  # Populated in existing data
+        feature_existing.setAttribute("Materiau", "Coquille œuf")
+        feature_existing.setGeometry(QgsGeometry.fromPointXY(QgsPointXY(149.35478723404256129, 130.55088652482268685)))
+        
+        # Test if Metre field is detected as virtual
+        is_virtual_new = self.field_import_service._is_virtual_field(feature_new, "Metre")
+        is_virtual_existing = self.field_import_service._is_virtual_field(feature_existing, "Metre")
+        
+        print(f"Metre field virtual detection - New feature: {is_virtual_new}, Existing feature: {is_virtual_existing}")
+        
+        # Now the Metre field should be detected as virtual
+        assert is_virtual_new is True, "Metre field should be detected as virtual in new feature"
+        assert is_virtual_existing is True, "Metre field should be detected as virtual in existing feature"
+        
+        # Test that signatures are now the same (excluding the virtual Metre field)
+        signature_new = self.field_import_service._create_feature_signature(feature_new)
+        signature_existing = self.field_import_service._create_feature_signature(feature_existing)
+        
+        print(f"New feature signature: {signature_new}")
+        print(f"Existing feature signature: {signature_existing}")
+        print(f"Signatures match: {signature_new == signature_existing}")
+        
+        # The signatures should now match since the Metre field is excluded
+        assert signature_new == signature_existing, "Signatures should match when Metre field is excluded as virtual" 

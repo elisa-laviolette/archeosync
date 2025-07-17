@@ -21,9 +21,11 @@ Usage:
     empty_layer = layer_service.create_empty_layer_copy(source_layer_id, "Empty Layer")
 """
 
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 import os
-from qgis.core import QgsProject, QgsVectorLayer, QgsRasterLayer, QgsExpression, QgsExpressionContext, QgsExpressionContextUtils, QgsFields, QgsField, QgsFeature, QgsGeometry
+import tempfile
+from qgis.core import QgsProject, QgsVectorLayer, QgsRasterLayer, QgsExpression, QgsExpressionContext, QgsExpressionContextUtils, QgsFields, QgsField, QgsFeature, QgsGeometry, QgsPointXY, QgsEditFormConfig, QgsDefaultValue, QgsCoordinateReferenceSystem
+from PyQt5.QtCore import QVariant
 
 try:
     from ..core.interfaces import ILayerService
@@ -704,7 +706,7 @@ class QGISLayerService(ILayerService):
             source_fields = source_layer.fields()
             memory_provider = memory_layer.dataProvider()
             
-            # Add fields to the memory layer
+            # Add all fields to the memory layer (including virtual fields)
             field_list = []
             for field in source_fields:
                 new_field = QgsField(field.name(), field.type(), field.typeName(), field.length(), field.precision(), field.comment())
@@ -832,6 +834,24 @@ class QGISLayerService(ILayerService):
                         qml_content = f.read()
                     print(f"[DEBUG] Successfully read QML content ({len(qml_content)} characters)")
                     
+                    # Check for virtual fields in QML
+                    if '<expressionfields>' in qml_content:
+                        print(f"[DEBUG] Found expressionfields section in QML")
+                        # Extract virtual field names
+                        import re
+                        virtual_fields = re.findall(r'<field name="([^"]+)"', qml_content)
+                        if virtual_fields:
+                            print(f"[DEBUG] Virtual fields found in QML: {virtual_fields}")
+                            
+                            # Show the expressionfields section
+                            start = qml_content.find('<expressionfields>')
+                            end = qml_content.find('</expressionfields>')
+                            if start != -1 and end != -1:
+                                expression_section = qml_content[start:end+len('</expressionfields>')]
+                                print(f"[DEBUG] Expression fields section: {expression_section}")
+                        else:
+                            print(f"[DEBUG] No expressionfields section found in QML")
+                    
                     # Create target QML file path
                     target_style_path = os.path.join(os.path.dirname(target_layer.source()), f"{target_layer.name()}.qml")
                     print(f"[DEBUG] Target QML path: {target_style_path}")
@@ -842,12 +862,44 @@ class QGISLayerService(ILayerService):
                     print(f"[DEBUG] Successfully wrote QML file: {target_style_path}")
                     
                     # Load the QML style into the target layer
-                    if target_layer.loadNamedStyle(target_style_path)[0]:
+                    load_result = target_layer.loadNamedStyle(target_style_path)
+                    print(f"[DEBUG] QML load result: {load_result}")
+                    if load_result[1]:  # Check the success boolean (second element)
                         print(f"Successfully loaded QML style from {target_style_path} to {target_layer.name()}")
+                        
+                        # Parse QML file to find expression fields and add them as virtual fields
+                        virtual_fields = self._parse_qml_expression_fields(target_style_path)
+                        if virtual_fields:
+                            print(f"[DEBUG] Found virtual fields in QML: {list(virtual_fields.keys())}")
+                            
+                            # Add virtual fields to the layer
+                            provider = target_layer.dataProvider()
+                            for field_name, expression in virtual_fields.items():
+                                # Check if the field already exists as a regular field
+                                existing_field_idx = target_layer.fields().indexOf(field_name)
+                                if existing_field_idx >= 0:
+                                    print(f"[DEBUG] Field {field_name} already exists as regular field, converting to virtual")
+                                    # Remove the regular field and add it as virtual
+                                    provider.deleteAttributes([existing_field_idx])
+                                    target_layer.updateFields()
+                                
+                                # Add the virtual field
+                                virtual_field = QgsField(field_name, QVariant.String, "string")
+                                virtual_field.setAlias(field_name)
+                                # Set the expression for the virtual field
+                                target_layer.addExpressionField(expression, virtual_field)
+                                print(f"[DEBUG] Added virtual field {field_name} with expression: {expression}")
+                        
+                        # Check fields after QML loading and virtual field addition
+                        print(f"[DEBUG] Fields in target layer after QML loading:")
+                        for i, field in enumerate(target_layer.fields()):
+                            is_virtual = hasattr(field, 'isVirtual') and field.isVirtual()
+                            print(f"[DEBUG]   Field {i}: {field.name()} (virtual: {is_virtual})")
+                        
                         target_layer.triggerRepaint()
                         return True
                     else:
-                        print(f"Failed to load QML style into target layer")
+                        print(f"Failed to load QML style into target layer: {load_result[0]}")
                         
                 except Exception as e:
                     print(f"[DEBUG] Error reading/writing QML file: {str(e)}")
@@ -880,12 +932,44 @@ class QGISLayerService(ILayerService):
                     print(f"[DEBUG] Successfully wrote exported QML to: {target_style_path}")
                     
                     # Load the style into the target layer
-                    if target_layer.loadNamedStyle(target_style_path)[0]:
+                    load_result = target_layer.loadNamedStyle(target_style_path)
+                    print(f"[DEBUG] QML load result (method 2): {load_result}")
+                    if load_result[1]:  # Check the success boolean (second element)
                         print(f"Successfully copied complete style from {source_layer.name()} to {target_layer.name()}")
+                        
+                        # Parse QML file to find expression fields and add them as virtual fields
+                        virtual_fields = self._parse_qml_expression_fields(target_style_path)
+                        if virtual_fields:
+                            print(f"[DEBUG] Found virtual fields in QML: {list(virtual_fields.keys())}")
+                            
+                            # Add virtual fields to the layer
+                            provider = target_layer.dataProvider()
+                            for field_name, expression in virtual_fields.items():
+                                # Check if the field already exists as a regular field
+                                existing_field_idx = target_layer.fields().indexOf(field_name)
+                                if existing_field_idx >= 0:
+                                    print(f"[DEBUG] Field {field_name} already exists as regular field, converting to virtual")
+                                    # Remove the regular field and add it as virtual
+                                    provider.deleteAttributes([existing_field_idx])
+                                    target_layer.updateFields()
+                                
+                                # Add the virtual field
+                                virtual_field = QgsField(field_name, QVariant.String, "string")
+                                virtual_field.setAlias(field_name)
+                                # Set the expression for the virtual field
+                                target_layer.addExpressionField(expression, virtual_field)
+                                print(f"[DEBUG] Added virtual field {field_name} with expression: {expression}")
+                        
+                        # Check fields after QML loading and virtual field addition
+                        print(f"[DEBUG] Fields in target layer after QML loading (method 2):")
+                        for i, field in enumerate(target_layer.fields()):
+                            is_virtual = hasattr(field, 'isVirtual') and field.isVirtual()
+                            print(f"[DEBUG]   Field {i}: {field.name()} (virtual: {is_virtual})")
+                        
                         target_layer.triggerRepaint()
                         return True
                     else:
-                        print(f"Failed to load exported style into target layer")
+                        print(f"Failed to load exported style into target layer: {load_result[0]}")
                 else:
                     print(f"Failed to export style from source layer")
                     
@@ -938,6 +1022,87 @@ class QGISLayerService(ILayerService):
         
         return False
     
+    def _is_virtual_field(self, field, layer=None) -> bool:
+        """
+        Check if a field is a virtual/computed field that should be excluded from copying.
+        
+        Args:
+            field: QgsField object to check
+            layer: Optional QgsVectorLayer to check for QML style file
+            
+        Returns:
+            True if the field appears to be virtual/computed
+        """
+        try:
+            # Method 1: Check if it's a virtual field (computed field)
+            if hasattr(field, 'isVirtual') and field.isVirtual():
+                return True
+            
+            # Method 2: Check if it's a computed field (QVariant.Invalid type)
+            if hasattr(field, 'type') and field.type() == 100:  # QVariant.Invalid
+                return True
+            
+            # Method 3: Check if the field has an expression (computed field)
+            if hasattr(field, 'expression') and field.expression():
+                return True
+            
+            # Method 4: Check if the field has a default value expression
+            if hasattr(field, 'defaultValueDefinition') and field.defaultValueDefinition():
+                default_def = field.defaultValueDefinition()
+                if hasattr(default_def, 'expression') and default_def.expression():
+                    return True
+            
+            # Method 5: Check QML style file for expression fields (most reliable)
+            if layer and hasattr(layer, 'styleURI'):
+                qml_path = layer.styleURI()
+                if qml_path and qml_path.endswith('.qml'):
+                    virtual_fields = self._parse_qml_expression_fields(qml_path)
+                    if field.name() in virtual_fields:
+                        return True
+            
+            # Method 6: Check if the field has a comment indicating it's computed
+            if hasattr(field, 'comment') and field.comment():
+                comment = field.comment().lower()
+                if any(keyword in comment for keyword in ['computed', 'virtual', 'expression', 'calculated']):
+                    return True
+            
+            # Method 7: Check if the field has an alias that suggests it's computed
+            if hasattr(field, 'alias') and field.alias():
+                alias = field.alias().lower()
+                if any(keyword in alias for keyword in ['computed', 'virtual', 'expression', 'calculated']):
+                    return True
+            
+            return False
+        except Exception:
+            # If we can't determine, assume it's not virtual
+            return False
+    
+    def _parse_qml_expression_fields(self, qml_path):
+        """Parse QML file to extract expression fields."""
+        import xml.etree.ElementTree as ET
+        
+        try:
+            tree = ET.parse(qml_path)
+            root = tree.getroot()
+            
+            # Find expressionfields section
+            expressionfields = root.find('.//expressionfields')
+            if expressionfields is None:
+                return {}
+            
+            virtual_fields = {}
+            for field in expressionfields.findall('field'):
+                name = field.get('name')
+                expression = field.get('expression')
+                if name and expression:
+                    virtual_fields[name] = expression
+            
+            return virtual_fields
+            
+        except Exception as e:
+            print(f"Error parsing QML file {qml_path}: {str(e)}")
+            return {}
+
     def remove_layer_from_project(self, layer_id: str) -> bool:
         """
         Remove a layer from the current QGIS project.

@@ -315,10 +315,13 @@ class QGISProjectCreationService(IProjectCreationService):
                                 project: QgsProject) -> bool:
         """Create an empty copy of a layer with the same structure."""
         try:
+            print(f"[DEBUG] _create_empty_layer_copy called for layer: {layer_name}")
             source_layer = self._layer_service.get_layer_by_id(source_layer_id)
             if not source_layer:
+                print(f"[DEBUG] Could not get source layer for ID: {source_layer_id}")
                 return False
 
+            print(f"[DEBUG] Source layer has {source_layer.fields().count()} fields")
             # Create empty layer with same structure
             success = self._copy_layer_structure_to_geopackage(source_layer, output_path, layer_name)
             
@@ -333,7 +336,9 @@ class QGISProjectCreationService(IProjectCreationService):
             
             return False
         except Exception as e:
-            print(f"Error creating empty layer copy: {str(e)}")
+            print(f"[DEBUG] Exception in _create_empty_layer_copy: {str(e)}")
+            import traceback
+            traceback.print_exc()
             return False
 
     def _create_layer_copy(self, source_layer_id: str, output_path: str, layer_name: str, 
@@ -364,6 +369,7 @@ class QGISProjectCreationService(IProjectCreationService):
     def _copy_layer_to_geopackage(self, source_layer, output_path, layer_name):
         """Copy a layer to a Geopackage file with preserved forms, styles, and field configurations."""
         try:
+            print(f"[DEBUG] _copy_layer_to_geopackage called for layer: {layer_name}")
             from qgis.core import QgsVectorFileWriter
             options = QgsVectorFileWriter.SaveVectorOptions()
             options.driverName = "GPKG"
@@ -404,6 +410,7 @@ class QGISProjectCreationService(IProjectCreationService):
     def _copy_layer_structure_to_geopackage(self, source_layer, output_path, layer_name):
         """Copy only the structure of a layer to a Geopackage file (no features) with preserved forms and styles."""
         try:
+            print(f"[DEBUG] _copy_layer_structure_to_geopackage called for layer: {layer_name}")
             from qgis.core import QgsVectorFileWriter, QgsWkbTypes
             # Determine geometry type from source layer
             geom_type = source_layer.geometryType()
@@ -418,7 +425,7 @@ class QGISProjectCreationService(IProjectCreationService):
             crs_string = self._get_crs_string(source_layer.crs())
             temp_layer = QgsVectorLayer(f"{geom_string}?crs={crs_string}", "temp", "memory")
             
-            # Copy fields
+            # Copy all fields (including virtual fields)
             temp_layer.startEditing()
             for field in source_layer.fields():
                 temp_layer.addAttribute(field)
@@ -457,7 +464,9 @@ class QGISProjectCreationService(IProjectCreationService):
             self._copy_layer_properties_to_geopackage(source_layer, output_path, layer_name)
             return True
         except Exception as e:
-            print(f"Error copying layer structure to Geopackage: {str(e)}")
+            print(f"[DEBUG] Exception in _copy_layer_structure_to_geopackage: {str(e)}")
+            import traceback
+            traceback.print_exc()
             return False
 
     def _get_crs_string(self, crs):
@@ -777,6 +786,99 @@ class QGISProjectCreationService(IProjectCreationService):
         except Exception as e:
             print(f"Error applying raster enhancement: {str(e)}")
             return False
+
+    def _is_virtual_field(self, field, layer=None) -> bool:
+        """
+        Check if a field is a virtual/computed field that should be excluded from copying.
+        
+        Args:
+            field: QgsField object to check
+            layer: Optional QgsVectorLayer to check for QML style file
+            
+        Returns:
+            True if the field appears to be virtual/computed
+        """
+        try:
+            print(f"[DEBUG] _is_virtual_field called for field: {field.name()}")
+            # Method 1: Check if it's a virtual field (computed field)
+            if hasattr(field, 'isVirtual') and field.isVirtual():
+                print(f"[DEBUG] Field {field.name()} detected as virtual via isVirtual()")
+                return True
+            
+            # Method 2: Check if it's a computed field (QVariant.Invalid type)
+            if hasattr(field, 'type') and field.type() == 100:  # QVariant.Invalid
+                print(f"[DEBUG] Field {field.name()} detected as virtual via type() == 100")
+                return True
+            
+            # Method 3: Check if the field has an expression (computed field)
+            if hasattr(field, 'expression') and field.expression():
+                print(f"[DEBUG] Field {field.name()} detected as virtual via expression()")
+                return True
+            
+            # Method 4: Check if the field has a default value expression
+            if hasattr(field, 'defaultValueDefinition') and field.defaultValueDefinition():
+                default_def = field.defaultValueDefinition()
+                if hasattr(default_def, 'expression') and default_def.expression():
+                    print(f"[DEBUG] Field {field.name()} detected as virtual via defaultValueDefinition().expression()")
+                    return True
+            
+            # Method 5: Check QML style file for expression fields (most reliable)
+            if layer and hasattr(layer, 'styleURI'):
+                qml_path = layer.styleURI()
+                if qml_path and qml_path.endswith('.qml'):
+                    virtual_fields = self._parse_qml_expression_fields(qml_path)
+                    if field.name() in virtual_fields:
+                        print(f"[DEBUG] Field {field.name()} detected as virtual via QML expression fields")
+                        return True
+            
+            # Method 6: Check if the field has a comment indicating it's computed
+            if hasattr(field, 'comment') and field.comment():
+                comment = field.comment().lower()
+                if any(keyword in comment for keyword in ['computed', 'virtual', 'expression', 'calculated']):
+                    print(f"[DEBUG] Field {field.name()} detected as virtual via comment: {comment}")
+                    return True
+            
+            # Method 7: Check if the field has an alias that suggests it's computed
+            if hasattr(field, 'alias') and field.alias():
+                alias = field.alias().lower()
+                if any(keyword in alias for keyword in ['computed', 'virtual', 'expression', 'calculated']):
+                    print(f"[DEBUG] Field {field.name()} detected as virtual via alias: {alias}")
+                    return True
+            
+            print(f"[DEBUG] Field {field.name()} not detected as virtual")
+            return False
+        except Exception as e:
+            # If we can't determine, assume it's not virtual
+            print(f"[DEBUG] Exception in _is_virtual_field for {field.name()}: {str(e)}")
+            return False
+    
+    def _parse_qml_expression_fields(self, qml_path):
+        """Parse QML file to extract expression fields."""
+        import xml.etree.ElementTree as ET
+        
+        try:
+            tree = ET.parse(qml_path)
+            root = tree.getroot()
+            
+            # Find expressionfields section
+            expressionfields = root.find('.//expressionfields')
+            if expressionfields is None:
+                return {}
+            
+            virtual_fields = {}
+            for field in expressionfields.findall('field'):
+                name = field.get('name')
+                expression = field.get('expression')
+                if name and expression:
+                    virtual_fields[name] = expression
+            
+            return virtual_fields
+            
+        except Exception as e:
+            print(f"Error parsing QML file {qml_path}: {str(e)}")
+            return {}
+
+
 
     def _set_project_variables(self, project: QgsProject, next_values: Dict[str, str], recording_area: str) -> None:
         """Set project variables for field preparation."""

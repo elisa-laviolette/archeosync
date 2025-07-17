@@ -197,7 +197,8 @@ QGIS-specific implementation for field project import operations including:
   - **Hybrid Support**: Handles projects with both data.gpkg and individual layer files
 - **Duplicate Detection**: Intelligent duplicate detection prevents importing features that already exist in the current project
   - **Automatic Duplicate Filtering**: Filters out features that already exist in Objects, Features, and Small Finds layers before creating merged layers
-  - **Smart Feature Comparison**: Creates unique signatures based on feature attributes and geometry to identify duplicates
+  - **Smart Feature Comparison**: Creates unique signatures based on feature attributes and geometry to identify duplicates (excluding layer-specific feature IDs and virtual fields)
+  - **Virtual Field Handling**: Properly detects and excludes virtual expression fields (like "Metre" fields) that are added during import but don't represent data differences
   - **Existing Layer Integration**: Retrieves existing layers from current project using settings configuration
   - **Seamless User Experience**: Works automatically without user intervention during import process
   - **Comprehensive Coverage**: Handles duplicates across all layer types (Objects, Features, Small Finds)

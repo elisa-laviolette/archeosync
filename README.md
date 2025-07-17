@@ -19,6 +19,13 @@ A QGIS plugin for archaeologists to prepare data for field work and import it ba
 - **CSV Import Service**: Comprehensive CSV import with column mapping and validation
 - **Field Project Import**: Import completed field projects and merge Objects/Features/Small Finds layers
 - **Duplicate Detection**: Intelligent duplicate detection prevents importing features that already exist in the current project
+  - **Automatic Duplicate Filtering**: Filters out features that already exist in Objects, Features, and Small Finds layers before creating merged layers
+  - **Smart Feature Comparison**: Creates unique signatures based on feature attributes and geometry to identify duplicates (excluding layer-specific feature IDs and virtual fields)
+  - **Virtual Field Handling**: Properly detects and excludes virtual expression fields (like "Metre" fields) that are added during import but don't represent data differences
+  - **Existing Layer Integration**: Retrieves existing layers from current project using settings configuration
+  - **Seamless User Experience**: Works automatically without user intervention during import process
+  - **Comprehensive Coverage**: Handles duplicates across all layer types (Objects, Features, Small Finds)
+  - **Performance Optimized**: Efficient duplicate detection that scales with project size
 - **Column Mapping Dialog**: Interactive column mapping for CSV files with different structures
 - **Import Summary Dialog**: Comprehensive summary dialog showing import statistics after data import
   - **Import Statistics**: Displays counts of imported CSV points, features, objects, and small finds
@@ -122,7 +129,7 @@ The raster processing service uses GDAL for high-quality clipping operations and
 - **Data.gpkg Processing**: Automatically processes data.gpkg files from field projects
 - **Layer Merging**: Merges Objects, Features, and Small Finds layers from multiple projects
 - **Duplicate Detection**: Automatically filters out features that already exist in the current project's Objects, Features, and Small Finds layers
-- **Smart Feature Comparison**: Uses unique signatures based on attributes and geometry to identify duplicates
+- **Smart Feature Comparison**: Uses unique signatures based on attributes and geometry to identify duplicates (excluding layer-specific feature IDs)
 - **Layer Creation**: Creates new "New Objects", "New Features", and "New Small Finds" layers in the project
 - **Feature Collection**: Collects all features from completed field recordings
 - **Automatic Archiving**: Moves imported field projects to the configured archive folder after successful import
