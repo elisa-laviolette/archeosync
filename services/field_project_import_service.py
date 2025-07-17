@@ -265,15 +265,26 @@ class FieldProjectImportService(IFieldProjectImportService):
     
     def _get_configured_layer_info(self) -> Dict[str, Any]:
         """
-        Get the configured layer information (name and geometry type) from settings.
+        Get the configured layer information (name, geometry type, and field types) from settings.
         
         Returns:
-            Dictionary mapping layer types to their names and geometry types.
+            Dictionary mapping layer types to their names, geometry types, and field types.
         """
         configured_layers = {
-            'objects': {'name': None, 'geometry_type': None},
-            'features': {'name': None, 'geometry_type': None},
-            'small_finds': {'name': None, 'geometry_type': None}
+            'objects': {'name': None, 'geometry_type': None, 'field_types': {}},
+            'features': {'name': None, 'geometry_type': None, 'field_types': {}},
+            'small_finds': {'name': None, 'geometry_type': None, 'field_types': {}}
+        }
+        
+        # QGIS field type name to memory layer URI type mapping
+        QGIS_TO_URI_TYPE = {
+            "Integer": "integer",
+            "Integer64": "integer64",
+            "Real": "real",
+            "String": "string",
+            "Date": "date",
+            "DateTime": "datetime",
+            "Boolean": "boolean"
         }
         
         # Get objects layer info
@@ -283,6 +294,13 @@ class FieldProjectImportService(IFieldProjectImportService):
             if layer_info:
                 configured_layers['objects']['name'] = layer_info['name']
                 configured_layers['objects']['geometry_type'] = layer_info.get('geometry_type', 2)  # Default to polygon
+                # Get field types from the actual layer
+                layer = self._get_existing_layer('objects_layer')
+                if layer:
+                    for field in layer.fields():
+                        field_type = field.typeName()
+                        uri_type = QGIS_TO_URI_TYPE.get(field_type, field_type.lower())
+                        configured_layers['objects']['field_types'][field.name()] = uri_type
         
         # Get features layer info
         features_layer_id = self._settings_manager.get_value('features_layer', '')
@@ -291,6 +309,13 @@ class FieldProjectImportService(IFieldProjectImportService):
             if layer_info:
                 configured_layers['features']['name'] = layer_info['name']
                 configured_layers['features']['geometry_type'] = layer_info.get('geometry_type', 2)  # Default to polygon
+                # Get field types from the actual layer
+                layer = self._get_existing_layer('features_layer')
+                if layer:
+                    for field in layer.fields():
+                        field_type = field.typeName()
+                        uri_type = QGIS_TO_URI_TYPE.get(field_type, field_type.lower())
+                        configured_layers['features']['field_types'][field.name()] = uri_type
         
         # Get small finds layer info
         small_finds_layer_id = self._settings_manager.get_value('small_finds_layer', '')
@@ -299,6 +324,13 @@ class FieldProjectImportService(IFieldProjectImportService):
             if layer_info:
                 configured_layers['small_finds']['name'] = layer_info['name']
                 configured_layers['small_finds']['geometry_type'] = layer_info.get('geometry_type', 0)  # Default to point
+                # Get field types from the actual layer
+                layer = self._get_existing_layer('small_finds_layer')
+                if layer:
+                    for field in layer.fields():
+                        field_type = field.typeName()
+                        uri_type = QGIS_TO_URI_TYPE.get(field_type, field_type.lower())
+                        configured_layers['small_finds']['field_types'][field.name()] = uri_type
         
         return configured_layers
 
@@ -468,26 +500,137 @@ class FieldProjectImportService(IFieldProjectImportService):
             # Create layer URI with fields
             layer_uri = f"{geom_string}?crs={crs_string}"
             
+            # QGIS field type name to memory layer URI type mapping
+            QGIS_TO_URI_TYPE = {
+                "Integer": "integer",
+                "Integer64": "integer64",
+                "Real": "real",
+                "String": "string",
+                "Date": "date",
+                "DateTime": "datetime",
+                "Boolean": "boolean"
+            }
+            
+            # Get field types from original configured layers as reference
+            reference_field_types = {}
+            configured_layers = self._get_configured_layer_info()
+            
+            # Determine which layer type this merged layer corresponds to
+            layer_type = None
+            if "objects" in layer_name.lower():
+                layer_type = 'objects'
+            elif "features" in layer_name.lower():
+                layer_type = 'features'
+            elif "small" in layer_name.lower() or "petits" in layer_name.lower():
+                layer_type = 'small_finds'
+            
+            if layer_type and configured_layers[layer_type]['field_types']:
+                reference_field_types = configured_layers[layer_type]['field_types']
+                print(f"Reference field types for {layer_type} layer:")
+                for field_name, field_type in reference_field_types.items():
+                    print(f"  {field_name}: {field_type}")
+            else:
+                print(f"No reference field types found for layer type: {layer_type}")
+            
             # Add fields with most common types
             for field_name in sorted(all_fields):
                 if field_name in field_types:
                     # Get the most common type for this field
                     most_common_type = max(field_types[field_name].items(), key=lambda x: x[1])[0]
-                    layer_uri += f"&field={field_name}:{most_common_type}"
+                    
+                    # Debug: Print detected types for this field
+                    print(f"Field '{field_name}' detected types: {field_types[field_name]}")
+                    print(f"  Most common type: {most_common_type}")
+                    
+                    # Use reference layer type if available, otherwise use detected type
+                    if field_name in reference_field_types:
+                        reference_type = reference_field_types[field_name]
+                        print(f"  Reference layer type: {reference_type}")
+                        uri_type = QGIS_TO_URI_TYPE.get(reference_type, reference_type.lower())
+                        print(f"  Using reference type: {uri_type}")
+                    else:
+                        uri_type = QGIS_TO_URI_TYPE.get(most_common_type, most_common_type.lower())
+                        print(f"  Using detected type: {uri_type}")
+                    
+                    layer_uri += f"&field={field_name}:{uri_type}"
             
             print(f"Layer URI before CRS: {layer_uri}")
             print(f"CRS string: '{crs_string}'")
             
-            # Create memory layer
-            layer = QgsVectorLayer(layer_uri, layer_name, "memory")
-            print(f"Created layer URI: {layer_uri}")
+            # Create memory layer with basic structure first
+            basic_uri = f"{geom_string}?crs={crs_string}"
+            layer = QgsVectorLayer(basic_uri, layer_name, "memory")
+            print(f"Created basic layer URI: {basic_uri}")
             if not layer.isValid():
                 print(f"Failed to create valid layer: {layer_name}")
                 return None
+            
+            # Add fields with proper types using QgsField objects
+            from qgis.core import QgsField
+            from PyQt5.QtCore import QVariant
+            
+            # QGIS field type name to QVariant type mapping
+            QGIS_TO_QVARIANT = {
+                "Integer": QVariant.Int,
+                "Integer64": QVariant.LongLong,
+                "Real": QVariant.Double,
+                "String": QVariant.String,
+                "Date": QVariant.Date,
+                "DateTime": QVariant.DateTime,
+                "Boolean": QVariant.Bool
+            }
+            
+            # Add fields with most common types
+            field_list = []
+            for field_name in sorted(all_fields):
+                if field_name in field_types:
+                    # Get the most common type for this field
+                    most_common_type = max(field_types[field_name].items(), key=lambda x: x[1])[0]
+                    
+                    # Debug: Print detected types for this field
+                    print(f"Field '{field_name}' detected types: {field_types[field_name]}")
+                    print(f"  Most common type: {most_common_type}")
+                    
+                    # Use reference layer type if available, otherwise use detected type
+                    if field_name in reference_field_types:
+                        reference_type = reference_field_types[field_name]
+                        print(f"  Reference layer type: {reference_type}")
+                        # Convert URI type back to QGIS type name for QVariant mapping
+                        if reference_type == "integer":
+                            qgis_type = "Integer"
+                        elif reference_type == "integer64":
+                            qgis_type = "Integer64"
+                        elif reference_type == "real":
+                            qgis_type = "Real"
+                        elif reference_type == "string":
+                            qgis_type = "String"
+                        elif reference_type == "date":
+                            qgis_type = "Date"
+                        elif reference_type == "datetime":
+                            qgis_type = "DateTime"
+                        elif reference_type == "boolean":
+                            qgis_type = "Boolean"
+                        else:
+                            qgis_type = most_common_type
+                        print(f"  Using reference type: {reference_type} -> {qgis_type}")
+                    else:
+                        qgis_type = most_common_type
+                        print(f"  Using detected type: {qgis_type}")
+                    
+                    # Create QgsField with proper type
+                    qvariant_type = QGIS_TO_QVARIANT.get(qgis_type, QVariant.String)
+                    new_field = QgsField(field_name, qvariant_type, qgis_type)
+                    field_list.append(new_field)
+            
+            # Add all fields to the layer
+            layer.dataProvider().addAttributes(field_list)
+            layer.updateFields()
+            
             print(f"Successfully created layer: {layer_name}, fields: {layer.fields().count()}")
             
             # Debug: Print field information
             print(f"Layer fields: {[field.name() for field in layer.fields()]}")
+            print(f"Layer field types: {[field.typeName() for field in layer.fields()]}")
             if features:
                 first_feature = features[0]
                 print(f"First feature fields: {[field.name() for field in first_feature.fields()]}")
