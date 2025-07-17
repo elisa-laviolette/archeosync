@@ -197,6 +197,16 @@ class FieldProjectImportService(IFieldProjectImportService):
             if self._settings_manager.get_value('field_project_archive_folder', ''):
                 self._archive_projects(project_paths)
             
+            # Store import statistics for summary
+            self._last_import_stats = {
+                'features_count': len(filtered_features_features),
+                'objects_count': len(filtered_objects_features),
+                'small_finds_count': len(filtered_small_finds_features),
+                'features_duplicates': len(all_features_features) - len(filtered_features_features),
+                'objects_duplicates': len(all_objects_features) - len(filtered_objects_features),
+                'small_finds_duplicates': len(all_small_finds_features) - len(filtered_small_finds_features)
+            }
+            
             # Prepare result message
             if layers_created > 0:
                 message = f"Successfully imported {layers_created} layer(s) from {processed_projects} project(s)"
@@ -208,6 +218,28 @@ class FieldProjectImportService(IFieldProjectImportService):
                 
         except Exception as e:
             return ValidationResult(False, f"Error during import: {str(e)}")
+    
+    def get_last_import_stats(self) -> Dict[str, int]:
+        """
+        Get the statistics from the last import operation.
+        
+        Returns:
+            Dictionary containing import statistics with keys:
+            - features_count: Number of features imported
+            - objects_count: Number of objects imported
+            - small_finds_count: Number of small finds imported
+            - features_duplicates: Number of duplicate features detected
+            - objects_duplicates: Number of duplicate objects detected
+            - small_finds_duplicates: Number of duplicate small finds detected
+        """
+        return getattr(self, '_last_import_stats', {
+            'features_count': 0,
+            'objects_count': 0,
+            'small_finds_count': 0,
+            'features_duplicates': 0,
+            'objects_duplicates': 0,
+            'small_finds_duplicates': 0
+        })
     
     def _scan_project_layers(self, project_path: str) -> Dict[str, List[str]]:
         """

@@ -447,10 +447,22 @@ class CSVImportService(ICSVImportService):
             if self._file_system_service and self._settings_manager:
                 self._archive_csv_files(csv_files)
             
+            # Store the number of imported features for summary
+            self._last_import_count = feature_id - 1
+            
             return ValidationResult(True, f"Successfully imported {feature_id - 1} points from {len(csv_files)} CSV file(s)")
             
         except Exception as e:
             return ValidationResult(False, f"Error during import: {str(e)}")
+    
+    def get_last_import_count(self) -> int:
+        """
+        Get the number of features imported in the last import operation.
+        
+        Returns:
+            Number of features imported, or 0 if no import has been performed
+        """
+        return getattr(self, '_last_import_count', 0)
     
     def _archive_csv_files(self, csv_files: List[str]) -> None:
         """

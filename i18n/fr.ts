@@ -789,4 +789,67 @@ Consultez la console pour plus de détails sur les erreurs.</translation>
         <translation>Annuler</translation>
     </message>
 </context>
+<context>
+    <name>ImportSummaryDialog</name>
+    <message>
+        <location filename="../ui/import_summary_dialog.py" line="85"/>
+        <source>Import Summary</source>
+        <translation>Résumé de l'importation</translation>
+    </message>
+    <message>
+        <location filename="../ui/import_summary_dialog.py" line="95"/>
+        <source>The following data has been imported and added to your project:</source>
+        <translation>Les données suivantes ont été importées et ajoutées à votre projet :</translation>
+    </message>
+    <message>
+        <location filename="../ui/import_summary_dialog.py" line="120"/>
+        <source>Total Station CSV Points</source>
+        <translation>Points CSV de station totale</translation>
+    </message>
+    <message>
+        <location filename="../ui/import_summary_dialog.py" line="125"/>
+        <source>Points imported:</source>
+        <translation>Points importés :</translation>
+    </message>
+    <message>
+        <location filename="../ui/import_summary_dialog.py" line="133"/>
+        <source>Duplicates detected:</source>
+        <translation>Doublons détectés :</translation>
+    </message>
+    <message>
+        <location filename="../ui/import_summary_dialog.py" line="145"/>
+        <source>Features</source>
+        <translation>Structures</translation>
+    </message>
+    <message>
+        <location filename="../ui/import_summary_dialog.py" line="150"/>
+        <source>Features imported:</source>
+        <translation>Structures importées :</translation>
+    </message>
+    <message>
+        <location filename="../ui/import_summary_dialog.py" line="170"/>
+        <source>Objects</source>
+        <translation>Objets</translation>
+    </message>
+    <message>
+        <location filename="../ui/import_summary_dialog.py" line="175"/>
+        <source>Objects imported:</source>
+        <translation>Objets importés :</translation>
+    </message>
+    <message>
+        <location filename="../ui/import_summary_dialog.py" line="195"/>
+        <source>Small Finds</source>
+        <translation>Petits objets</translation>
+    </message>
+    <message>
+        <location filename="../ui/import_summary_dialog.py" line="200"/>
+        <source>Small finds imported:</source>
+        <translation>Petits objets importés :</translation>
+    </message>
+    <message>
+        <location filename="../ui/import_summary_dialog.py" line="220"/>
+        <source>OK</source>
+        <translation>OK</translation>
+    </message>
+</context>
 </TS>

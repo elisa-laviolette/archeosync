@@ -67,12 +67,14 @@ archeosync/
 │   ├── __init__.py
 │   ├── settings_dialog.py
 │   ├── import_data_dialog.py
-│   └── prepare_recording_dialog.py
-├── test/                   # Test suite (351 tests)
+│   ├── prepare_recording_dialog.py
+│   └── import_summary_dialog.py
+├── test/                   # Test suite (comprehensive coverage)
 │   ├── test_core_interfaces.py
 │   ├── test_services.py
 │   ├── test_ui_components.py
 │   ├── test_import_data_dialog.py
+│   ├── test_import_summary_dialog.py
 │   ├── test_layer_service.py
 │   ├── test_qfield_service.py
 │   ├── test_csv_import_service.py
@@ -285,6 +287,36 @@ Dialog for mapping columns across multiple CSV files with:
 - **User-friendly Error Messages**: Clear guidance for column mapping
 - **Flexible Mapping**: Support for different column structures across files
 
+### ImportSummaryDialog
+Dialog for displaying comprehensive import statistics after successful data import operations:
+- **Import Statistics Display**: Shows detailed counts of imported data types
+  - **CSV Points**: Number of total station points imported from CSV files
+  - **Features**: Number of archaeological features imported from field projects
+  - **Objects**: Number of archaeological objects imported from field projects
+  - **Small Finds**: Number of small finds imported from field projects
+- **Duplicate Detection Reporting**: Displays number of duplicates detected and filtered out
+  - **Color-coded Display**: Green for successful imports, orange for duplicates
+  - **Conditional Display**: Only shows duplicate sections when duplicates are detected
+  - **Per-type Statistics**: Separate duplicate counts for each data type
+- **User-Friendly Interface**: Clean, organized dialog with intuitive design
+  - **Organized Sections**: Clear sections for each data type with descriptive headings
+  - **Scrollable Content**: Handles large amounts of data with scrollable area
+  - **Modal Dialog**: Modal behavior with OK button for easy dismissal
+  - **Responsive Layout**: Adapts to different screen sizes and content amounts
+- **Translation Support**: Full internationalization support for all dialog elements
+  - **Dependency Injection**: Translation service injected through constructor
+  - **Graceful Fallback**: Falls back to English when translation service unavailable
+  - **Complete Coverage**: All strings translatable with French and Afrikaans support
+- **Automatic Display**: Dialog appears automatically after successful import operations
+  - **Trigger Conditions**: Displays after CSV, field project, or mixed imports
+  - **Data Validation**: Only displays when data is actually imported (counts > 0)
+  - **Seamless Integration**: Integrates with existing import workflow
+- **SOLID Design**: Follows clean architecture principles
+  - **Single Responsibility**: Focused solely on summary display
+  - **Dependency Injection**: Translation service injected through interface
+  - **Data Structure**: Clean `ImportSummaryData` dataclass for data organization
+  - **Error Handling**: Graceful handling of missing data or services
+
 ## Testing Strategy
 
 ### Interface Tests
@@ -351,7 +383,37 @@ The filtering process ensures field projects contain only relevant data:
 - **Error Recovery**: Graceful handling of QGIS object deletion issues
 - **Relation Processing**: Efficient relation-based filtering using QGIS relation manager
 
-## Latest Features (v0.13.0)
+## Latest Features (v0.15.0)
+
+### Import Summary Dialog
+- **Comprehensive Statistics Display**: Shows detailed import statistics after successful data import operations
+  - **Data Type Coverage**: Displays counts for CSV points, features, objects, and small finds
+  - **Duplicate Reporting**: Shows number of duplicates detected and filtered out during import
+  - **Color-coded Interface**: Green for successful imports, orange for duplicates
+  - **Conditional Display**: Only shows relevant sections based on imported data
+- **Enhanced Import Workflow**: Improved import process with better user feedback
+  - **Statistics Collection**: Enhanced import services to collect and provide detailed statistics
+  - **Automatic Display**: Dialog appears automatically after successful import operations
+  - **Seamless Integration**: Integrates with existing CSV and field project import workflows
+  - **Error Handling**: Graceful handling of missing data or translation services
+- **SOLID Architecture**: Follows clean architecture principles
+  - **Single Responsibility**: `ImportSummaryDialog` class focused solely on summary display
+  - **Dependency Injection**: Translation service injected through interface
+  - **Data Structure**: Clean `ImportSummaryData` dataclass for data organization
+  - **Interface-based Design**: Extensible design for future enhancements
+- **Internationalization**: Full translation support for all dialog elements
+  - **French Translations**: Complete French translations for all dialog strings
+  - **Afrikaans Translations**: Complete Afrikaans translations for all dialog strings
+  - **Graceful Fallback**: Falls back to English when translation service unavailable
+  - **Dependency Injection**: Translation service integration with clean architecture
+- **Comprehensive Testing**: Extensive test coverage for all functionality
+  - **Dialog Initialization**: Tests for proper dialog creation and setup
+  - **Data Display**: Tests for correct display of import statistics
+  - **Translation Service**: Tests for translation service integration
+  - **Data Structure**: Tests for `ImportSummaryData` dataclass functionality
+  - **Integration**: Tests for integration with main plugin workflow
+
+## Previous Features (v0.13.0)
 
 ### Raster Enhancement Settings
 - **Brightness Control**: Adjust brightness from -255 to +255 (default: 0)

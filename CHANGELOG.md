@@ -2,6 +2,91 @@
 
 All notable changes to the ArcheoSync QGIS plugin will be documented in this file.
 
+## [0.15.0] - 2025-07-16
+
+### New Features
+
+- **Import Summary Dialog**: Added comprehensive summary dialog that displays after successful data import operations
+  - **Import Statistics Display**: Shows detailed counts of imported CSV points, features, objects, and small finds
+    - Displays total number of CSV points imported from total station data
+    - Shows count of archaeological features imported from field projects
+    - Reports number of archaeological objects imported from field projects
+    - Displays count of small finds imported from field projects
+  - **Duplicate Detection Reporting**: Displays number of duplicates detected and filtered out during import
+    - Shows duplicate counts for each data type (CSV points, features, objects, small finds)
+    - Color-coded display with green for successful imports and orange for duplicates
+    - Only displays duplicate sections when duplicates are actually detected
+  - **User-Friendly Interface**: Clean, organized dialog with intuitive design
+    - Organized sections for each data type with clear headings
+    - Scrollable content area for handling large amounts of data
+    - Color-coded statistics with green for successful imports and orange for duplicates
+    - Modal dialog with OK button for easy dismissal
+  - **Translation Support**: Full internationalization support for all dialog elements
+    - Complete French translations for all dialog strings
+    - Complete Afrikaans translations for all dialog strings
+    - Graceful fallback to English when translation service is not available
+    - Translation service integration with dependency injection
+  - **Automatic Display**: Dialog appears automatically after successful import operations
+    - Triggers after successful CSV import operations
+    - Triggers after successful field project import operations
+    - Triggers after mixed import operations (both CSV and field projects)
+    - Only displays when data is actually imported (counts > 0)
+  - **Comprehensive Coverage**: Covers all import scenarios and data types
+    - Handles CSV-only imports with point statistics
+    - Handles field project-only imports with feature/object/small finds statistics
+    - Handles mixed imports with combined statistics
+    - Graceful handling of empty imports with no data sections displayed
+
+### Technical Improvements
+
+- **Enhanced Import Workflow**: Improved import process with better user feedback and statistics collection
+  - **Statistics Collection**: Enhanced import services to collect and provide detailed import statistics
+    - CSV import service provides count of imported features via `get_last_import_count()` method
+    - Field project import service provides comprehensive statistics via `get_last_import_stats()` method
+    - Statistics include counts and duplicate information for all data types
+    - Integration with existing import workflow without breaking changes
+  - **Seamless Integration**: Summary dialog integrates with existing CSV and field project import workflows
+    - Modified `_handle_import_data_accepted()` method in main plugin to collect statistics
+    - Added `_show_import_summary()` method to display the summary dialog
+    - Integration with both CSV and field project import services
+    - Maintains existing error handling and validation workflows
+  - **Error Handling**: Graceful handling of missing data or translation services
+    - Dialog works correctly when no translation service is provided
+    - Handles cases where no data is imported gracefully
+    - Proper error handling for dialog creation and display
+    - Fallback behavior for missing dependencies
+  - **SOLID Design**: Follows dependency injection and single responsibility principles
+    - `ImportSummaryDialog` class with single responsibility for summary display
+    - `ImportSummaryData` dataclass for clean data structure
+    - Dependency injection for translation service
+    - Interface-based design for extensibility
+    - Clean separation of concerns between UI and business logic
+
+### Test Coverage
+
+- **Comprehensive Testing**: Added extensive test coverage for import summary dialog functionality
+  - **Dialog Initialization Tests**: Tests for proper dialog creation and setup
+    - Tests dialog initialization with various data scenarios
+    - Tests dialog properties (modal, window title, etc.)
+    - Tests handling of empty summary data
+  - **Data Display Tests**: Tests for correct display of import statistics
+    - Tests CSV section display when CSV data is present
+    - Tests features section display when features data is present
+    - Tests objects section display when objects data is present
+    - Tests small finds section display when small finds data is present
+  - **Translation Service Tests**: Tests for translation service integration
+    - Tests translation service usage when provided
+    - Tests graceful handling when no translation service is available
+    - Tests translation of dialog strings and content
+  - **Data Structure Tests**: Tests for `ImportSummaryData` dataclass
+    - Tests data structure initialization and field access
+    - Tests default values for all fields
+    - Tests data integrity and type safety
+  - **Integration Tests**: Tests for integration with main plugin workflow
+    - Tests statistics collection from import services
+    - Tests dialog display after successful imports
+    - Tests error handling and edge cases
+
 ## [0.14.0] - 2025-07-16
 
 ### New Features

@@ -22,7 +22,7 @@
  ***************************************************************************/
 """
 import os.path
-from typing import List, Optional
+from typing import List, Optional, Dict
 
 from qgis.PyQt.QtCore import QSettings
 from qgis.PyQt.QtGui import QIcon
@@ -453,13 +453,37 @@ class ArcheoSyncPlugin:
             
             from qgis.PyQt.QtWidgets import QMessageBox
             
+            # Initialize summary data
+            summary_data = {
+                'csv_points_count': 0,
+                'features_count': 0,
+                'objects_count': 0,
+                'small_finds_count': 0,
+                'csv_duplicates': 0,
+                'features_duplicates': 0,
+                'objects_duplicates': 0,
+                'small_finds_duplicates': 0
+            }
+            
             # Process CSV files if any are selected
             if selected_csv_files:
-                self._process_csv_files(selected_csv_files)
+                csv_result = self._process_csv_files(selected_csv_files)
+                if csv_result:
+                    summary_data['csv_points_count'] = csv_result
             
             # Process completed projects if any are selected
             if selected_completed_projects:
-                self._process_completed_projects(selected_completed_projects)
+                project_stats = self._process_completed_projects(selected_completed_projects)
+                if project_stats:
+                    summary_data.update(project_stats)
+            
+            # Show summary dialog if any data was imported
+            if (summary_data['csv_points_count'] > 0 or 
+                summary_data['features_count'] > 0 or 
+                summary_data['objects_count'] > 0 or 
+                summary_data['small_finds_count'] > 0):
+                
+                self._show_import_summary(summary_data)
             
         except Exception as e:
             from qgis.PyQt.QtWidgets import QMessageBox
@@ -469,7 +493,7 @@ class ArcheoSyncPlugin:
                 self.tr(f"An error occurred during import data processing:\n{str(e)}")
             )
     
-    def _process_csv_files(self, csv_files: List[str]) -> None:
+    def _process_csv_files(self, csv_files: List[str]) -> Optional[int]:
         """Process CSV files for import."""
         from qgis.PyQt.QtWidgets import QMessageBox
         
@@ -481,7 +505,7 @@ class ArcheoSyncPlugin:
                 self.tr("CSV Validation Error"),
                 validation_result.message
             )
-            return
+            return None
         
         # Get column mapping and all headers
         column_mapping, file_columns = self._csv_import_service.get_column_mapping_and_headers(csv_files)
@@ -503,7 +527,7 @@ class ArcheoSyncPlugin:
             )
             
             if mapping_dialog.exec_() != mapping_dialog.Accepted:
-                return  # User cancelled
+                return None  # User cancelled
             
             # Get final mapping from dialog
             column_mapping = mapping_dialog.get_final_mapping()
@@ -512,19 +536,17 @@ class ArcheoSyncPlugin:
         import_result = self._csv_import_service.import_csv_files(csv_files, column_mapping)
         
         if import_result.is_valid:
-            QMessageBox.information(
-                self._iface.mainWindow(),
-                self.tr("CSV Import Complete"),
-                import_result.message
-            )
+            # Return the number of imported features
+            return self._csv_import_service.get_last_import_count()
         else:
             QMessageBox.critical(
                 self._iface.mainWindow(),
                 self.tr("CSV Import Error"),
                 import_result.message
             )
+            return None
     
-    def _process_completed_projects(self, project_paths: List[str]) -> None:
+    def _process_completed_projects(self, project_paths: List[str]) -> Optional[Dict[str, int]]:
         """Process completed field projects for import."""
         from qgis.PyQt.QtWidgets import QMessageBox
         
@@ -532,16 +554,48 @@ class ArcheoSyncPlugin:
         import_result = self._field_project_import_service.import_field_projects(project_paths)
         
         if import_result.is_valid:
-            QMessageBox.information(
-                self._iface.mainWindow(),
-                self.tr("Field Project Import Complete"),
-                import_result.message
-            )
+            # Return the import statistics
+            return self._field_project_import_service.get_last_import_stats()
         else:
             QMessageBox.critical(
                 self._iface.mainWindow(),
                 self.tr("Field Project Import Error"),
                 import_result.message
+            )
+            return None
+    
+    def _show_import_summary(self, summary_data: Dict[str, int]) -> None:
+        """Show the import summary dialog."""
+        try:
+            from .ui.import_summary_dialog import ImportSummaryDialog, ImportSummaryData
+            
+            # Create summary data object
+            summary = ImportSummaryData(
+                csv_points_count=summary_data['csv_points_count'],
+                features_count=summary_data['features_count'],
+                objects_count=summary_data['objects_count'],
+                small_finds_count=summary_data['small_finds_count'],
+                csv_duplicates=summary_data['csv_duplicates'],
+                features_duplicates=summary_data['features_duplicates'],
+                objects_duplicates=summary_data['objects_duplicates'],
+                small_finds_duplicates=summary_data['small_finds_duplicates']
+            )
+            
+            # Create and show the summary dialog
+            dialog = ImportSummaryDialog(
+                summary_data=summary,
+                translation_service=self._translation_service,
+                parent=self._iface.mainWindow()
+            )
+            
+            dialog.exec_()
+            
+        except Exception as e:
+            from qgis.PyQt.QtWidgets import QMessageBox
+            QMessageBox.warning(
+                self._iface.mainWindow(),
+                self.tr("Warning"),
+                self.tr(f"Could not show import summary: {str(e)}")
             )
     
     @property

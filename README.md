@@ -20,6 +20,11 @@ A QGIS plugin for archaeologists to prepare data for field work and import it ba
 - **Field Project Import**: Import completed field projects and merge Objects/Features/Small Finds layers
 - **Duplicate Detection**: Intelligent duplicate detection prevents importing features that already exist in the current project
 - **Column Mapping Dialog**: Interactive column mapping for CSV files with different structures
+- **Import Summary Dialog**: Comprehensive summary dialog showing import statistics after data import
+  - **Import Statistics**: Displays counts of imported CSV points, features, objects, and small finds
+  - **Duplicate Detection**: Shows number of duplicates detected and filtered out during import
+  - **User-Friendly Interface**: Clean, organized display with sections for each data type
+  - **Translation Support**: Full internationalization support for summary dialog
 - **Intelligent Data Filtering**: Automatic filtering of field projects to include only relevant data:
   - **Recording Area Filtering**: Keeps only the selected recording area feature
   - **Related Extra Layers Filtering**: Filters extra layers based on QGIS relations
@@ -123,6 +128,16 @@ The raster processing service uses GDAL for high-quality clipping operations and
 - **Automatic Archiving**: Moves imported field projects to the configured archive folder after successful import
 - **Validation**: Validates project structure and data integrity
 
+#### Import Summary Dialog
+After successful import, the plugin displays a comprehensive summary dialog showing:
+- **CSV Points**: Number of total station points imported from CSV files
+- **Features**: Number of archaeological features imported from field projects
+- **Objects**: Number of archaeological objects imported from field projects
+- **Small Finds**: Number of small finds imported from field projects
+- **Duplicate Detection**: Number of duplicates detected and filtered out during import for each data type
+- **Clean Interface**: Organized sections with clear statistics and color-coded information
+- **Translation Support**: Full internationalization with French and Afrikaans translations
+
 ## Architecture
 
 The plugin follows clean architecture principles with:
@@ -170,7 +185,21 @@ The project includes comprehensive test coverage with robust validation and qual
 
 ## Recent Updates
 
-### Version 0.14.0 (Latest)
+### Version 0.15.0 (Latest)
+- **Import Summary Dialog**: Added comprehensive summary dialog that displays after successful data import
+  - **Import Statistics Display**: Shows detailed counts of imported CSV points, features, objects, and small finds
+  - **Duplicate Detection Reporting**: Displays number of duplicates detected and filtered out during import for each data type
+  - **User-Friendly Interface**: Clean, organized dialog with sections for each data type and color-coded information
+  - **Translation Support**: Full internationalization with French and Afrikaans translations for all dialog elements
+  - **Automatic Display**: Dialog appears automatically after successful import operations
+  - **Comprehensive Coverage**: Covers all import scenarios including CSV files, field projects, and mixed imports
+- **Enhanced Import Workflow**: Improved import process with better user feedback
+  - **Statistics Collection**: Enhanced import services to collect and provide detailed import statistics
+  - **Seamless Integration**: Summary dialog integrates with existing CSV and field project import workflows
+  - **Error Handling**: Graceful handling of missing data or translation services
+  - **SOLID Design**: Follows dependency injection and single responsibility principles
+
+### Version 0.14.0
 - **Duplicate Detection for Field Project Import**: Added intelligent duplicate detection to prevent importing features that already exist in the current project
   - **Automatic Duplicate Filtering**: Filters out features that already exist in Objects, Features, and Small Finds layers before creating merged layers
   - **Smart Feature Comparison**: Creates unique signatures based on feature attributes and geometry to identify duplicates
