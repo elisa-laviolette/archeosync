@@ -262,6 +262,7 @@ class ArcheoSyncPlugin:
             recording_areas_layer_id = self._settings_manager.get_value('recording_areas_layer', '')
             objects_layer_id = self._settings_manager.get_value('objects_layer', '')
             features_layer_id = self._settings_manager.get_value('features_layer', '')
+            small_finds_layer_id = self._settings_manager.get_value('small_finds_layer', '')
             destination_folder = self._settings_manager.get_value('field_projects_folder', '')
             
             if not recording_areas_layer_id or not objects_layer_id or not destination_folder:
@@ -389,6 +390,7 @@ class ArcheoSyncPlugin:
                         recording_areas_layer_id=recording_areas_layer_id,
                         objects_layer_id=objects_layer_id,
                         features_layer_id=features_layer_id if features_layer_id else None,
+                        small_finds_layer_id=small_finds_layer_id if small_finds_layer_id else None,
                         background_layer_id=background_layer_id if background_layer_id else None,
                         extra_layers=extra_layers,
                         destination_folder=destination_folder,
