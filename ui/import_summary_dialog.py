@@ -34,15 +34,10 @@ Usage:
     dialog.exec_()
 """
 
-from typing import Optional
+from typing import Optional, List
 from dataclasses import dataclass
 from qgis.PyQt import QtWidgets
 from qgis.PyQt.QtCore import Qt
-
-try:
-    from ..core.interfaces import ITranslationService
-except ImportError:
-    from core.interfaces import ITranslationService
 
 
 @dataclass
@@ -56,6 +51,12 @@ class ImportSummaryData:
     features_duplicates: int = 0
     objects_duplicates: int = 0
     small_finds_duplicates: int = 0
+    duplicate_objects_warnings: List[str] = None
+    
+    def __post_init__(self):
+        """Initialize default values for mutable fields."""
+        if self.duplicate_objects_warnings is None:
+            self.duplicate_objects_warnings = []
 
 
 class ImportSummaryDialog(QtWidgets.QDialog):
@@ -68,21 +69,18 @@ class ImportSummaryDialog(QtWidgets.QDialog):
     
     def __init__(self, 
                  summary_data: ImportSummaryData,
-                 translation_service: Optional[ITranslationService] = None,
                  parent=None):
         """
         Initialize the import summary dialog.
         
         Args:
             summary_data: Data containing import statistics
-            translation_service: Service for translations (optional)
             parent: Parent widget for the dialog
         """
         super().__init__(parent)
         
         # Store injected dependencies
         self._summary_data = summary_data
-        self._translation_service = translation_service
         
         # Initialize UI
         self._setup_ui()
@@ -236,6 +234,21 @@ class ImportSummaryDialog(QtWidgets.QDialog):
             duplicates_layout.addWidget(duplicates_count)
             layout.addLayout(duplicates_layout)
         
+        # Duplicate objects warnings
+        if self._summary_data.duplicate_objects_warnings:
+            warnings_layout = QtWidgets.QVBoxLayout()
+            warnings_label = QtWidgets.QLabel(self.tr("Duplicate Objects Warnings:"))
+            warnings_label.setStyleSheet("font-weight: bold; color: #FF4500;")
+            warnings_layout.addWidget(warnings_label)
+            
+            for warning in self._summary_data.duplicate_objects_warnings:
+                warning_item = QtWidgets.QLabel(f"• {warning}")
+                warning_item.setStyleSheet("color: #FF4500; margin-left: 10px;")
+                warning_item.setWordWrap(True)
+                warnings_layout.addWidget(warning_item)
+            
+            layout.addLayout(warnings_layout)
+        
         return group
     
     def _create_small_finds_section(self) -> QtWidgets.QGroupBox:
@@ -283,18 +296,4 @@ class ImportSummaryDialog(QtWidgets.QDialog):
     def _setup_connections(self) -> None:
         """Set up signal connections."""
         # Button connections
-        self._ok_button.clicked.connect(self.accept)
-    
-    def tr(self, message: str) -> str:
-        """
-        Translate a message using the translation service if available.
-        
-        Args:
-            message: Message to translate
-            
-        Returns:
-            Translated message or original message if translation service not available
-        """
-        if self._translation_service:
-            return self._translation_service.translate(message)
-        return message 
+        self._ok_button.clicked.connect(self.accept) 

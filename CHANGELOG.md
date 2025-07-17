@@ -2,6 +2,19 @@
 
 All notable changes to the ArcheoSync QGIS plugin will be documented in this file.
 
+## [0.17.0] - 2025-01-XX
+
+### New Features
+
+- **Duplicate Objects Warnings**: Added comprehensive warnings for duplicate objects with the same recording area and number
+  - **Import Summary Integration**: Warnings are displayed in the import summary dialog after successful data import
+  - **Multi-Layer Detection**: Detects duplicates within the "New Objects" layer (imported objects), within the original "Objects" layer (existing objects), and between both layers
+  - **Detailed Information**: Shows specific recording area names and object numbers for each duplicate found
+  - **User-Friendly Display**: Color-coded warnings in orange for easy identification in the summary dialog
+  - **Translation Support**: Full internationalization support for warning messages with French translations
+  - **Automatic Detection**: Runs automatically when objects are imported, providing immediate feedback to users
+  - **Error Handling**: Graceful handling of missing configuration or layers without failing the import process
+
 ## [0.16.0] - 2025-07-17
 
 ### Bug Fixes

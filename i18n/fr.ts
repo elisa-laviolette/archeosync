@@ -847,5 +847,17 @@ Consultez la console pour plus de détails sur les erreurs.</translation>
         <source>OK</source>
         <translation>OK</translation>
     </message>
+    <message>
+        <location filename="../ui/import_summary_dialog.py" line="250"/>
+        <source>Duplicate Objects Warnings:</source>
+        <translation>Avertissements d'objets en double :</translation>
+    </message>
+</context>
+<context>
+    <name>DuplicateObjectsDetectorService</name>
+    <message>
+        <source>Recording Area '{recording_area_name}' has {count} objects with number {number} in {layer_name}</source>
+        <translation>Zone d'enregistrement '{recording_area_name}' a {count} objets avec le numéro {number} dans {layer_name}</translation>
+    </message>
 </context>
 </TS>

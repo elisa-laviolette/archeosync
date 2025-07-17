@@ -190,27 +190,24 @@ QGIS-specific implementation for layer operations including:
 - Layer structure copying with styling preservation
 
 ### FieldProjectImportService
-QGIS-specific implementation for field project import operations including:
-- **Dual Import Support**: Processes both data.gpkg files and individual layer files
-  - **data.gpkg Processing**: Extracts Objects, Features, and Small Finds layers from data.gpkg files
-  - **Individual Layer Processing**: Processes Objects.gpkg, Features.gpkg, Small Finds.gpkg, and other individual layer files
-  - **Hybrid Support**: Handles projects with both data.gpkg and individual layer files
-- **Duplicate Detection**: Intelligent duplicate detection prevents importing features that already exist in the current project
-  - **Automatic Duplicate Filtering**: Filters out features that already exist in Objects, Features, and Small Finds layers before creating merged layers
-  - **Smart Feature Comparison**: Creates unique signatures based on feature attributes and geometry to identify duplicates (excluding layer-specific feature IDs and virtual fields)
-  - **Virtual Field Handling**: Properly detects and excludes virtual expression fields (like "Metre" fields) that are added during import but don't represent data differences
-  - **Existing Layer Integration**: Retrieves existing layers from current project using settings configuration
-  - **Seamless User Experience**: Works automatically without user intervention during import process
-  - **Comprehensive Coverage**: Handles duplicates across all layer types (Objects, Features, Small Finds)
-  - **Performance Optimized**: Efficient duplicate detection that scales with project size
-- **Layer Merging**: Merges Objects, Features, and Small Finds layers from multiple completed projects
-  - Creates new "New Objects", "New Features", and "New Small Finds" layers in the current project
-  - Preserves all attributes and geometry from imported layers
-  - Maintains coordinate reference system compatibility
-- **Automatic Archiving**: Moves imported field projects to configured archive folder after successful import
-- **Comprehensive Validation**: Validates layer structure and content before import
-- **Error Recovery**: Graceful handling of missing or invalid layers
-- **Project Integration**: Automatically adds merged layers to the current QGIS project
+QGIS-specific implementation for field project import and processing including:
+- **Data.gpkg Processing**: Automatically processes data.gpkg files from field projects
+- **Layer Merging**: Merges Objects, Features, and Small Finds layers from multiple projects
+- **Duplicate Detection**: Automatically filters out features that already exist in the current project's Objects, Features, and Small Finds layers
+- **Smart Feature Comparison**: Uses unique signatures based on attributes and geometry to identify duplicates (excluding layer-specific feature IDs)
+- **Layer Creation**: Creates new "New Objects", "New Features", and "New Small Finds" layers in the project
+- **Feature Collection**: Collects all features from completed field recordings
+- **Automatic Archiving**: Moves imported field projects to the configured archive folder after successful import
+- **Validation**: Validates project structure and data integrity
+
+### DuplicateObjectsDetectorService
+Service for detecting duplicate objects with the same recording area and number:
+- **Multi-Layer Detection**: Detects duplicates within "New Objects" layer, original "Objects" layer, and between both layers
+- **Recording Area Integration**: Uses QGIS relations to identify recording area references and display names
+- **Detailed Warnings**: Provides specific information about recording area names and object numbers for each duplicate
+- **Translation Support**: Full internationalization support for warning messages
+- **Error Handling**: Graceful handling of missing configuration or layers without failing the import process
+- **Import Summary Integration**: Automatically runs during import summary generation to provide user feedback
 
 ### QGISProjectCreationService
 QGIS-specific implementation for field project creation and packaging including:
@@ -299,6 +296,10 @@ Dialog for displaying comprehensive import statistics after successful data impo
   - **Color-coded Display**: Green for successful imports, orange for duplicates
   - **Conditional Display**: Only shows duplicate sections when duplicates are detected
   - **Per-type Statistics**: Separate duplicate counts for each data type
+- **Duplicate Objects Warnings**: Comprehensive warnings for objects with same recording area and number
+  - **Multi-Layer Detection**: Detects duplicates within "New Objects" layer, original "Objects" layer, and between both layers
+  - **Detailed Information**: Shows specific recording area names and object numbers for each duplicate
+  - **User-Friendly Display**: Color-coded warnings in orange for easy identification
 - **User-Friendly Interface**: Clean, organized dialog with intuitive design
   - **Organized Sections**: Clear sections for each data type with descriptive headings
   - **Scrollable Content**: Handles large amounts of data with scrollable area

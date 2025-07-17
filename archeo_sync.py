@@ -570,35 +570,39 @@ class ArcheoSyncPlugin:
         """Show the import summary dialog."""
         try:
             from .ui.import_summary_dialog import ImportSummaryDialog, ImportSummaryData
+            from .services.duplicate_objects_detector_service import DuplicateObjectsDetectorService
             
-            # Create summary data object
+            # Detect duplicate objects if objects were imported
+            duplicate_objects_warnings = []
+            if summary_data.get('objects_count', 0) > 0:
+                detector = DuplicateObjectsDetectorService(
+                    settings_manager=self._settings_manager,
+                    layer_service=self._layer_service,
+                    translation_service=self._translation_service
+                )
+                duplicate_objects_warnings = detector.detect_duplicate_objects()
+            
+            # Create summary data
             summary = ImportSummaryData(
-                csv_points_count=summary_data['csv_points_count'],
-                features_count=summary_data['features_count'],
-                objects_count=summary_data['objects_count'],
-                small_finds_count=summary_data['small_finds_count'],
-                csv_duplicates=summary_data['csv_duplicates'],
-                features_duplicates=summary_data['features_duplicates'],
-                objects_duplicates=summary_data['objects_duplicates'],
-                small_finds_duplicates=summary_data['small_finds_duplicates']
+                csv_points_count=summary_data.get('csv_points_count', 0),
+                features_count=summary_data.get('features_count', 0),
+                objects_count=summary_data.get('objects_count', 0),
+                small_finds_count=summary_data.get('small_finds_count', 0),
+                csv_duplicates=summary_data.get('csv_duplicates', 0),
+                features_duplicates=summary_data.get('features_duplicates', 0),
+                objects_duplicates=summary_data.get('objects_duplicates', 0),
+                small_finds_duplicates=summary_data.get('small_finds_duplicates', 0),
+                duplicate_objects_warnings=duplicate_objects_warnings
             )
             
-            # Create and show the summary dialog
-            dialog = ImportSummaryDialog(
-                summary_data=summary,
-                translation_service=self._translation_service,
-                parent=self._iface.mainWindow()
-            )
-            
+            # Show the dialog
+            dialog = ImportSummaryDialog(summary)
             dialog.exec_()
             
         except Exception as e:
-            from qgis.PyQt.QtWidgets import QMessageBox
-            QMessageBox.warning(
-                self._iface.mainWindow(),
-                self.tr("Warning"),
-                self.tr(f"Could not show import summary: {str(e)}")
-            )
+            print(f"Error showing import summary: {e}")
+            import traceback
+            traceback.print_exc()
     
     @property
     def settings_manager(self):
