@@ -391,6 +391,9 @@ class ImportSummaryDockWidget(QDockWidget):
         # Create Refresh button for warnings
         self._refresh_button = QtWidgets.QPushButton(self.tr("Refresh Warnings"))
         
+        # Create Cancel button
+        self._cancel_button = QtWidgets.QPushButton(self.tr("Cancel Import"))
+        
         # Create Validate button (instead of OK)
         self._validate_button = QtWidgets.QPushButton(self.tr("Validate"))
         self._validate_button.setDefault(True)
@@ -398,6 +401,7 @@ class ImportSummaryDockWidget(QDockWidget):
         # Add buttons to layout
         button_layout.addWidget(self._refresh_button)
         button_layout.addStretch()
+        button_layout.addWidget(self._cancel_button)
         button_layout.addWidget(self._validate_button)
         
         parent_layout.addLayout(button_layout)
@@ -406,11 +410,17 @@ class ImportSummaryDockWidget(QDockWidget):
         """Set up signal connections."""
         # Button connections
         self._refresh_button.clicked.connect(self._handle_refresh_warnings)
+        self._cancel_button.clicked.connect(self._handle_cancel)
         self._validate_button.clicked.connect(self._handle_validate)
     
     def _handle_validate(self) -> None:
         """Handle the validate button click - copy features from temporary to definitive layers."""
         try:
+            # Check for warnings and ask for confirmation if any exist
+            if self._has_warnings():
+                if not self._confirm_validation_with_warnings():
+                    return  # User cancelled validation
+            
             # Copy features from temporary layers to definitive layers
             self._copy_temporary_to_definitive_layers()
             
@@ -420,8 +430,12 @@ class ImportSummaryDockWidget(QDockWidget):
             # Archive imported files and folders after successful validation
             self._archive_imported_data()
             
-            # Close the dock widget
-            self.close()
+            # Delete the dock widget from the interface
+            if self._iface:
+                self._iface.removeDockWidget(self)
+            
+            # Delete the widget
+            self.deleteLater()
             
         except Exception as e:
             print(f"Error during validation: {e}")
@@ -433,6 +447,73 @@ class ImportSummaryDockWidget(QDockWidget):
                 self,
                 self.tr("Validation Error"),
                 self.tr(f"An error occurred during validation: {str(e)}")
+            )
+    
+    def _has_warnings(self) -> bool:
+        """Check if there are any warnings present in the summary data."""
+        duplicate_warnings = getattr(self._summary_data, 'duplicate_objects_warnings', [])
+        skipped_warnings = getattr(self._summary_data, 'skipped_numbers_warnings', [])
+        
+        return len(duplicate_warnings) > 0 or len(skipped_warnings) > 0
+    
+    def _confirm_validation_with_warnings(self) -> bool:
+        """Show confirmation dialog when warnings are present."""
+        duplicate_count = len(getattr(self._summary_data, 'duplicate_objects_warnings', []))
+        skipped_count = len(getattr(self._summary_data, 'skipped_numbers_warnings', []))
+        
+        # Build warning summary message
+        warning_summary = []
+        if duplicate_count > 0:
+            warning_summary.append(self.tr(f"• {duplicate_count} duplicate object warning(s)"))
+        if skipped_count > 0:
+            warning_summary.append(self.tr(f"• {skipped_count} skipped numbers warning(s)"))
+        
+        warning_message = "\n".join(warning_summary)
+        
+        # Show confirmation dialog
+        reply = QMessageBox.question(
+            self,
+            self.tr("Validation with Warnings"),
+            self.tr(f"The following warnings have been detected:\n\n{warning_message}\n\nDo you want to proceed with validation anyway?"),
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        
+        return reply == QMessageBox.Yes
+    
+    def _handle_cancel(self) -> None:
+        """Handle the cancel button click - delete temporary layers and delete the widget."""
+        try:
+            # Show confirmation dialog
+            reply = QMessageBox.question(
+                self,
+                self.tr("Cancel Import"),
+                self.tr("Are you sure you want to cancel the import? This will delete all temporary import layers and cannot be undone."),
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            
+            if reply == QMessageBox.Yes:
+                # Delete temporary layers
+                self._delete_temporary_layers()
+                
+                # Delete the dock widget from the interface
+                if self._iface:
+                    self._iface.removeDockWidget(self)
+                
+                # Delete the widget
+                self.deleteLater()
+                
+        except Exception as e:
+            print(f"Error during cancel: {e}")
+            import traceback
+            traceback.print_exc()
+            
+            # Show error message to user
+            QMessageBox.critical(
+                self,
+                self.tr("Cancel Error"),
+                self.tr(f"An error occurred while canceling the import: {str(e)}")
             )
     
     def _handle_refresh_warnings(self) -> None:
@@ -674,7 +755,7 @@ class ImportSummaryDockWidget(QDockWidget):
             project = QgsProject.instance()
             
             # Define temporary layer names to delete
-            temporary_layer_names = ["New Objects", "New Features", "New Small Finds"]
+            temporary_layer_names = ["New Objects", "New Features", "New Small Finds", "Imported_CSV_Points"]
             
             layers_to_remove = []
             

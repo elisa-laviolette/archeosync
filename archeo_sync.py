@@ -27,6 +27,7 @@ from typing import List, Optional, Dict
 from qgis.PyQt.QtCore import QSettings
 from qgis.PyQt.QtGui import QIcon
 from qgis.PyQt.QtWidgets import QAction
+from qgis.PyQt.QtWidgets import QDockWidget
 
 # Initialize Qt resources from file resources.py
 from .resources import *
@@ -433,18 +434,31 @@ class ArcheoSyncPlugin:
     
     def run_import_data(self) -> None:
         """Run the import data dialog."""
-        # Create and show the import data dialog
-        dialog = ImportDataDialog(
-            settings_manager=self._settings_manager,
-            file_system_service=self._file_system_service,
-            parent=self._iface.mainWindow()
-        )
+        print("Debug: run_import_data called")
         
-        result = dialog.exec_()
+        # Check if an import summary dock widget already exists
+        existing_dock_widget = self._find_existing_import_summary_dock_widget()
         
-        # Handle dialog result
-        if result:
-            self._handle_import_data_accepted(dialog)
+        if existing_dock_widget:
+            print("Debug: Found existing dock widget, showing it")
+            # If a dock widget exists, show it and bring it to front
+            existing_dock_widget.show()
+            existing_dock_widget.raise_()
+            existing_dock_widget.activateWindow()
+        else:
+            print("Debug: No existing dock widget found, creating new dialog")
+            # If no dock widget exists, create and show the import data dialog
+            dialog = ImportDataDialog(
+                settings_manager=self._settings_manager,
+                file_system_service=self._file_system_service,
+                parent=self._iface.mainWindow()
+            )
+            
+            result = dialog.exec_()
+            
+            # Handle dialog result
+            if result:
+                self._handle_import_data_accepted(dialog)
     
     def _handle_import_data_accepted(self, dialog) -> None:
         """Handle the case when import data dialog is accepted."""
@@ -629,6 +643,44 @@ class ArcheoSyncPlugin:
             print(f"Error showing import summary: {e}")
             import traceback
             traceback.print_exc()
+    
+    def _find_existing_import_summary_dock_widget(self):
+        """
+        Find an existing import summary dock widget.
+        
+        Returns:
+            The existing dock widget if found, None otherwise
+        """
+        try:
+            # Get the main window
+            main_window = self._iface.mainWindow()
+            if not main_window:
+                print("Debug: No main window found")
+                return None
+            
+            # Look for dock widgets that are instances of ImportSummaryDockWidget
+            dock_widgets = main_window.findChildren(QDockWidget)
+            print(f"Debug: Found {len(dock_widgets)} dock widgets")
+            
+            for child in dock_widgets:
+                # Check if this is an ImportSummaryDockWidget by checking the class name
+                if hasattr(child, '__class__') and 'ImportSummaryDockWidget' in child.__class__.__name__:
+                    print(f"Debug: Found ImportSummaryDockWidget by class name: {child.__class__.__name__}")
+                    return child
+                
+                # Also check the window title as a fallback (both translated and untranslated)
+                title = child.windowTitle()
+                print(f"Debug: Dock widget title: '{title}'")
+                if title in ["Import Summary", self.tr("Import Summary")]:
+                    print(f"Debug: Found ImportSummaryDockWidget by title: '{title}'")
+                    return child
+            
+            print("Debug: No ImportSummaryDockWidget found")
+            return None
+            
+        except Exception as e:
+            print(f"Error finding existing import summary dock widget: {e}")
+            return None
     
     @property
     def settings_manager(self):

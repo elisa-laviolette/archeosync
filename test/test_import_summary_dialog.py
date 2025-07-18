@@ -258,6 +258,315 @@ class TestImportSummaryDialog(unittest.TestCase):
         expected_areas = (Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea | 
                          Qt.TopDockWidgetArea | Qt.BottomDockWidgetArea)
         self.assertEqual(dock_widget.allowedAreas(), expected_areas)
+    
+    def test_cancel_button_exists(self):
+        """Test that the cancel button is created."""
+        self.assertIsNotNone(self.dialog._cancel_button)
+        self.assertEqual(self.dialog._cancel_button.text(), "Cancel Import")
+    
+    def test_cancel_button_confirmation_yes(self):
+        """Test that cancel button shows confirmation dialog and proceeds when user clicks Yes."""
+        with patch('qgis.PyQt.QtWidgets.QMessageBox.question') as mock_question, \
+             patch.object(self.dialog, '_delete_temporary_layers') as mock_delete, \
+             patch.object(self.dialog, 'deleteLater') as mock_delete_later:
+            
+            # Configure the mock to return Yes
+            mock_question.return_value = QtWidgets.QMessageBox.Yes
+            
+            # Call the cancel method
+            self.dialog._handle_cancel()
+            
+            # Verify confirmation dialog was shown
+            mock_question.assert_called_once_with(
+                self.dialog,
+                "Cancel Import",
+                "Are you sure you want to cancel the import? This will delete all temporary import layers and cannot be undone.",
+                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                QtWidgets.QMessageBox.No
+            )
+            
+            # Verify temporary layers were deleted
+            mock_delete.assert_called_once()
+            
+            # Verify widget was deleted
+            mock_delete_later.assert_called_once()
+    
+    def test_cancel_button_confirmation_no(self):
+        """Test that cancel button shows confirmation dialog and does nothing when user clicks No."""
+        with patch('qgis.PyQt.QtWidgets.QMessageBox.question') as mock_question, \
+             patch.object(self.dialog, '_delete_temporary_layers') as mock_delete, \
+             patch.object(self.dialog, 'deleteLater') as mock_delete_later:
+            
+            # Configure the mock to return No
+            mock_question.return_value = QtWidgets.QMessageBox.No
+            
+            # Call the cancel method
+            self.dialog._handle_cancel()
+            
+            # Verify confirmation dialog was shown
+            mock_question.assert_called_once()
+            
+            # Verify temporary layers were NOT deleted
+            mock_delete.assert_not_called()
+            
+            # Verify widget was NOT deleted
+            mock_delete_later.assert_not_called()
+    
+    def test_cancel_button_error_handling(self):
+        """Test that cancel button handles errors gracefully."""
+        with patch('qgis.PyQt.QtWidgets.QMessageBox.question', side_effect=Exception("Test error")), \
+             patch('qgis.PyQt.QtWidgets.QMessageBox.critical') as mock_critical:
+            
+            # Call the cancel method
+            self.dialog._handle_cancel()
+            
+            # Verify error message was shown
+            mock_critical.assert_called_once_with(
+                self.dialog,
+                "Cancel Error",
+                "An error occurred while canceling the import: Test error"
+            )
+    
+    def test_delete_temporary_layers_includes_csv_layer(self):
+        """Test that the delete temporary layers method includes the CSV temporary layer."""
+        with patch('qgis.core.QgsProject') as mock_project_class:
+            
+            # Create mock project and layers
+            mock_project = Mock()
+            mock_project_class.instance.return_value = mock_project
+            
+            # Create mock layers
+            mock_objects_layer = Mock()
+            mock_objects_layer.name.return_value = "New Objects"
+            mock_objects_layer.id.return_value = "objects_layer_id"
+            
+            mock_features_layer = Mock()
+            mock_features_layer.name.return_value = "New Features"
+            mock_features_layer.id.return_value = "features_layer_id"
+            
+            mock_csv_layer = Mock()
+            mock_csv_layer.name.return_value = "Imported_CSV_Points"
+            mock_csv_layer.id.return_value = "csv_layer_id"
+            
+            # Set up the project to return our mock layers
+            mock_project.mapLayers.return_value = {
+                "objects_layer_id": mock_objects_layer,
+                "features_layer_id": mock_features_layer,
+                "csv_layer_id": mock_csv_layer
+            }
+            
+            # Call the delete method
+            self.dialog._delete_temporary_layers()
+            
+            # Check that removeMapLayer was called for each temporary layer
+            self.assertEqual(mock_project.removeMapLayer.call_count, 3)
+            
+            # Verify the specific layer IDs were called
+            mock_project.removeMapLayer.assert_any_call("objects_layer_id")
+            mock_project.removeMapLayer.assert_any_call("features_layer_id")
+            mock_project.removeMapLayer.assert_any_call("csv_layer_id")
+    
+    def test_validate_button_exists(self):
+        """Test that the validate button is created."""
+        self.assertIsNotNone(self.dialog._validate_button)
+        self.assertEqual(self.dialog._validate_button.text(), "Validate")
+    
+    def test_validate_button_success(self):
+        """Test that validate button properly deletes the dock widget on success."""
+        with patch.object(self.dialog, '_copy_temporary_to_definitive_layers') as mock_copy, \
+             patch.object(self.dialog, '_delete_temporary_layers') as mock_delete, \
+             patch.object(self.dialog, '_archive_imported_data') as mock_archive, \
+             patch.object(self.dialog, 'deleteLater') as mock_delete_later:
+            
+            # Call the validate method
+            self.dialog._handle_validate()
+            
+            # Verify all the validation steps were called
+            mock_copy.assert_called_once()
+            mock_delete.assert_called_once()
+            mock_archive.assert_called_once()
+            
+            # Verify the dock widget was removed from the interface
+            self.mock_iface.removeDockWidget.assert_called_once_with(self.dialog)
+            
+            # Verify the widget was deleted
+            mock_delete_later.assert_called_once()
+    
+    def test_validate_button_error_handling(self):
+        """Test that validate button handles errors gracefully."""
+        with patch.object(self.dialog, '_copy_temporary_to_definitive_layers', side_effect=Exception("Test error")), \
+             patch('qgis.PyQt.QtWidgets.QMessageBox.critical') as mock_critical:
+            
+            # Call the validate method
+            self.dialog._handle_validate()
+            
+            # Verify error message was shown
+            mock_critical.assert_called_once_with(
+                self.dialog,
+                "Validation Error",
+                "An error occurred during validation: Test error"
+            )
+            
+            # Verify the dock widget was NOT removed from the interface on error
+            self.mock_iface.removeDockWidget.assert_not_called()
+    
+    def test_has_warnings_with_duplicates(self):
+        """Test that _has_warnings returns True when duplicate warnings exist."""
+        # Set up summary data with duplicate warnings
+        self.dialog._summary_data.duplicate_objects_warnings = [WarningData("test", "area", "layer", "filter")]
+        self.dialog._summary_data.skipped_numbers_warnings = []
+        
+        self.assertTrue(self.dialog._has_warnings())
+    
+    def test_has_warnings_with_skipped_numbers(self):
+        """Test that _has_warnings returns True when skipped numbers warnings exist."""
+        # Set up summary data with skipped numbers warnings
+        self.dialog._summary_data.duplicate_objects_warnings = []
+        self.dialog._summary_data.skipped_numbers_warnings = [WarningData("test", "area", "layer", "filter")]
+        
+        self.assertTrue(self.dialog._has_warnings())
+    
+    def test_has_warnings_with_both_types(self):
+        """Test that _has_warnings returns True when both types of warnings exist."""
+        # Set up summary data with both types of warnings
+        self.dialog._summary_data.duplicate_objects_warnings = [WarningData("test1", "area1", "layer1", "filter1")]
+        self.dialog._summary_data.skipped_numbers_warnings = [WarningData("test2", "area2", "layer2", "filter2")]
+        
+        self.assertTrue(self.dialog._has_warnings())
+    
+    def test_has_warnings_without_warnings(self):
+        """Test that _has_warnings returns False when no warnings exist."""
+        # Set up summary data with no warnings
+        self.dialog._summary_data.duplicate_objects_warnings = []
+        self.dialog._summary_data.skipped_numbers_warnings = []
+        
+        self.assertFalse(self.dialog._has_warnings())
+    
+    def test_confirm_validation_with_warnings_duplicates_only(self):
+        """Test confirmation dialog when only duplicate warnings exist."""
+        # Set up summary data with only duplicate warnings
+        self.dialog._summary_data.duplicate_objects_warnings = [
+            WarningData("test1", "area1", "layer1", "filter1"),
+            WarningData("test2", "area2", "layer2", "filter2")
+        ]
+        self.dialog._summary_data.skipped_numbers_warnings = []
+        
+        with patch('qgis.PyQt.QtWidgets.QMessageBox.question') as mock_question:
+            mock_question.return_value = QtWidgets.QMessageBox.Yes
+            
+            result = self.dialog._confirm_validation_with_warnings()
+            
+            # Verify the confirmation dialog was shown
+            mock_question.assert_called_once()
+            self.assertTrue(result)
+    
+    def test_confirm_validation_with_warnings_skipped_only(self):
+        """Test confirmation dialog when only skipped numbers warnings exist."""
+        # Set up summary data with only skipped numbers warnings
+        self.dialog._summary_data.duplicate_objects_warnings = []
+        self.dialog._summary_data.skipped_numbers_warnings = [
+            WarningData("test1", "area1", "layer1", "filter1"),
+            WarningData("test2", "area2", "layer2", "filter2"),
+            WarningData("test3", "area3", "layer3", "filter3")
+        ]
+        
+        with patch('qgis.PyQt.QtWidgets.QMessageBox.question') as mock_question:
+            mock_question.return_value = QtWidgets.QMessageBox.No
+            
+            result = self.dialog._confirm_validation_with_warnings()
+            
+            # Verify the confirmation dialog was shown
+            mock_question.assert_called_once()
+            self.assertFalse(result)
+    
+    def test_confirm_validation_with_warnings_both_types(self):
+        """Test confirmation dialog when both types of warnings exist."""
+        # Set up summary data with both types of warnings
+        self.dialog._summary_data.duplicate_objects_warnings = [
+            WarningData("test1", "area1", "layer1", "filter1")
+        ]
+        self.dialog._summary_data.skipped_numbers_warnings = [
+            WarningData("test2", "area2", "layer2", "filter2"),
+            WarningData("test3", "area3", "layer3", "filter3")
+        ]
+        
+        with patch('qgis.PyQt.QtWidgets.QMessageBox.question') as mock_question:
+            mock_question.return_value = QtWidgets.QMessageBox.Yes
+            
+            result = self.dialog._confirm_validation_with_warnings()
+            
+            # Verify the confirmation dialog was shown
+            mock_question.assert_called_once()
+            self.assertTrue(result)
+    
+    def test_validate_with_warnings_user_confirms(self):
+        """Test validation when warnings exist and user confirms."""
+        # Set up summary data with warnings
+        self.dialog._summary_data.duplicate_objects_warnings = [WarningData("test", "area", "layer", "filter")]
+        self.dialog._summary_data.skipped_numbers_warnings = []
+        
+        with patch.object(self.dialog, '_has_warnings', return_value=True), \
+             patch.object(self.dialog, '_confirm_validation_with_warnings', return_value=True), \
+             patch.object(self.dialog, '_copy_temporary_to_definitive_layers') as mock_copy, \
+             patch.object(self.dialog, '_delete_temporary_layers') as mock_delete, \
+             patch.object(self.dialog, '_archive_imported_data') as mock_archive, \
+             patch.object(self.dialog, 'deleteLater') as mock_delete_later:
+            
+            # Call the validate method
+            self.dialog._handle_validate()
+            
+            # Verify that all validation steps were executed
+            mock_copy.assert_called_once()
+            mock_delete.assert_called_once()
+            mock_archive.assert_called_once()
+            mock_delete_later.assert_called_once()
+    
+    def test_validate_with_warnings_user_cancels(self):
+        """Test validation when warnings exist and user cancels."""
+        # Set up summary data with warnings
+        self.dialog._summary_data.duplicate_objects_warnings = [WarningData("test", "area", "layer", "filter")]
+        self.dialog._summary_data.skipped_numbers_warnings = []
+        
+        with patch.object(self.dialog, '_has_warnings', return_value=True), \
+             patch.object(self.dialog, '_confirm_validation_with_warnings', return_value=False), \
+             patch.object(self.dialog, '_copy_temporary_to_definitive_layers') as mock_copy, \
+             patch.object(self.dialog, '_delete_temporary_layers') as mock_delete, \
+             patch.object(self.dialog, '_archive_imported_data') as mock_archive, \
+             patch.object(self.dialog, 'deleteLater') as mock_delete_later:
+            
+            # Call the validate method
+            self.dialog._handle_validate()
+            
+            # Verify that no validation steps were executed
+            mock_copy.assert_not_called()
+            mock_delete.assert_not_called()
+            mock_archive.assert_not_called()
+            mock_delete_later.assert_not_called()
+    
+    def test_validate_without_warnings(self):
+        """Test validation when no warnings exist."""
+        # Set up summary data with no warnings
+        self.dialog._summary_data.duplicate_objects_warnings = []
+        self.dialog._summary_data.skipped_numbers_warnings = []
+        
+        with patch.object(self.dialog, '_has_warnings', return_value=False), \
+             patch.object(self.dialog, '_confirm_validation_with_warnings') as mock_confirm, \
+             patch.object(self.dialog, '_copy_temporary_to_definitive_layers') as mock_copy, \
+             patch.object(self.dialog, '_delete_temporary_layers') as mock_delete, \
+             patch.object(self.dialog, '_archive_imported_data') as mock_archive, \
+             patch.object(self.dialog, 'deleteLater') as mock_delete_later:
+            
+            # Call the validate method
+            self.dialog._handle_validate()
+            
+            # Verify that confirmation was not called
+            mock_confirm.assert_not_called()
+            
+            # Verify that all validation steps were executed
+            mock_copy.assert_called_once()
+            mock_delete.assert_called_once()
+            mock_archive.assert_called_once()
+            mock_delete_later.assert_called_once()
 
 
 if __name__ == '__main__':

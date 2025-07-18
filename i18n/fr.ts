@@ -978,6 +978,21 @@ Consultez la console pour plus de détails sur les erreurs.</translation>
         <translation>Actualiser les avertissements</translation>
     </message>
     <message>
+        <location filename="../ui/import_summary_dialog.py" line="395"/>
+        <source>Cancel Import</source>
+        <translation>Annuler l'importation</translation>
+    </message>
+    <message>
+        <location filename="../ui/import_summary_dialog.py" line="450"/>
+        <source>Are you sure you want to cancel the import? This will delete all temporary import layers and cannot be undone.</source>
+        <translation>Êtes-vous sûr de vouloir annuler l'importation ? Cela supprimera toutes les couches temporaires d'importation et ne peut pas être annulé.</translation>
+    </message>
+    <message>
+        <location filename="../ui/import_summary_dialog.py" line="467"/>
+        <source>Cancel Error</source>
+        <translation>Erreur d'annulation</translation>
+    </message>
+    <message>
         <location filename="../ui/import_summary_dialog.py" line="462"/>
         <source>Services Not Available</source>
         <translation>Services non disponibles</translation>
@@ -1046,6 +1061,31 @@ Consultez la console pour plus de détails sur les erreurs.</translation>
         <location filename="../ui/import_summary_dialog.py" line="964"/>
         <source>Could not open both attribute tables: {error}</source>
         <translation>Impossible d'ouvrir les deux tables attributaires : {error}</translation>
+    </message>
+    <message>
+        <location filename="../ui/import_summary_dialog.py" line="430"/>
+        <source>Validation with Warnings</source>
+        <translation>Validation avec avertissements</translation>
+    </message>
+    <message>
+        <location filename="../ui/import_summary_dialog.py" line="432"/>
+        <source>The following warnings have been detected:</source>
+        <translation>Les avertissements suivants ont été détectés :</translation>
+    </message>
+    <message>
+        <location filename="../ui/import_summary_dialog.py" line="434"/>
+        <source>Do you want to proceed with validation anyway?</source>
+        <translation>Voulez-vous continuer avec la validation malgré tout ?</translation>
+    </message>
+    <message>
+        <location filename="../ui/import_summary_dialog.py" line="436"/>
+        <source>duplicate object warning(s)</source>
+        <translation>avertissement(s) d'objet(s) en double</translation>
+    </message>
+    <message>
+        <location filename="../ui/import_summary_dialog.py" line="438"/>
+        <source>skipped numbers warning(s)</source>
+        <translation>avertissement(s) de numéro(s) manqué(s)</translation>
     </message>
 </context>
 <context>

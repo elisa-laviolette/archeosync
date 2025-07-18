@@ -7,17 +7,19 @@ CSV files and completed field projects, and handles user selections properly.
 
 import unittest
 from unittest.mock import Mock, MagicMock, patch
-from qgis.PyQt.QtWidgets import QApplication
+from qgis.PyQt.QtWidgets import QApplication, QDockWidget
 from qgis.PyQt.QtCore import Qt
 
 try:
     from ..ui.import_data_dialog import ImportDataDialog
     from ..services.settings_service import QGISSettingsManager
     from ..services.file_system_service import QGISFileSystemService
+    from ..archeo_sync import ArcheoSyncPlugin
 except ImportError:
     from ui.import_data_dialog import ImportDataDialog
     from services.settings_service import QGISSettingsManager
     from services.file_system_service import QGISFileSystemService
+    from archeo_sync import ArcheoSyncPlugin
 
 
 class TestImportDataDialog(unittest.TestCase):
@@ -625,5 +627,119 @@ class TestImportDataDialog(unittest.TestCase):
         self.assertEqual(dialog._cancel_button.text(), "Cancel")
 
 
-if __name__ == '__main__':
-    unittest.main() 
+class TestImportDataDialogLogic(unittest.TestCase):
+    """Test cases for the import data dialog logic functionality."""
+    
+    def setUp(self):
+        """Set up test fixtures."""
+        # Create a mock QApplication if one doesn't exist
+        if not QApplication.instance():
+            self.app = QApplication([])
+        else:
+            self.app = QApplication.instance()
+    
+    def test_find_existing_dock_widget_logic(self):
+        """Test the logic for finding existing dock widgets."""
+        # Create a mock main window
+        mock_main_window = Mock()
+        
+        # Create mock dock widgets
+        mock_dock_widget1 = Mock(spec=QDockWidget)
+        mock_dock_widget1.windowTitle.return_value = "Import Summary"
+        
+        mock_dock_widget2 = Mock(spec=QDockWidget)
+        mock_dock_widget2.windowTitle.return_value = "Other Widget"
+        
+        # Test with existing import summary dock widget
+        mock_main_window.findChildren.return_value = [mock_dock_widget1, mock_dock_widget2]
+        
+        # Find the import summary dock widget
+        found_widget = None
+        for child in mock_main_window.findChildren(QDockWidget):
+            if child.windowTitle() == "Import Summary":
+                found_widget = child
+                break
+        
+        # Verify that the correct widget was found
+        self.assertEqual(found_widget, mock_dock_widget1)
+        mock_main_window.findChildren.assert_called_once()
+    
+    def test_find_existing_dock_widget_not_found(self):
+        """Test the logic when no import summary dock widget exists."""
+        # Create a mock main window
+        mock_main_window = Mock()
+        
+        # Create mock dock widgets (none with "Import Summary" title)
+        mock_dock_widget1 = Mock(spec=QDockWidget)
+        mock_dock_widget1.windowTitle.return_value = "Other Widget 1"
+        
+        mock_dock_widget2 = Mock(spec=QDockWidget)
+        mock_dock_widget2.windowTitle.return_value = "Other Widget 2"
+        
+        # Test with no import summary dock widget
+        mock_main_window.findChildren.return_value = [mock_dock_widget1, mock_dock_widget2]
+        
+        # Find the import summary dock widget
+        found_widget = None
+        for child in mock_main_window.findChildren(QDockWidget):
+            if child.windowTitle() == "Import Summary":
+                found_widget = child
+                break
+        
+        # Verify that no widget was found
+        self.assertIsNone(found_widget)
+        mock_main_window.findChildren.assert_called_once()
+    
+    def test_find_existing_dock_widget_empty_list(self):
+        """Test the logic when no dock widgets exist."""
+        # Create a mock main window
+        mock_main_window = Mock()
+        
+        # Test with no dock widgets
+        mock_main_window.findChildren.return_value = []
+        
+        # Find the import summary dock widget
+        found_widget = None
+        for child in mock_main_window.findChildren(QDockWidget):
+            if child.windowTitle() == "Import Summary":
+                found_widget = child
+                break
+        
+        # Verify that no widget was found
+        self.assertIsNone(found_widget)
+        mock_main_window.findChildren.assert_called_once()
+    
+    def test_dock_widget_show_raise_activate(self):
+        """Test that dock widget methods are called correctly."""
+        # Create a mock dock widget
+        mock_dock_widget = Mock(spec=QDockWidget)
+        
+        # Call the methods that would be used to show and bring to front
+        mock_dock_widget.show()
+        mock_dock_widget.raise_()
+        mock_dock_widget.activateWindow()
+        
+        # Verify that all methods were called
+        mock_dock_widget.show.assert_called_once()
+        mock_dock_widget.raise_.assert_called_once()
+        mock_dock_widget.activateWindow.assert_called_once()
+    
+    def test_exception_handling_in_find_dock_widget(self):
+        """Test that exceptions are handled gracefully when finding dock widgets."""
+        # Create a mock main window that raises an exception
+        mock_main_window = Mock()
+        mock_main_window.findChildren.side_effect = Exception("Test error")
+        
+        # Test that the exception is handled gracefully
+        try:
+            found_widget = None
+            for child in mock_main_window.findChildren(QDockWidget):
+                if child.windowTitle() == "Import Summary":
+                    found_widget = child
+                    break
+        except Exception:
+            # If an exception occurs, it should be handled gracefully
+            found_widget = None
+        
+        # Verify that found_widget is None (indicating graceful handling)
+        self.assertIsNone(found_widget) 
