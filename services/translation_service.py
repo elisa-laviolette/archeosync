@@ -52,23 +52,11 @@ class QGISTranslationService(ITranslationService):
             f'{self._plugin_name}_{locale}.qm'
         )
         
-        # Debug: Print translation setup info
-        print(f"[ArcheoSync] Translation setup:")
-        print(f"  - Current locale: {locale}")
-        print(f"  - Plugin name: {self._plugin_name}")
-        print(f"  - Translation file path: {locale_path}")
-        print(f"  - File exists: {os.path.exists(locale_path)}")
-        
         # Load translation if file exists
         if os.path.exists(locale_path):
             self._translator = QTranslator()
             if self._translator.load(locale_path):
                 QCoreApplication.installTranslator(self._translator)
-                print(f"  - Translation loaded successfully")
-            else:
-                print(f"  - Failed to load translation file")
-        else:
-            print(f"  - Translation file not found")
     
     def translate(self, message: str) -> str:
         """

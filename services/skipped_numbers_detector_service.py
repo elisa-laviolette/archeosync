@@ -130,17 +130,12 @@ class SkippedNumbersDetectorService:
         warnings = []
         
         try:
-            print(f"[DEBUG] _detect_skipped_numbers_within_layer called for {layer_name}")
-            
             # Get field indices
             number_field_idx = objects_layer.fields().indexOf(number_field)
             recording_area_field_idx = objects_layer.fields().indexOf(recording_area_field)
             
             if number_field_idx < 0 or recording_area_field_idx < 0:
-                print(f"[DEBUG] Required fields not found in {layer_name} layer")
                 return warnings
-            
-            print(f"[DEBUG] Field indices for {layer_name} - number: {number_field_idx}, recording area: {recording_area_field_idx}")
             
             # Group objects by recording area
             recording_area_objects = {}
@@ -158,8 +153,6 @@ class SkippedNumbersDetectorService:
                     except (ValueError, TypeError):
                         # Skip non-numeric numbers
                         pass
-            
-            print(f"[DEBUG] Found {len(recording_area_objects)} recording areas with objects in {layer_name}")
             
             # Check for skipped numbers in each recording area
             for recording_area_id, numbers in recording_area_objects.items():
@@ -189,9 +182,6 @@ class SkippedNumbersDetectorService:
                         skipped_numbers=gaps
                     )
                     warnings.append(warning_data)
-                    print(f"[DEBUG] Found skipped numbers in {layer_name}: {warning_data.message}")
-            
-            print(f"[DEBUG] Found {len(warnings)} skipped number warnings within {layer_name}")
             
         except Exception as e:
             print(f"[DEBUG] Error in _detect_skipped_numbers_within_layer: {e}")
@@ -281,14 +271,11 @@ class SkippedNumbersDetectorService:
         warnings = []
         
         try:
-            print(f"[DEBUG] _detect_skipped_numbers_between_layers called")
-            
             # Get field indices for both layers
             original_number_field_idx = original_objects_layer.fields().indexOf(number_field)
             new_number_field_idx = new_objects_layer.fields().indexOf(number_field)
             
             if original_number_field_idx < 0 or new_number_field_idx < 0:
-                print(f"[DEBUG] Number field '{number_field}' not found in one or both layers")
                 return warnings
             
             # Get recording area field indices
@@ -296,7 +283,6 @@ class SkippedNumbersDetectorService:
             new_recording_area_field_idx = new_objects_layer.fields().indexOf(recording_area_field)
             
             if original_recording_area_field_idx < 0 or new_recording_area_field_idx < 0:
-                print(f"[DEBUG] Recording area field '{recording_area_field}' not found in one or both layers")
                 return warnings
             
             # Group objects by recording area for both layers
@@ -370,9 +356,6 @@ class SkippedNumbersDetectorService:
                         second_filter_expression=f'"{recording_area_field}" = \'{recording_area_id}\' AND "{number_field}" IN ({",".join(map(str, context_numbers))})'
                     )
                     warnings.append(warning_data)
-                    print(f"[DEBUG] Found skipped numbers: {warning_data.message}")
-            
-            print(f"[DEBUG] Found {len(warnings)} skipped number warnings between layers")
             
         except Exception as e:
             print(f"[DEBUG] Error in _detect_skipped_numbers_between_layers: {e}")
@@ -393,10 +376,6 @@ class SkippedNumbersDetectorService:
             The field name that references the recording areas layer, or None if not found
         """
         try:
-            print(f"[DEBUG] _get_recording_area_field called")
-            print(f"[DEBUG] Objects layer: {objects_layer.name() if objects_layer else 'None'}")
-            print(f"[DEBUG] Recording areas layer: {recording_areas_layer.name() if recording_areas_layer else 'None'}")
-            
             # Get the relation manager
             project = QgsProject.instance()
             relation_manager = project.relationManager()
@@ -404,28 +383,20 @@ class SkippedNumbersDetectorService:
             # Find relations where the objects layer is the referencing layer
             # and the recording areas layer is the referenced layer
             for relation in relation_manager.relations().values():
-                print(f"[DEBUG] Checking relation: {relation.name()}")
-                print(f"[DEBUG]   Referencing layer: {relation.referencingLayer().name() if relation.referencingLayer() else 'None'}")
-                print(f"[DEBUG]   Referenced layer: {relation.referencedLayer().name() if relation.referencedLayer() else 'None'}")
-                
                 if (relation.referencingLayer() == objects_layer and 
                     relation.referencedLayer() == recording_areas_layer):
                     
                     # Get the field pairs
                     field_pairs = relation.fieldPairs()
-                    print(f"[DEBUG]   Field pairs: {field_pairs}")
                     
                     # Return the first referencing field (should be the recording area field)
                     if field_pairs:
                         recording_area_field = list(field_pairs.keys())[0]
-                        print(f"[DEBUG]   Found recording area field: {recording_area_field}")
                         return recording_area_field
             
-            print(f"[DEBUG] No relation found between objects and recording areas layers")
             return None
             
         except Exception as e:
-            print(f"[DEBUG] Error getting recording area field: {str(e)}")
             return None
     
     def _get_recording_area_name(self, recording_areas_layer: Any, recording_area_id: Any) -> str:

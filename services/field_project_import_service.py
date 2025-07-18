@@ -119,12 +119,7 @@ class FieldProjectImportService(IFieldProjectImportService):
                     layer_files = self._scan_project_layers(project_path)
                     
                     # Process individual layer files that match configured layers
-                    print(f"Processing individual layer files: {len(layer_files.get('objects', []))} objects, {len(layer_files.get('features', []))} features")
-                    
                     individual_features = self._process_individual_layers_with_matching(layer_files, configured_layers)
-                    print(f"  Individual objects: {len(individual_features.get('objects', []))}")
-                    print(f"  Individual features: {len(individual_features.get('features', []))}")
-                    print(f"  Individual small finds: {len(individual_features.get('small_finds', []))}")
                     all_objects_features.extend(individual_features.get('objects', []))
                     all_features_features.extend(individual_features.get('features', []))
                     all_small_finds_features.extend(individual_features.get('small_finds', []))
@@ -136,16 +131,10 @@ class FieldProjectImportService(IFieldProjectImportService):
                     failed_projects += 1
                     continue
             
-            print(f"Total objects features collected: {len(all_objects_features)}")
-            print(f"Total features features collected: {len(all_features_features)}")
-            print(f"Total small finds features collected: {len(all_small_finds_features)}")
-            
             # Filter out duplicates before creating merged layers
             filtered_objects_features = self._filter_duplicates(all_objects_features, existing_objects_layer, "Objects")
             filtered_features_features = self._filter_duplicates(all_features_features, existing_features_layer, "Features")
             filtered_small_finds_features = self._filter_duplicates(all_small_finds_features, existing_small_finds_layer, "Small Finds")
-            
-            print(f"After duplicate filtering - objects: {len(filtered_objects_features)}, features: {len(filtered_features_features)}, small finds: {len(filtered_small_finds_features)}")
             
             # Create merged layers
             layers_created = 0
@@ -241,31 +230,22 @@ class FieldProjectImportService(IFieldProjectImportService):
         if not os.path.exists(project_path):
             return layer_files
         
-        print(f"Scanning project directory: {project_path}")
-        
         # Look for individual layer files
         for filename in os.listdir(project_path):
             file_path = os.path.join(project_path, filename)
             if not os.path.isfile(file_path):
                 continue
             
-            print(f"  Found file: {filename}")
-            
             # Check for Objects layer files
             if self._is_objects_layer_file(filename):
-                print(f"    -> Recognized as Objects layer")
                 layer_files['objects'].append(file_path)
             
             # Check for Features layer files
             elif self._is_features_layer_file(filename):
-                print(f"    -> Recognized as Features layer")
                 layer_files['features'].append(file_path)
             # Check for Small Finds layer files
             elif self._is_small_finds_layer_file(filename):
-                print(f"    -> Recognized as Small Finds layer")
                 layer_files['small_finds'].append(file_path)
-            else:
-                print(f"    -> Not recognized as Objects, Features, or Small Finds layer")
         
         return layer_files
     
@@ -362,39 +342,30 @@ class FieldProjectImportService(IFieldProjectImportService):
             expected_name = configured_layers['objects']['name']
             layer = self._load_layer(f"{file_path}|layername={expected_name}", expected_name)
             if not layer:
-                print(f"Skipping Objects layer {expected_name} in {file_path} (not found or invalid)")
                 continue
             if not self._is_valid_geometry_type(layer, configured_layers['objects']['geometry_type']):
-                print(f"Skipping Objects layer {layer.name()} with incompatible geometry type: {layer.geometryType()} (expected: {configured_layers['objects']['geometry_type']})")
                 continue
             features['objects'].extend(list(layer.getFeatures()))
-            print(f"Imported Objects layer {layer.name()} with {layer.featureCount()} features")
         
         # Process Features layer files
         for file_path in layer_files['features']:
             expected_name = configured_layers['features']['name']
             layer = self._load_layer(f"{file_path}|layername={expected_name}", expected_name)
             if not layer:
-                print(f"Skipping Features layer {expected_name} in {file_path} (not found or invalid)")
                 continue
             if not self._is_valid_geometry_type(layer, configured_layers['features']['geometry_type']):
-                print(f"Skipping Features layer {layer.name()} with incompatible geometry type: {layer.geometryType()} (expected: {configured_layers['features']['geometry_type']})")
                 continue
             features['features'].extend(list(layer.getFeatures()))
-            print(f"Imported Features layer {layer.name()} with {layer.featureCount()} features")
         
         # Process Small Finds layer files
         for file_path in layer_files['small_finds']:
             expected_name = configured_layers['small_finds']['name']
             layer = self._load_layer(f"{file_path}|layername={expected_name}", expected_name)
             if not layer:
-                print(f"Skipping Small Finds layer {expected_name} in {file_path} (not found or invalid)")
                 continue
             if not self._is_valid_geometry_type(layer, configured_layers['small_finds']['geometry_type']):
-                print(f"Skipping Small Finds layer {layer.name()} with incompatible geometry type: {layer.geometryType()} (expected: {configured_layers['small_finds']['geometry_type']})")
                 continue
             features['small_finds'].extend(list(layer.getFeatures()))
-            print(f"Imported Small Finds layer {layer.name()} with {layer.featureCount()} features")
         
         return features
 
@@ -485,16 +456,13 @@ class FieldProjectImportService(IFieldProjectImportService):
                 # Check if any polygon features are multipart
                 has_multipart_polygons = any(f.geometry().isMultipart() for f in polygon_features)
                 geom_string = "MultiPolygon" if has_multipart_polygons else "Polygon"
-                print(f"Creating {layer_name} layer with {len(polygon_features)} polygon features, multipart: {has_multipart_polygons}")
             elif point_features:
                 # Check if any point features are multipart
                 has_multipart_points = any(f.geometry().isMultipart() for f in point_features)
                 geom_string = "MultiPoint" if has_multipart_points else "Point"
-                print(f"Creating {layer_name} layer with {len(point_features)} point features, multipart: {has_multipart_points}")
             else:
                 # No features have geometry, create a layer without geometry
                 geom_string = "None"  # No geometry
-                print(f"Creating {layer_name} layer with no geometry (all features are attribute-only)")
             
             # Get CRS - try project CRS first, then fall back to default
             project_crs = QgsProject.instance().crs()
@@ -532,11 +500,8 @@ class FieldProjectImportService(IFieldProjectImportService):
             
             if layer_type and configured_layers[layer_type]['field_types']:
                 reference_field_types = configured_layers[layer_type]['field_types']
-                print(f"Reference field types for {layer_type} layer:")
-                for field_name, field_type in reference_field_types.items():
-                    print(f"  {field_name}: {field_type}")
             else:
-                print(f"No reference field types found for layer type: {layer_type}")
+                reference_field_types = {}
             
             # Add fields with most common types
             for field_name in sorted(all_fields):
@@ -544,31 +509,19 @@ class FieldProjectImportService(IFieldProjectImportService):
                     # Get the most common type for this field
                     most_common_type = max(field_types[field_name].items(), key=lambda x: x[1])[0]
                     
-                    # Debug: Print detected types for this field
-                    print(f"Field '{field_name}' detected types: {field_types[field_name]}")
-                    print(f"  Most common type: {most_common_type}")
-                    
                     # Use reference layer type if available, otherwise use detected type
                     if field_name in reference_field_types:
                         reference_type = reference_field_types[field_name]
-                        print(f"  Reference layer type: {reference_type}")
                         uri_type = QGIS_TO_URI_TYPE.get(reference_type, reference_type.lower())
-                        print(f"  Using reference type: {uri_type}")
                     else:
                         uri_type = QGIS_TO_URI_TYPE.get(most_common_type, most_common_type.lower())
-                        print(f"  Using detected type: {uri_type}")
                     
                     layer_uri += f"&field={field_name}:{uri_type}"
-            
-            print(f"Layer URI before CRS: {layer_uri}")
-            print(f"CRS string: '{crs_string}'")
             
             # Create memory layer with basic structure first
             basic_uri = f"{geom_string}?crs={crs_string}"
             layer = QgsVectorLayer(basic_uri, layer_name, "memory")
-            print(f"Created basic layer URI: {basic_uri}")
             if not layer.isValid():
-                print(f"Failed to create valid layer: {layer_name}")
                 return None
             
             # Add fields with proper types using QgsField objects
@@ -593,14 +546,9 @@ class FieldProjectImportService(IFieldProjectImportService):
                     # Get the most common type for this field
                     most_common_type = max(field_types[field_name].items(), key=lambda x: x[1])[0]
                     
-                    # Debug: Print detected types for this field
-                    print(f"Field '{field_name}' detected types: {field_types[field_name]}")
-                    print(f"  Most common type: {most_common_type}")
-                    
                     # Use reference layer type if available, otherwise use detected type
                     if field_name in reference_field_types:
                         reference_type = reference_field_types[field_name]
-                        print(f"  Reference layer type: {reference_type}")
                         # Convert URI type back to QGIS type name for QVariant mapping
                         if reference_type == "integer":
                             qgis_type = "Integer"
@@ -618,10 +566,8 @@ class FieldProjectImportService(IFieldProjectImportService):
                             qgis_type = "Boolean"
                         else:
                             qgis_type = most_common_type
-                        print(f"  Using reference type: {reference_type} -> {qgis_type}")
                     else:
                         qgis_type = most_common_type
-                        print(f"  Using detected type: {qgis_type}")
                     
                     # Create QgsField with proper type
                     qvariant_type = QGIS_TO_QVARIANT.get(qgis_type, QVariant.String)
@@ -632,21 +578,10 @@ class FieldProjectImportService(IFieldProjectImportService):
             layer.dataProvider().addAttributes(field_list)
             layer.updateFields()
             
-            print(f"Successfully created layer: {layer_name}, fields: {layer.fields().count()}")
-            
-            # Debug: Print field information
-            print(f"Layer fields: {[field.name() for field in layer.fields()]}")
-            print(f"Layer field types: {[field.typeName() for field in layer.fields()]}")
-            if features:
-                first_feature = features[0]
-                print(f"First feature fields: {[field.name() for field in first_feature.fields()]}")
-            
             # Add features, filtering out incompatible geometries
             layer.startEditing()
             added_count = 0
             skipped_count = 0
-            
-            print(f"Attempting to add {len(features)} features to {layer_name} layer")
             
             for feature in features:
                 # Create a new feature with the correct field structure
@@ -681,7 +616,6 @@ class FieldProjectImportService(IFieldProjectImportService):
                         new_feature.setGeometry(feature.geometry())
                     else:
                         skipped_count += 1
-                        print(f"Skipped feature with incompatible geometry: type={feature_geom_type}, multipart={feature.geometry().isMultipart()} for layer type {geom_string}")
                         continue
                 else:
                     # Feature has no geometry, which is fine for layers with geometry (will be NULL)
@@ -703,17 +637,6 @@ class FieldProjectImportService(IFieldProjectImportService):
                     added_count += 1
                 else:
                     skipped_count += 1
-                    if feature.geometry() and not feature.geometry().isEmpty():
-                        print(f"Failed to add feature with geometry: type={feature.geometry().type()}, multipart={feature.geometry().isMultipart()}")
-                    else:
-                        print(f"Failed to add feature without geometry")
-                    # Get more details about the failure
-                    print(f"  Layer error: {layer.lastError()}")
-            
-            print(f"Added {added_count} features, skipped {skipped_count} features to {layer_name} layer")
-            
-            if skipped_count > 0:
-                print(f"Warning: Skipped {skipped_count} features with incompatible geometry types for layer '{layer_name}'")
             
             layer.commitChanges()
             
@@ -910,41 +833,26 @@ class FieldProjectImportService(IFieldProjectImportService):
         if not existing_layer or not features:
             return features
         
-        print(f"Checking {len(features)} {layer_type} features against existing layer...")
-        
         # Get all existing features for comparison
         existing_features = list(existing_layer.getFeatures())
-        print(f"Found {len(existing_features)} existing {layer_type} features to compare against")
         
         # Create a set of existing feature signatures for fast lookup
         existing_signatures = set()
-        for i, existing_feature in enumerate(existing_features):
+        for existing_feature in existing_features:
             signature = self._create_feature_signature(existing_feature)
             existing_signatures.add(signature)
-            # Debug: Print first few existing feature signatures
-            if i < 3:  # Only print first 3 for brevity
-                print(f"  Existing {layer_type} feature {i+1} signature: {signature[:200]}...")
-        
-        print(f"  Total existing signatures: {len(existing_signatures)}")
         
         # Filter out duplicates
         filtered_features = []
         duplicates_count = 0
         
-        for i, feature in enumerate(features):
+        for feature in features:
             signature = self._create_feature_signature(feature)
-            # Debug: Print new feature signatures
-            print(f"  New {layer_type} feature {i+1} signature: {signature[:200]}...")
             if signature not in existing_signatures:
                 filtered_features.append(feature)
-                print(f"    -> Not a duplicate")
             else:
                 duplicates_count += 1
-                # Debug: Print the signature of the duplicate feature
-                print(f"    -> DUPLICATE FOUND!")
-                print(f"  Duplicate {layer_type} feature {i+1} signature: {signature[:200]}...")
         
-        print(f"Filtered out {duplicates_count} duplicate {layer_type} features")
         return filtered_features
     
     def _create_feature_signature(self, feature: Any) -> str:

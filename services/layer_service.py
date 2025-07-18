@@ -837,64 +837,41 @@ class QGISLayerService(ILayerService):
             True if QML style copying was successful, False otherwise
         """
         try:
-            print(f"[DEBUG] Starting QML style copy from {source_layer.name()} to {target_layer.name()}")
-            
             # Method 1: Try to copy the actual QML file content
             source_style_path = source_layer.styleURI()
             if source_style_path and source_style_path.endswith('.qml') and os.path.exists(source_style_path):
-                print(f"[DEBUG] Found QML style file: {source_style_path}")
-                
                 # Read the QML content
                 try:
                     with open(source_style_path, 'r', encoding='utf-8') as f:
                         qml_content = f.read()
-                    print(f"[DEBUG] Successfully read QML content ({len(qml_content)} characters)")
                     
                     # Check for virtual fields in QML
                     if '<expressionfields>' in qml_content:
-                        print(f"[DEBUG] Found expressionfields section in QML")
                         # Extract virtual field names
                         import re
                         virtual_fields = re.findall(r'<field name="([^"]+)"', qml_content)
-                        if virtual_fields:
-                            print(f"[DEBUG] Virtual fields found in QML: {virtual_fields}")
-                            
-                            # Show the expressionfields section
-                            start = qml_content.find('<expressionfields>')
-                            end = qml_content.find('</expressionfields>')
-                            if start != -1 and end != -1:
-                                expression_section = qml_content[start:end+len('</expressionfields>')]
-                                print(f"[DEBUG] Expression fields section: {expression_section}")
-                        else:
-                            print(f"[DEBUG] No expressionfields section found in QML")
                     
                     # Create target QML file path
                     target_style_path = os.path.join(os.path.dirname(target_layer.source()), f"{target_layer.name()}.qml")
-                    print(f"[DEBUG] Target QML path: {target_style_path}")
                     
                     # Write QML content to target file
                     with open(target_style_path, 'w', encoding='utf-8') as f:
                         f.write(qml_content)
-                    print(f"[DEBUG] Successfully wrote QML file: {target_style_path}")
                     
                     # Load the QML style into the target layer
                     load_result = target_layer.loadNamedStyle(target_style_path)
-                    print(f"[DEBUG] QML load result: {load_result}")
                     if load_result[1]:  # Check the success boolean (second element)
                         print(f"Successfully loaded QML style from {target_style_path} to {target_layer.name()}")
                         
                         # Parse QML file to find expression fields and add them as virtual fields
                         virtual_fields = self._parse_qml_expression_fields(target_style_path)
                         if virtual_fields:
-                            print(f"[DEBUG] Found virtual fields in QML: {list(virtual_fields.keys())}")
-                            
                             # Add virtual fields to the layer
                             provider = target_layer.dataProvider()
                             for field_name, expression in virtual_fields.items():
                                 # Check if the field already exists as a regular field
                                 existing_field_idx = target_layer.fields().indexOf(field_name)
                                 if existing_field_idx >= 0:
-                                    print(f"[DEBUG] Field {field_name} already exists as regular field, converting to virtual")
                                     # Remove the regular field and add it as virtual
                                     provider.deleteAttributes([existing_field_idx])
                                     target_layer.updateFields()
@@ -904,13 +881,6 @@ class QGISLayerService(ILayerService):
                                 virtual_field.setAlias(field_name)
                                 # Set the expression for the virtual field
                                 target_layer.addExpressionField(expression, virtual_field)
-                                print(f"[DEBUG] Added virtual field {field_name} with expression: {expression}")
-                        
-                        # Check fields after QML loading and virtual field addition
-                        print(f"[DEBUG] Fields in target layer after QML loading:")
-                        for i, field in enumerate(target_layer.fields()):
-                            is_virtual = hasattr(field, 'isVirtual') and field.isVirtual()
-                            print(f"[DEBUG]   Field {i}: {field.name()} (virtual: {is_virtual})")
                         
                         target_layer.triggerRepaint()
                         return True
@@ -918,7 +888,7 @@ class QGISLayerService(ILayerService):
                         print(f"Failed to load QML style into target layer: {load_result[0]}")
                         
                 except Exception as e:
-                    print(f"[DEBUG] Error reading/writing QML file: {str(e)}")
+                    pass
             
             # Method 2: Use QGIS's built-in style copying (more reliable)
             print(f"[DEBUG] Trying QGIS built-in style copying")
@@ -945,26 +915,20 @@ class QGISLayerService(ILayerService):
                     # Write the exported QML content to target file
                     with open(target_style_path, 'w', encoding='utf-8') as f:
                         f.write(exported_qml_content)
-                    print(f"[DEBUG] Successfully wrote exported QML to: {target_style_path}")
-                    
                     # Load the style into the target layer
                     load_result = target_layer.loadNamedStyle(target_style_path)
-                    print(f"[DEBUG] QML load result (method 2): {load_result}")
                     if load_result[1]:  # Check the success boolean (second element)
                         print(f"Successfully copied complete style from {source_layer.name()} to {target_layer.name()}")
                         
                         # Parse QML file to find expression fields and add them as virtual fields
                         virtual_fields = self._parse_qml_expression_fields(target_style_path)
                         if virtual_fields:
-                            print(f"[DEBUG] Found virtual fields in QML: {list(virtual_fields.keys())}")
-                            
                             # Add virtual fields to the layer
                             provider = target_layer.dataProvider()
                             for field_name, expression in virtual_fields.items():
                                 # Check if the field already exists as a regular field
                                 existing_field_idx = target_layer.fields().indexOf(field_name)
                                 if existing_field_idx >= 0:
-                                    print(f"[DEBUG] Field {field_name} already exists as regular field, converting to virtual")
                                     # Remove the regular field and add it as virtual
                                     provider.deleteAttributes([existing_field_idx])
                                     target_layer.updateFields()
@@ -974,20 +938,11 @@ class QGISLayerService(ILayerService):
                                 virtual_field.setAlias(field_name)
                                 # Set the expression for the virtual field
                                 target_layer.addExpressionField(expression, virtual_field)
-                                print(f"[DEBUG] Added virtual field {field_name} with expression: {expression}")
-                        
-                        # Check fields after QML loading and virtual field addition
-                        print(f"[DEBUG] Fields in target layer after QML loading (method 2):")
-                        for i, field in enumerate(target_layer.fields()):
-                            is_virtual = hasattr(field, 'isVirtual') and field.isVirtual()
-                            print(f"[DEBUG]   Field {i}: {field.name()} (virtual: {is_virtual})")
                         
                         target_layer.triggerRepaint()
                         return True
                     else:
                         print(f"Failed to load exported style into target layer: {load_result[0]}")
-                else:
-                    print(f"Failed to export style from source layer")
                     
             finally:
                 # Clean up temporary file
@@ -997,34 +952,30 @@ class QGISLayerService(ILayerService):
                     pass
             
             # Method 3: Direct renderer and form copying as fallback
-            print(f"[DEBUG] Using direct renderer and form copying as fallback")
             success = False
             
             # Copy renderer
             if hasattr(source_layer, 'renderer') and hasattr(target_layer, 'setRenderer'):
                 try:
                     target_layer.setRenderer(source_layer.renderer().clone())
-                    print(f"[DEBUG] Successfully copied renderer")
                     success = True
                 except Exception as e:
-                    print(f"[DEBUG] Error copying renderer: {str(e)}")
+                    pass
             
             # Copy form configuration
             if hasattr(source_layer, 'editFormConfig'):
                 try:
                     target_layer.setEditFormConfig(source_layer.editFormConfig())
-                    print(f"[DEBUG] Successfully copied form configuration")
                     success = True
                 except Exception as e:
-                    print(f"[DEBUG] Error copying form configuration: {str(e)}")
+                    pass
             
             # Copy field configurations
             try:
                 self._copy_field_configurations(source_layer, target_layer)
-                print(f"[DEBUG] Successfully copied field configurations")
                 success = True
             except Exception as e:
-                print(f"[DEBUG] Error copying field configurations: {str(e)}")
+                pass
             
             if success:
                 target_layer.triggerRepaint()

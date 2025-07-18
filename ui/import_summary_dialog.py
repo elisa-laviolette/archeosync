@@ -354,32 +354,21 @@ class ImportSummaryDockWidget(QDockWidget):
                 warnings_layout.addLayout(warning_item_layout)
             
             layout.addLayout(warnings_layout)
-        else:
-            print(f"Debug: No skipped numbers warnings found. hasattr: {hasattr(self._summary_data, 'skipped_numbers_warnings')}, warnings: {getattr(self._summary_data, 'skipped_numbers_warnings', None)}")
-        
         # Out-of-bounds warnings
-        print(f"[DEBUG] Checking out-of-bounds warnings. hasattr: {hasattr(self._summary_data, 'out_of_bounds_warnings')}, warnings: {getattr(self._summary_data, 'out_of_bounds_warnings', None)}")
         if hasattr(self._summary_data, 'out_of_bounds_warnings') and self._summary_data.out_of_bounds_warnings:
-            print(f"[DEBUG] Displaying {len(self._summary_data.out_of_bounds_warnings)} out-of-bounds warnings")
             warnings_layout = QtWidgets.QVBoxLayout()
             warnings_label = QtWidgets.QLabel(self.tr("Out-of-Bounds Warnings:"))
             warnings_label.setStyleSheet("font-weight: bold; color: #DC143C;")
             warnings_layout.addWidget(warnings_label)
             
             for i, warning in enumerate(self._summary_data.out_of_bounds_warnings):
-                print(f"[DEBUG] Processing out-of-bounds warning {i+1}: {warning}")
-                print(f"[DEBUG] Warning type: {type(warning)}")
-                print(f"[DEBUG] Warning attributes: {dir(warning)}")
-                
                 warning_item_layout = QtWidgets.QHBoxLayout()
                 
                 # Warning text - check if it has the expected attributes
                 if hasattr(warning, 'message'):
                     warning_text = warning.message
-                    print(f"[DEBUG] Using warning.message: {warning_text}")
                 else:
                     warning_text = str(warning)
-                    print(f"[DEBUG] Using str(warning): {warning_text}")
                 
                 warning_item = QtWidgets.QLabel(f"• {warning_text}")
                 warning_item.setStyleSheet("color: #DC143C; margin-left: 10px;")
@@ -397,34 +386,22 @@ class ImportSummaryDockWidget(QDockWidget):
                 warnings_layout.addLayout(warning_item_layout)
             
             layout.addLayout(warnings_layout)
-        else:
-            print(f"[DEBUG] No out-of-bounds warnings to display")
-            print(f"[DEBUG] Summary data attributes: {dir(self._summary_data)}")
-            print(f"[DEBUG] Summary data dict: {self._summary_data.__dict__}")
         
         # Distance warnings
-        print(f"[DEBUG] Checking distance warnings. hasattr: {hasattr(self._summary_data, 'distance_warnings')}, warnings: {getattr(self._summary_data, 'distance_warnings', None)}")
         if hasattr(self._summary_data, 'distance_warnings') and self._summary_data.distance_warnings:
-            print(f"[DEBUG] Displaying {len(self._summary_data.distance_warnings)} distance warnings")
             warnings_layout = QtWidgets.QVBoxLayout()
             warnings_label = QtWidgets.QLabel(self.tr("Distance Warnings:"))
             warnings_label.setStyleSheet("font-weight: bold; color: #DC143C;")
             warnings_layout.addWidget(warnings_label)
             
             for i, warning in enumerate(self._summary_data.distance_warnings):
-                print(f"[DEBUG] Processing distance warning {i+1}: {warning}")
-                print(f"[DEBUG] Warning type: {type(warning)}")
-                print(f"[DEBUG] Warning attributes: {dir(warning)}")
-                
                 warning_item_layout = QtWidgets.QHBoxLayout()
                 
                 # Warning text - check if it has the expected attributes
                 if hasattr(warning, 'message'):
                     warning_text = warning.message
-                    print(f"[DEBUG] Using warning.message: {warning_text}")
                 else:
                     warning_text = str(warning)
-                    print(f"[DEBUG] Using str(warning): {warning_text}")
                 
                 warning_item = QtWidgets.QLabel(f"• {warning_text}")
                 warning_item.setStyleSheet("color: #DC143C; margin-left: 10px;")
@@ -442,8 +419,6 @@ class ImportSummaryDockWidget(QDockWidget):
                 warnings_layout.addLayout(warning_item_layout)
             
             layout.addLayout(warnings_layout)
-        else:
-            print(f"[DEBUG] No distance warnings to display")
         
         return group
     

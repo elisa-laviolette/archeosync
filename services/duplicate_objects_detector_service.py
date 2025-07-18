@@ -166,17 +166,12 @@ class DuplicateObjectsDetectorService:
         warnings = []
         
         try:
-            print(f"[DEBUG] _detect_duplicates_within_layer called for {layer_name}")
-            
             # Get field indices
             number_field_idx = objects_layer.fields().indexOf(number_field)
             recording_area_field_idx = objects_layer.fields().indexOf(recording_area_field)
             
             if number_field_idx < 0 or recording_area_field_idx < 0:
-                print(f"[DEBUG] Required fields not found in {layer_name} layer")
                 return warnings
-            
-            print(f"[DEBUG] Field indices for {layer_name} - number: {number_field_idx}, recording area: {recording_area_field_idx}")
             
             # Group objects by recording area and number
             duplicates = {}
@@ -209,9 +204,6 @@ class DuplicateObjectsDetectorService:
                         object_number=number
                     )
                     warnings.append(warning_data)
-                    print(f"[DEBUG] Found duplicate in {layer_name}: {warning_data.message}")
-            
-            print(f"[DEBUG] Found {len(warnings)} duplicates within {layer_name}")
             
         except Exception as e:
             print(f"[DEBUG] Error in _detect_duplicates_within_layer: {e}")
@@ -242,14 +234,11 @@ class DuplicateObjectsDetectorService:
         warnings = []
         
         try:
-            print(f"[DEBUG] _detect_duplicates_between_layers called")
-            
             # Get field indices for both layers
             original_number_field_idx = original_objects_layer.fields().indexOf(number_field)
             new_number_field_idx = new_objects_layer.fields().indexOf(number_field)
             
             if original_number_field_idx < 0 or new_number_field_idx < 0:
-                print(f"[DEBUG] Number field '{number_field}' not found in one or both layers")
                 return warnings
             
             # Get recording area field indices
@@ -257,11 +246,7 @@ class DuplicateObjectsDetectorService:
             new_recording_area_field_idx = new_objects_layer.fields().indexOf(recording_area_field)
             
             if original_recording_area_field_idx < 0 or new_recording_area_field_idx < 0:
-                print(f"[DEBUG] Recording area field '{recording_area_field}' not found in one or both layers")
                 return warnings
-            
-            print(f"[DEBUG] Field indices - original number: {original_number_field_idx}, new number: {new_number_field_idx}")
-            print(f"[DEBUG] Field indices - original recording area: {original_recording_area_field_idx}, new recording area: {new_recording_area_field_idx}")
             
             # Create lookup dictionaries for original objects
             original_objects = {}
@@ -274,8 +259,6 @@ class DuplicateObjectsDetectorService:
                     if key not in original_objects:
                         original_objects[key] = []
                     original_objects[key].append(feature)
-            
-            print(f"[DEBUG] Found {len(original_objects)} unique recording area/number combinations in original layer")
             
             # Check new objects against original objects
             for feature in new_objects_layer.getFeatures():
@@ -301,9 +284,6 @@ class DuplicateObjectsDetectorService:
                             second_filter_expression=f'"{recording_area_field}" = \'{recording_area_id}\' AND "{number_field}" = {number}'
                         )
                         warnings.append(warning_data)
-                        print(f"[DEBUG] Found duplicate: {warning_data.message}")
-            
-            print(f"[DEBUG] Found {len(warnings)} duplicates between layers")
             
         except Exception as e:
             print(f"[DEBUG] Error in _detect_duplicates_between_layers: {e}")
@@ -324,10 +304,6 @@ class DuplicateObjectsDetectorService:
             The field name that references the recording areas layer, or None if not found
         """
         try:
-            print(f"[DEBUG] _get_recording_area_field called")
-            print(f"[DEBUG] Objects layer: {objects_layer.name() if objects_layer else 'None'}")
-            print(f"[DEBUG] Recording areas layer: {recording_areas_layer.name() if recording_areas_layer else 'None'}")
-            
             # Get the relation manager
             from qgis.core import QgsProject
             project = QgsProject.instance()
@@ -336,28 +312,20 @@ class DuplicateObjectsDetectorService:
             # Find relations where the objects layer is the referencing layer
             # and the recording areas layer is the referenced layer
             for relation in relation_manager.relations().values():
-                print(f"[DEBUG] Checking relation: {relation.name()}")
-                print(f"[DEBUG]   Referencing layer: {relation.referencingLayer().name() if relation.referencingLayer() else 'None'}")
-                print(f"[DEBUG]   Referenced layer: {relation.referencedLayer().name() if relation.referencedLayer() else 'None'}")
-                
                 if (relation.referencingLayer() == objects_layer and 
                     relation.referencedLayer() == recording_areas_layer):
                     
                     # Get the field pairs
                     field_pairs = relation.fieldPairs()
-                    print(f"[DEBUG]   Field pairs: {field_pairs}")
                     
                     # Return the first referencing field (should be the recording area field)
                     if field_pairs:
                         recording_area_field = list(field_pairs.keys())[0]
-                        print(f"[DEBUG]   Found recording area field: {recording_area_field}")
                         return recording_area_field
             
-            print(f"[DEBUG] No relation found between objects and recording areas layers")
             return None
             
         except Exception as e:
-            print(f"[DEBUG] Error getting recording area field: {str(e)}")
             return None
     
     def _get_recording_area_name(self, recording_areas_layer: Any, recording_area_id: Any) -> str:

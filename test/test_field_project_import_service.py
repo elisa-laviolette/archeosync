@@ -1028,8 +1028,6 @@ class TestFieldProjectImportService:
         is_virtual_new = self.field_import_service._is_virtual_field(feature_new, "Metre")
         is_virtual_existing = self.field_import_service._is_virtual_field(feature_existing, "Metre")
         
-        print(f"Metre field virtual detection - New feature: {is_virtual_new}, Existing feature: {is_virtual_existing}")
-        
         # Now the Metre field should be detected as virtual
         assert is_virtual_new is True, "Metre field should be detected as virtual in new feature"
         assert is_virtual_existing is True, "Metre field should be detected as virtual in existing feature"
@@ -1037,10 +1035,6 @@ class TestFieldProjectImportService:
         # Test that signatures are now the same (excluding the virtual Metre field)
         signature_new = self.field_import_service._create_feature_signature(feature_new)
         signature_existing = self.field_import_service._create_feature_signature(feature_existing)
-        
-        print(f"New feature signature: {signature_new}")
-        print(f"Existing feature signature: {signature_existing}")
-        print(f"Signatures match: {signature_new == signature_existing}")
         
         # The signatures should now match since the Metre field is excluded
         assert signature_new == signature_existing, "Signatures should match when Metre field is excluded as virtual" 
