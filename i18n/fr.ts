@@ -844,8 +844,8 @@ Consultez la console pour plus de détails sur les erreurs.</translation>
     </message>
     <message>
         <location filename="../ui/import_summary_dialog.py" line="220"/>
-        <source>OK</source>
-        <translation>OK</translation>
+        <source>Validate</source>
+        <translation>Valider</translation>
     </message>
     <message>
         <location filename="../ui/import_summary_dialog.py" line="250"/>
@@ -876,6 +876,101 @@ Consultez la console pour plus de détails sur les erreurs.</translation>
         <location filename="../ui/import_summary_dialog.py" line="390"/>
         <source>Could not open attribute table: {error}</source>
         <translation>Impossible d'ouvrir la table attributaire : {error}</translation>
+    </message>
+    <message>
+        <location filename="../ui/import_summary_dialog.py" line="400"/>
+        <source>Validation Error</source>
+        <translation>Erreur de validation</translation>
+    </message>
+    <message>
+        <location filename="../ui/import_summary_dialog.py" line="402"/>
+        <source>An error occurred during validation: {error}</source>
+        <translation>Une erreur s'est produite lors de la validation : {error}</translation>
+    </message>
+    <message>
+        <location filename="../ui/import_summary_dialog.py" line="470"/>
+        <source>Note: Some layers could not be copied because definitive layers are not configured.</source>
+        <translation>Note : Certaines couches n'ont pas pu être copiées car les couches définitives ne sont pas configurées.</translation>
+    </message>
+    <message>
+        <location filename="../ui/import_summary_dialog.py" line="475"/>
+        <source>No features were copied because definitive layers are not configured.</source>
+        <translation>Aucune entité n'a été copiée car les couches définitives ne sont pas configurées.</translation>
+    </message>
+    <message>
+        <location filename="../ui/import_summary_dialog.py" line="477"/>
+        <source>To use the validation feature, please configure the following in the settings:</source>
+        <translation>Pour utiliser la fonction de validation, veuillez configurer les éléments suivants dans les paramètres :</translation>
+    </message>
+    <message>
+        <location filename="../ui/import_summary_dialog.py" line="485"/>
+        <source>Go to: Plugins > ArcheoSync > Configuration > Layers &amp; Fields</source>
+        <translation>Allez dans : Plugins > ArcheoSync > Configuration > Couches et champs</translation>
+    </message>
+    <message>
+        <location filename="../ui/import_summary_dialog.py" line="490"/>
+        <source>Configuration Required</source>
+        <translation>Configuration requise</translation>
+    </message>
+    <message>
+        <location filename="../ui/import_summary_dialog.py" line="495"/>
+        <source>No Data to Validate</source>
+        <translation>Aucune donnée à valider</translation>
+    </message>
+    <message>
+        <location filename="../ui/import_summary_dialog.py" line="497"/>
+        <source>No temporary layers found to validate.</source>
+        <translation>Aucune couche temporaire trouvée à valider.</translation>
+    </message>
+    <message>
+        <location filename="../ui/import_summary_dialog.py" line="450"/>
+        <source>Features copied successfully:</source>
+        <translation>Entités copiées avec succès :</translation>
+    </message>
+    <message>
+        <location filename="../ui/import_summary_dialog.py" line="455"/>
+        <source>Definitive layers are now in edit mode.</source>
+        <translation>Les couches définitives sont maintenant en mode édition.</translation>
+    </message>
+    <message>
+        <location filename="../ui/import_summary_dialog.py" line="460"/>
+        <source>Validation Complete</source>
+        <translation>Validation terminée</translation>
+    </message>
+    <message>
+        <location filename="../ui/import_summary_dialog.py" line="480"/>
+        <source>Features copied successfully!</source>
+        <translation>Entités copiées avec succès !</translation>
+    </message>
+    <message>
+        <location filename="../ui/import_summary_dialog.py" line="485"/>
+        <source>The definitive layers are now in edit mode.</source>
+        <translation>Les couches définitives sont maintenant en mode édition.</translation>
+    </message>
+    <message>
+        <location filename="../ui/import_summary_dialog.py" line="486"/>
+        <source>The newly copied features are selected for easy identification.</source>
+        <translation>Les entités nouvellement copiées sont sélectionnées pour une identification facile.</translation>
+    </message>
+    <message>
+        <location filename="../ui/import_summary_dialog.py" line="486"/>
+        <source>Please review the copied features and:</source>
+        <translation>Veuillez examiner les entités copiées et :</translation>
+    </message>
+    <message>
+        <location filename="../ui/import_summary_dialog.py" line="487"/>
+        <source>Save changes if you want to keep them</source>
+        <translation>Sauvegarder les modifications si vous voulez les conserver</translation>
+    </message>
+    <message>
+        <location filename="../ui/import_summary_dialog.py" line="488"/>
+        <source>Cancel changes if you want to discard them</source>
+        <translation>Annuler les modifications si vous voulez les rejeter</translation>
+    </message>
+    <message>
+        <location filename="../ui/import_summary_dialog.py" line="495"/>
+        <source>No Layers to Validate</source>
+        <translation>Aucune couche à valider</translation>
     </message>
 </context>
 <context>

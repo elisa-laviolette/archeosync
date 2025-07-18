@@ -148,6 +148,12 @@ After successful import, the plugin displays a comprehensive summary dialog show
   - Detects duplicates between both layers
   - Shows specific recording area names and object numbers for each duplicate
   - Color-coded warnings in orange for easy identification
+- **Validation Button**: "Validate" button to copy features from temporary to definitive layers
+  - Copies features from "New Objects" to the configured Objects layer
+  - Copies features from "New Features" to the configured Features layer
+  - Copies features from "New Small Finds" to the configured Small Finds layer
+  - Keeps definitive layers in edit mode for further editing
+  - Shows summary of copied features with success message
 - **Clean Interface**: Organized sections with clear statistics and color-coded information
 - **Translation Support**: Full internationalization with French and Afrikaans translations
 

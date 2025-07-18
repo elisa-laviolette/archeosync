@@ -31,7 +31,12 @@ Usage:
         small_finds_duplicates=2
     )
     
+    # Non-modal dialog (default) - allows interaction with other windows
     dialog = ImportSummaryDialog(summary_data, parent=parent_widget)
+    dialog.exec_()
+    
+    # Modal dialog - blocks interaction with other windows
+    dialog = ImportSummaryDialog(summary_data, parent=parent_widget, modal=True)
     dialog.exec_()
 """
 
@@ -83,26 +88,34 @@ class ImportSummaryDialog(QtWidgets.QDialog):
     Import Summary dialog for ArcheoSync plugin.
     
     Displays a summary of imported data after the import process is complete.
+    By default, the dialog is non-modal, allowing users to interact with other
+    windows (including attribute tables) while the summary is displayed.
     All user-facing strings are wrapped in self.tr() for translation.
     """
     
     def __init__(self, 
                  summary_data: ImportSummaryData,
                  iface=None,
-                 parent=None):
+                 settings_manager=None,
+                 parent=None,
+                 modal=False):
         """
         Initialize the import summary dialog.
         
         Args:
             summary_data: Data containing import statistics
             iface: QGIS interface for opening attribute tables
+            settings_manager: Settings manager for accessing layer configurations
             parent: Parent widget for the dialog
+            modal: Whether the dialog should be modal (default: False)
         """
         super().__init__(parent)
         
         # Store injected dependencies
         self._summary_data = summary_data
         self._iface = iface
+        self._settings_manager = settings_manager
+        self._modal = modal
         
         # Initialize UI
         self._setup_ui()
@@ -112,7 +125,7 @@ class ImportSummaryDialog(QtWidgets.QDialog):
         """Set up the user interface components."""
         self.setWindowTitle(self.tr("Import Summary"))
         self.setGeometry(0, 0, 500, 400)
-        self.setModal(True)
+        self.setModal(self._modal)
         
         # Create main layout
         main_layout = QtWidgets.QVBoxLayout(self)
@@ -370,21 +383,263 @@ class ImportSummaryDialog(QtWidgets.QDialog):
         """Create the dialog button box."""
         button_layout = QtWidgets.QHBoxLayout()
         
-        # Create OK button
-        self._ok_button = QtWidgets.QPushButton(self.tr("OK"))
-        self._ok_button.setDefault(True)
+        # Create Validate button (instead of OK)
+        self._validate_button = QtWidgets.QPushButton(self.tr("Validate"))
+        self._validate_button.setDefault(True)
         
         # Add button to layout
         button_layout.addStretch()
-        button_layout.addWidget(self._ok_button)
+        button_layout.addWidget(self._validate_button)
         
         parent_layout.addLayout(button_layout)
     
     def _setup_connections(self) -> None:
         """Set up signal connections."""
         # Button connections
-        self._ok_button.clicked.connect(self.accept)
+        self._validate_button.clicked.connect(self._handle_validate)
     
+    def _handle_validate(self) -> None:
+        """Handle the validate button click - copy features from temporary to definitive layers."""
+        try:
+            # Copy features from temporary layers to definitive layers
+            self._copy_temporary_to_definitive_layers()
+            
+            # Close the dialog
+            self.accept()
+            
+        except Exception as e:
+            print(f"Error during validation: {e}")
+            import traceback
+            traceback.print_exc()
+            
+            # Show error message to user
+            from qgis.PyQt.QtWidgets import QMessageBox
+            QMessageBox.critical(
+                self,
+                self.tr("Validation Error"),
+                self.tr(f"An error occurred during validation: {str(e)}")
+            )
+    
+    def _copy_temporary_to_definitive_layers(self) -> None:
+        """Copy features from temporary layers to definitive layers and keep them in edit mode."""
+        try:
+            from qgis.core import QgsProject
+            
+            project = QgsProject.instance()
+            
+            # Define layer mappings: temporary layer name -> definitive layer setting key
+            layer_mappings = {
+                "New Objects": "objects_layer",
+                "New Features": "features_layer", 
+                "New Small Finds": "small_finds_layer"
+            }
+            
+            copied_counts = {}
+            missing_configurations = []
+            
+            for temp_layer_name, definitive_layer_key in layer_mappings.items():
+                # Find the temporary layer
+                temp_layer = None
+                for layer in project.mapLayers().values():
+                    if layer.name() == temp_layer_name:
+                        temp_layer = layer
+                        break
+                
+                if not temp_layer:
+                    print(f"Temporary layer '{temp_layer_name}' not found")
+                    continue
+                
+                # Get the definitive layer ID from settings
+                definitive_layer_id = self._get_definitive_layer_id(definitive_layer_key)
+                if not definitive_layer_id:
+                    print(f"Definitive layer setting '{definitive_layer_key}' not configured")
+                    missing_configurations.append(definitive_layer_key)
+                    continue
+                
+                # Find the definitive layer
+                definitive_layer = None
+                for layer in project.mapLayers().values():
+                    if layer.id() == definitive_layer_id:
+                        definitive_layer = layer
+                        break
+                
+                if not definitive_layer:
+                    print(f"Definitive layer with ID '{definitive_layer_id}' not found")
+                    continue
+                
+                # Copy features from temporary to definitive layer
+                copied_count = self._copy_features_between_layers(temp_layer, definitive_layer)
+                copied_counts[temp_layer_name] = copied_count
+                
+                print(f"Copied {copied_count} features from '{temp_layer_name}' to '{definitive_layer.name()}'")
+            
+            # Show success message with information about edit mode
+            if copied_counts:
+                success_message = self.tr("Features copied successfully!\n\n")
+                for layer_name, count in copied_counts.items():
+                    success_message += f"• {layer_name}: {count} features\n"
+                success_message += f"\n{self.tr('The definitive layers are now in edit mode.')}\n"
+                success_message += f"{self.tr('The newly copied features are selected for easy identification.')}\n"
+                success_message += f"{self.tr('Please review the copied features and:')}\n"
+                success_message += f"• {self.tr('Save changes if you want to keep them')}\n"
+                success_message += f"• {self.tr('Cancel changes if you want to discard them')}"
+                
+                from qgis.PyQt.QtWidgets import QMessageBox
+                QMessageBox.information(
+                    self,
+                    self.tr("Validation Complete"),
+                    success_message
+                )
+            else:
+                # Show message if no layers were configured
+                if missing_configurations:
+                    from qgis.PyQt.QtWidgets import QMessageBox
+                    QMessageBox.information(
+                        self,
+                        self.tr("No Layers to Validate"),
+                        self.tr("Note: Some layers could not be copied because definitive layers are not configured.\n\n"
+                               "Please configure the definitive layers in the settings dialog first.")
+                    )
+            
+        except Exception as e:
+            print(f"Error copying temporary to definitive layers: {e}")
+            import traceback
+            traceback.print_exc()
+            raise
+    
+    def _get_definitive_layer_id(self, layer_setting_key: str) -> Optional[str]:
+        """Get the definitive layer ID from settings."""
+        try:
+            if self._settings_manager:
+                # Use the settings manager to get the layer ID
+                layer_id = self._settings_manager.get_value(layer_setting_key, "")
+                return layer_id if layer_id else None
+            else:
+                # Fallback to direct QSettings access if no settings manager is provided
+                from qgis.PyQt.QtCore import QSettings
+                settings = QSettings()
+                settings.beginGroup('ArcheoSync')
+                layer_id = settings.value(layer_setting_key, "")
+                settings.endGroup()
+                return layer_id if layer_id else None
+            
+        except Exception as e:
+            print(f"Error getting definitive layer ID for {layer_setting_key}: {e}")
+            return None
+    
+    def _copy_features_between_layers(self, source_layer, target_layer) -> int:
+        """Copy features from source layer to target layer and keep target in edit mode without committing."""
+        try:
+            # Start editing the target layer
+            if not target_layer.isEditable():
+                target_layer.startEditing()
+            
+            copied_count = 0
+            error_count = 0
+            newly_added_features = []  # Track newly added features for selection
+            
+            # Get all features from source layer
+            source_features = list(source_layer.getFeatures())
+            
+            for i, source_feature in enumerate(source_features):
+                try:
+                    # Create a new feature with the target layer's field structure
+                    new_feature = self._create_feature_with_target_structure(source_feature, target_layer)
+                    
+                    if new_feature:
+                        # Add the feature to the target layer
+                        success = target_layer.addFeature(new_feature)
+                        if success:
+                            copied_count += 1
+                            # Store the newly added feature for selection
+                            newly_added_features.append(new_feature)
+                        else:
+                            error_count += 1
+                            error_msg = target_layer.lastError()
+                            print(f"Failed to add feature {i+1} to {target_layer.name()}: {error_msg}")
+                    else:
+                        error_count += 1
+                        print(f"Failed to create feature {i+1} for {target_layer.name()}")
+                        
+                except Exception as e:
+                    error_count += 1
+                    print(f"Error processing feature {i+1}: {e}")
+            
+            # Select the newly added features
+            if newly_added_features:
+                try:
+                    # Clear any existing selection
+                    target_layer.removeSelection()
+                    
+                    # Select all newly added features
+                    for feature in newly_added_features:
+                        target_layer.select(feature.id())
+                    
+                    print(f"Selected {len(newly_added_features)} newly copied features in {target_layer.name()}")
+                except Exception as e:
+                    print(f"Warning: Could not select newly added features: {e}")
+            
+            # DO NOT commit changes - keep the layer in edit mode for user review
+            # The user can decide whether to save or cancel the changes
+            
+            # Log summary
+            if error_count > 0:
+                print(f"Copied {copied_count} features to {target_layer.name()}, {error_count} errors occurred")
+                print(f"Layer {target_layer.name()} is in edit mode - review changes and save/cancel as needed")
+            else:
+                print(f"Successfully copied {copied_count} features to {target_layer.name()}")
+                print(f"Layer {target_layer.name()} is in edit mode - review changes and save/cancel as needed")
+            
+            return copied_count
+            
+        except Exception as e:
+            print(f"Error copying features between layers: {e}")
+            # Try to rollback changes if there was an error
+            if target_layer.isEditable():
+                target_layer.rollBack()
+            raise
+    
+    def _create_feature_with_target_structure(self, source_feature, target_layer):
+        """Create a new feature with the target layer's field structure."""
+        try:
+            from qgis.core import QgsFeature
+            
+            # Create a new feature with the target layer's fields
+            # This automatically assigns a new FID, avoiding conflicts
+            new_feature = QgsFeature(target_layer.fields())
+            
+            # Copy geometry if both layers have geometry
+            if source_feature.geometry() and not source_feature.geometry().isEmpty():
+                new_feature.setGeometry(source_feature.geometry())
+            
+            # Copy attributes by field name, excluding FID fields
+            for field in target_layer.fields():
+                field_name = field.name()
+                
+                # Skip FID-related fields to avoid conflicts
+                if field_name.lower() in ['fid', 'id', 'gid', 'objectid', 'featureid']:
+                    continue
+                
+                source_field_idx = source_feature.fields().indexOf(field_name)
+                
+                if source_field_idx >= 0:
+                    # Field exists in source, copy the value
+                    source_value = source_feature[field_name]
+                    # Handle NULL values properly
+                    if source_value is None or str(source_value).lower() == 'null':
+                        new_feature[field_name] = None
+                    else:
+                        new_feature[field_name] = source_value
+                else:
+                    # Field doesn't exist in source, set to NULL
+                    new_feature[field_name] = None
+            
+            return new_feature
+            
+        except Exception as e:
+            print(f"Error creating feature with target structure: {e}")
+            return None
+
     def _open_filtered_attribute_table(self, warning_data: WarningData) -> None:
         """
         Open the attribute table for the specified layer and select the concerned entities.

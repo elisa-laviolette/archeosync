@@ -6,6 +6,18 @@ All notable changes to the ArcheoSync QGIS plugin will be documented in this fil
 
 ### New Features
 
+- **Import Summary Validation**: Enhanced import summary dialog with validation functionality
+  - **Validate Button**: Replaced "OK" button with "Validate" button for feature validation workflow
+  - **Feature Copying**: Automatically copies features from temporary layers to definitive layers
+    - Copies from "New Objects" to configured Objects layer
+    - Copies from "New Features" to configured Features layer  
+    - Copies from "New Small Finds" to configured Small Finds layer
+  - **Edit Mode Preservation**: Keeps definitive layers in edit mode after copying for continued editing
+  - **Success Feedback**: Shows summary message with count of copied features for each layer type
+  - **Error Handling**: Comprehensive error handling with user-friendly error messages
+  - **Translation Support**: Full internationalization for validation messages with French translations
+  - **Settings Integration**: Uses configured layer settings to identify definitive layers
+
 - **Duplicate Objects Warnings**: Added comprehensive warnings for duplicate objects with the same recording area and number
   - **Import Summary Integration**: Warnings are displayed in the import summary dialog after successful data import
   - **Multi-Layer Detection**: Detects duplicates within the "New Objects" layer (imported objects), within the original "Objects" layer (existing objects), and between both layers
