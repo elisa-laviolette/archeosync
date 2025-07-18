@@ -507,4 +507,45 @@ class TestProjectCreationService:
             assert len(call_order) >= 3
             assert call_order[0] == 'background_raster', f"Expected background_raster first, got: {call_order}"
             assert call_order[1] == 'recording_areas', f"Expected recording_areas second, got: {call_order}"
-            assert call_order[2] == 'objects_layer', f"Expected objects_layer third, got: {call_order}" 
+            assert call_order[2] == 'objects_layer', f"Expected objects_layer third, got: {call_order}"
+
+    def test_create_recording_area_bookmark(self):
+        """Test that a bookmark is created for the recording area."""
+        # Mock feature data
+        feature_data = {
+            'id': 123,
+            'geometry_wkt': 'POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))',
+            'display_name': 'Test Area'
+        }
+        
+        # Mock QGIS project
+        mock_project = Mock()
+        mock_bookmark_manager = Mock()
+        mock_bookmark = Mock()
+        
+        # Set up the bookmark manager
+        mock_project.bookmarkManager.return_value = mock_bookmark_manager
+        
+        # Mock QgsBookmark and QgsReferencedRectangle
+        with patch('qgis.core.QgsBookmark', return_value=mock_bookmark), \
+             patch('qgis.core.QgsGeometry.fromWkt') as mock_from_wkt, \
+             patch('qgis.core.QgsReferencedRectangle') as mock_referenced_rect_class:
+            
+            # Mock geometry and bounding box
+            mock_geometry = Mock()
+            mock_bounding_box = Mock()
+            mock_geometry.boundingBox.return_value = mock_bounding_box
+            mock_from_wkt.return_value = mock_geometry
+            
+            # Mock the QgsReferencedRectangle constructor to return our mock bounding box
+            mock_referenced_rect_class.return_value = mock_bounding_box
+            
+            # Call the method
+            self.project_service._create_recording_area_bookmark(mock_project, feature_data, "Test Area")
+            
+            # Verify bookmark was created and configured
+            mock_bookmark.setName.assert_called_once_with("Test Area")
+            mock_bookmark.setExtent.assert_called_once_with(mock_bounding_box)
+            mock_bookmark_manager.addBookmark.assert_called_once_with(mock_bookmark)
+
+ 

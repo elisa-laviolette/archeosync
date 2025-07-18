@@ -42,7 +42,7 @@ The service provides:
 import os
 import re
 from typing import Optional, Any, Dict, List
-from qgis.core import QgsProject, QgsVectorLayer, QgsRasterLayer, QgsFeature, QgsGeometry, QgsWkbTypes, QgsVectorFileWriter, QgsCoordinateReferenceSystem
+from qgis.core import QgsProject, QgsVectorLayer, QgsRasterLayer, QgsFeature, QgsGeometry, QgsWkbTypes, QgsVectorFileWriter, QgsCoordinateReferenceSystem, QgsBookmark, QgsReferencedRectangle
 from qgis.PyQt.QtWidgets import QMessageBox
 
 try:
@@ -248,6 +248,9 @@ class QGISProjectCreationService(IProjectCreationService):
             # Set project variables
             if next_values:
                 self._set_project_variables(project, next_values, feature_data['display_name'])
+
+            # Create bookmark for recording area
+            self._create_recording_area_bookmark(project, feature_data, feature_data['display_name'])
 
             # Ensure all layers are properly refreshed before saving
             print("[DEBUG] Refreshing all layers before saving project")
@@ -887,7 +890,36 @@ class QGISProjectCreationService(IProjectCreationService):
             project.setCustomVariables({
                 'recording_area': recording_area,
                 'first_number': next_values.get('first_number', ''),
-                'level': next_values.get('level', '')
+                'level': next_values.get('level', ''),
+                'auto_zoom_bookmark': recording_area
             })
         except Exception as e:
             print(f"Error setting project variables: {str(e)}") 
+
+    def _create_recording_area_bookmark(self, project: QgsProject, feature_data: Dict[str, Any], recording_area_name: str) -> None:
+        """
+        Create a bookmark for the recording area that zooms to the feature's geometry.
+        """
+        try:
+            # Get the geometry as a QgsGeometry object
+            geometry_wkt = feature_data['geometry_wkt']
+            geom = QgsGeometry.fromWkt(geometry_wkt)
+
+            # Get the project CRS
+            project_crs = project.crs()
+            
+            # Create a referenced rectangle with the project CRS
+            bounding_box = geom.boundingBox()
+            referenced_rect = QgsReferencedRectangle(bounding_box, project_crs)
+
+            # Create a new bookmark
+            bookmark = QgsBookmark()
+            bookmark.setName(recording_area_name)
+            bookmark.setExtent(referenced_rect)
+            # Add the bookmark to the project's bookmark manager
+            project.bookmarkManager().addBookmark(bookmark)
+            print(f"Created bookmark for {recording_area_name} with extent: {bounding_box}")
+        except Exception as e:
+            print(f"Error creating recording area bookmark: {str(e)}")
+
+ 
