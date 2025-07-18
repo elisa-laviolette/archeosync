@@ -42,6 +42,7 @@ class ImportSummaryData:
     out_of_bounds_warnings: List[Union[str, WarningData]] = None
     distance_warnings: List[Union[str, WarningData]] = None
     missing_total_station_warnings: List[Union[str, WarningData]] = None
+    duplicate_total_station_identifiers_warnings: List[Union[str, WarningData]] = None
     
     def __post_init__(self):
         """Initialize default values for mutable fields."""
@@ -54,4 +55,6 @@ class ImportSummaryData:
         if self.distance_warnings is None:
             self.distance_warnings = []
         if self.missing_total_station_warnings is None:
-            self.missing_total_station_warnings = [] 
+            self.missing_total_station_warnings = []
+        if self.duplicate_total_station_identifiers_warnings is None:
+            self.duplicate_total_station_identifiers_warnings = [] 

@@ -467,12 +467,8 @@ class SkippedNumbersDetectorService:
         """
         try:
             # Try to translate the message
-            message = self._translation_service.tr(
-                "Recording Area '{recording_area_name}' has skipped numbers: {gaps} in {layer_name}"
-            ).format(
-                recording_area_name=recording_area_name,
-                gaps=gaps,
-                layer_name=layer_name
+            message = self._translation_service.translate(
+                f"Recording Area '{recording_area_name}' has skipped numbers: {gaps} in {layer_name}"
             )
         except Exception:
             # Fallback to English if translation fails

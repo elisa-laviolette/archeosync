@@ -219,6 +219,46 @@ class ImportSummaryDockWidget(QDockWidget):
             duplicates_layout.addWidget(duplicates_count)
             layout.addLayout(duplicates_layout)
         
+        # Duplicate total station identifiers warnings
+        if hasattr(self._summary_data, 'duplicate_total_station_identifiers_warnings') and self._summary_data.duplicate_total_station_identifiers_warnings:
+            warnings_layout = QtWidgets.QVBoxLayout()
+            warnings_label = QtWidgets.QLabel(self.tr("Duplicate Identifiers Warnings:"))
+            warnings_label.setStyleSheet("font-weight: bold; color: #FF4500;")
+            warnings_layout.addWidget(warnings_label)
+            
+            for warning in self._summary_data.duplicate_total_station_identifiers_warnings:
+                warning_item_layout = QtWidgets.QHBoxLayout()
+                
+                # Warning text - check if it has the expected attributes
+                if hasattr(warning, 'message'):
+                    warning_text = warning.message
+                else:
+                    warning_text = str(warning)
+                
+                warning_item = QtWidgets.QLabel(f"• {warning_text}")
+                warning_item.setStyleSheet("color: #FF4500; margin-left: 10px;")
+                warning_item.setWordWrap(True)
+                warning_item_layout.addWidget(warning_item)
+                
+                # Add button if we have structured data and QGIS interface
+                if hasattr(warning, 'message') and self._iface:
+                    if getattr(warning, "second_layer_name", None):
+                        # Between-layer warning - open both tables
+                        button = QtWidgets.QPushButton(self.tr("Select and Show Both Entities"))
+                        button.setStyleSheet("background-color: #FF6B35; color: white; border: none; padding: 5px; border-radius: 3px;")
+                        button.clicked.connect(lambda checked, w=warning: self._open_both_filtered_attribute_tables(w))
+                    else:
+                        # Single layer warning
+                        button = QtWidgets.QPushButton(self.tr("Select and Show Entities"))
+                        button.setStyleSheet("background-color: #4CAF50; color: white; border: none; padding: 5px; border-radius: 3px;")
+                        button.clicked.connect(lambda checked, w=warning: self._open_filtered_attribute_table(w))
+                    warning_item_layout.addWidget(button)
+                
+                warning_item_layout.addStretch()
+                warnings_layout.addLayout(warning_item_layout)
+            
+            layout.addLayout(warnings_layout)
+        
         return group
     
     def _create_features_section(self) -> QtWidgets.QGroupBox:
@@ -750,14 +790,42 @@ class ImportSummaryDockWidget(QDockWidget):
             else:
                 print(f"[DEBUG] Skipping missing total station detection - missing total station points or objects")
             
+            # Run duplicate total station identifiers detection if total station points were imported
+            duplicate_total_station_identifiers_warnings = []
+            if self._summary_data.csv_points_count > 0:
+                print(f"[DEBUG] Running duplicate total station identifiers detection")
+                try:
+                    from services.duplicate_total_station_identifiers_detector_service import DuplicateTotalStationIdentifiersDetectorService
+                except ImportError:
+                    # Fallback for relative import
+                    import sys
+                    import os
+                    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+                    from services.duplicate_total_station_identifiers_detector_service import DuplicateTotalStationIdentifiersDetectorService
+                
+                duplicate_total_station_identifiers_detector = DuplicateTotalStationIdentifiersDetectorService(
+                    settings_manager=self._settings_manager,
+                    layer_service=self._layer_service,
+                    translation_service=self._translation_service
+                )
+                duplicate_total_station_identifiers_warnings = duplicate_total_station_identifiers_detector.detect_duplicate_identifiers_warnings()
+                print(f"[DEBUG] Detected {len(duplicate_total_station_identifiers_warnings)} duplicate total station identifiers warnings")
+                for i, warning in enumerate(duplicate_total_station_identifiers_warnings):
+                    print(f"[DEBUG] Duplicate total station identifiers warning {i+1}: {warning}")
+                    if hasattr(warning, 'message'):
+                        print(f"[DEBUG]   Message: {warning.message}")
+            else:
+                print(f"[DEBUG] Skipping duplicate total station identifiers detection - no total station points imported")
+            
             # Update the summary data with new warnings
-            print(f"[DEBUG] Updating summary data with {len(duplicate_objects_warnings)} duplicates, {len(skipped_numbers_warnings)} skipped, {len(out_of_bounds_warnings)} out-of-bounds, {len(distance_warnings)} distance, and {len(missing_total_station_warnings)} missing total station")
+            print(f"[DEBUG] Updating summary data with {len(duplicate_objects_warnings)} duplicates, {len(skipped_numbers_warnings)} skipped, {len(out_of_bounds_warnings)} out-of-bounds, {len(distance_warnings)} distance, {len(missing_total_station_warnings)} missing total station, and {len(duplicate_total_station_identifiers_warnings)} duplicate total station identifiers")
             self._summary_data.duplicate_objects_warnings = duplicate_objects_warnings
             self._summary_data.skipped_numbers_warnings = skipped_numbers_warnings
             self._summary_data.out_of_bounds_warnings = out_of_bounds_warnings
             self._summary_data.distance_warnings = distance_warnings
             self._summary_data.missing_total_station_warnings = missing_total_station_warnings
-            print(f"[DEBUG] Summary data now has {len(self._summary_data.duplicate_objects_warnings)} duplicates, {len(self._summary_data.skipped_numbers_warnings)} skipped, {len(self._summary_data.out_of_bounds_warnings)} out-of-bounds, {len(self._summary_data.distance_warnings)} distance, and {len(self._summary_data.missing_total_station_warnings)} missing total station")
+            self._summary_data.duplicate_total_station_identifiers_warnings = duplicate_total_station_identifiers_warnings
+            print(f"[DEBUG] Summary data now has {len(self._summary_data.duplicate_objects_warnings)} duplicates, {len(self._summary_data.skipped_numbers_warnings)} skipped, {len(self._summary_data.out_of_bounds_warnings)} out-of-bounds, {len(self._summary_data.distance_warnings)} distance, {len(self._summary_data.missing_total_station_warnings)} missing total station, and {len(self._summary_data.duplicate_total_station_identifiers_warnings)} duplicate total station identifiers")
             
             # Recreate the UI to show updated warnings
             print("[DEBUG] Recreating summary content")

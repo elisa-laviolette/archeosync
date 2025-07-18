@@ -678,6 +678,38 @@ class ArcheoSyncPlugin:
             else:
                 print(f"[DEBUG] Skipping missing total station detection - missing total station points or objects")
             
+            # Run duplicate total station identifiers detection if total station points were imported
+            duplicate_total_station_identifiers_warnings = []
+            if summary_data.get('csv_points_count', 0) > 0:
+                print(f"[DEBUG] Running duplicate total station identifiers detection in main plugin")
+                try:
+                    # Force reload of the module
+                    import sys
+                    import importlib
+                    if 'services.duplicate_total_station_identifiers_detector_service' in sys.modules:
+                        importlib.reload(sys.modules['services.duplicate_total_station_identifiers_detector_service'])
+                    from services.duplicate_total_station_identifiers_detector_service import DuplicateTotalStationIdentifiersDetectorService
+                except ImportError:
+                    # Fallback for relative import
+                    import sys
+                    import os
+                    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+                    from services.duplicate_total_station_identifiers_detector_service import DuplicateTotalStationIdentifiersDetectorService
+                
+                duplicate_total_station_identifiers_detector = DuplicateTotalStationIdentifiersDetectorService(
+                    settings_manager=self._settings_manager,
+                    layer_service=self._layer_service,
+                    translation_service=self._translation_service
+                )
+                duplicate_total_station_identifiers_warnings = duplicate_total_station_identifiers_detector.detect_duplicate_identifiers_warnings()
+                print(f"[DEBUG] Duplicate total station identifiers detection completed, found {len(duplicate_total_station_identifiers_warnings)} warnings")
+                for i, warning in enumerate(duplicate_total_station_identifiers_warnings):
+                    print(f"[DEBUG] Duplicate total station identifiers warning {i+1}: {warning}")
+                    if hasattr(warning, 'message'):
+                        print(f"[DEBUG]   Message: {warning.message}")
+            else:
+                print(f"[DEBUG] Skipping duplicate total station identifiers detection - no total station points imported")
+            
             # Create summary data
             summary = ImportSummaryData(
                 csv_points_count=summary_data.get('csv_points_count', 0),
@@ -696,6 +728,7 @@ class ArcheoSyncPlugin:
             summary.out_of_bounds_warnings = out_of_bounds_warnings
             summary.distance_warnings = distance_warnings
             summary.missing_total_station_warnings = missing_total_station_warnings
+            summary.duplicate_total_station_identifiers_warnings = duplicate_total_station_identifiers_warnings
             
             print(f"[DEBUG] Summary data warnings - duplicates: {len(duplicate_objects_warnings)}, skipped: {len(skipped_numbers_warnings)}, out-of-bounds: {len(out_of_bounds_warnings)}")
             print(f"[DEBUG] Summary object attributes: {dir(summary)}")
