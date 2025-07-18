@@ -431,7 +431,7 @@ class TestFieldProjectImportService:
     @patch('services.field_project_import_service.QgsVectorLayer')
     @patch('services.field_project_import_service.QgsProject')
     def test_import_field_projects_archives_projects_when_configured(self, mock_project, mock_vector_layer, mock_exists, mock_qgsfeature):
-        """Test that projects are archived when archive folder is configured."""
+        """Test that projects are tracked for later archiving after successful import when archive folder is configured."""
         # Mock that data.gpkg does NOT exist
         def exists_side_effect(path):
             return not path.endswith("data.gpkg")
@@ -497,10 +497,18 @@ class TestFieldProjectImportService:
                 assert result.is_valid is True
                 assert "Successfully imported 1 layer(s)" in result.message
                 
-                # Verify archive folder was checked
-                self.settings_manager.get_value.assert_called_with('field_project_archive_folder', '')
+                # Verify projects are tracked for later archiving
+                tracked_projects = self.field_import_service.get_last_imported_projects()
+                assert project_path in tracked_projects
                 
-                # Verify project was moved to archive
+                # Verify no archiving happened immediately
+                self.file_system_service.move_directory.assert_not_called()
+                
+                # Now test the archiving functionality
+                self.field_import_service.archive_last_imported_projects()
+                
+                # Verify archive folder was checked and project was moved
+                self.settings_manager.get_value.assert_called_with('field_project_archive_folder', '')
                 self.file_system_service.move_directory.assert_called_once()
 
     @patch('services.field_project_import_service.QgsFeature')
@@ -508,7 +516,7 @@ class TestFieldProjectImportService:
     @patch('services.field_project_import_service.QgsVectorLayer')
     @patch('services.field_project_import_service.QgsProject')
     def test_import_field_projects_does_not_archive_when_not_configured(self, mock_project, mock_vector_layer, mock_exists, mock_qgsfeature):
-        """Test that projects are not archived when archive folder is not configured."""
+        """Test that projects are tracked for later archiving but not archived when archive folder is not configured."""
         # Mock that data.gpkg does NOT exist
         def exists_side_effect(path):
             return not path.endswith("data.gpkg")
@@ -574,10 +582,18 @@ class TestFieldProjectImportService:
                 assert result.is_valid is True
                 assert "Successfully imported 1 layer(s)" in result.message
                 
-                # Verify archive folder was checked
-                self.settings_manager.get_value.assert_called_with('field_project_archive_folder', '')
+                # Verify projects are tracked for later archiving
+                tracked_projects = self.field_import_service.get_last_imported_projects()
+                assert project_path in tracked_projects
                 
-                # Verify project was NOT moved to archive
+                # Verify no archiving happened immediately
+                self.file_system_service.move_directory.assert_not_called()
+                
+                # Now test the archiving functionality with no archive folder configured
+                self.field_import_service.archive_last_imported_projects()
+                
+                # Verify archive folder was checked but no project operations were performed
+                self.settings_manager.get_value.assert_called_with('field_project_archive_folder', '')
                 self.file_system_service.move_directory.assert_not_called()
 
     @patch('services.field_project_import_service.QgsFeature')

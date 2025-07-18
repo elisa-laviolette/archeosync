@@ -34,7 +34,7 @@ from typing import List, Dict, Optional, Any
 from dataclasses import dataclass
 
 try:
-    from qgis.core import QgsVectorLayer, QgsFeature, QgsGeometry, QgsPointXY, QgsField
+    from qgis.core import QgsVectorLayer, QgsFeature, QgsGeometry, QgsPointXY, QgsFields, QgsField
     from qgis.PyQt.QtCore import QVariant
     from ..core.interfaces import ICSVImportService, ValidationResult
 except ImportError:
@@ -443,9 +443,8 @@ class CSVImportService(ICSVImportService):
             from qgis.core import QgsProject
             QgsProject.instance().addMapLayer(layer)
             
-            # Archive CSV files if archive folder is configured
-            if self._file_system_service and self._settings_manager:
-                self._archive_csv_files(csv_files)
+            # Store imported files for later archiving instead of archiving immediately
+            self._last_imported_files = csv_files
             
             # Store the number of imported features for summary
             self._last_import_count = feature_id - 1
@@ -463,6 +462,26 @@ class CSVImportService(ICSVImportService):
             Number of features imported, or 0 if no import has been performed
         """
         return getattr(self, '_last_import_count', 0)
+    
+    def get_last_imported_files(self) -> List[str]:
+        """
+        Get the list of files imported in the last import operation.
+        
+        Returns:
+            List of imported file paths, or empty list if no import has been performed
+        """
+        return getattr(self, '_last_imported_files', [])
+    
+    def archive_last_imported_files(self) -> None:
+        """
+        Archive the files from the last import operation.
+        This method should be called after validation is complete.
+        """
+        imported_files = self.get_last_imported_files()
+        if imported_files:
+            self._archive_csv_files(imported_files)
+            # Clear the stored files after archiving
+            self._last_imported_files = []
     
     def _archive_csv_files(self, csv_files: List[str]) -> None:
         """

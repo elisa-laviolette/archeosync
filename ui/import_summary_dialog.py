@@ -97,6 +97,8 @@ class ImportSummaryDialog(QtWidgets.QDialog):
                  summary_data: ImportSummaryData,
                  iface=None,
                  settings_manager=None,
+                 csv_import_service=None,
+                 field_project_import_service=None,
                  parent=None,
                  modal=False):
         """
@@ -106,6 +108,8 @@ class ImportSummaryDialog(QtWidgets.QDialog):
             summary_data: Data containing import statistics
             iface: QGIS interface for opening attribute tables
             settings_manager: Settings manager for accessing layer configurations
+            csv_import_service: CSV import service for archiving files after validation
+            field_project_import_service: Field project import service for archiving projects after validation
             parent: Parent widget for the dialog
             modal: Whether the dialog should be modal (default: False)
         """
@@ -115,6 +119,8 @@ class ImportSummaryDialog(QtWidgets.QDialog):
         self._summary_data = summary_data
         self._iface = iface
         self._settings_manager = settings_manager
+        self._csv_import_service = csv_import_service
+        self._field_project_import_service = field_project_import_service
         self._modal = modal
         
         # Initialize UI
@@ -404,6 +410,12 @@ class ImportSummaryDialog(QtWidgets.QDialog):
             # Copy features from temporary layers to definitive layers
             self._copy_temporary_to_definitive_layers()
             
+            # Delete temporary layers after successful copying
+            self._delete_temporary_layers()
+            
+            # Archive imported files and folders after successful validation
+            self._archive_imported_data()
+            
             # Close the dialog
             self.accept()
             
@@ -506,6 +518,59 @@ class ImportSummaryDialog(QtWidgets.QDialog):
             import traceback
             traceback.print_exc()
             raise
+    
+    def _delete_temporary_layers(self) -> None:
+        """Delete temporary layers after features have been copied to definitive layers."""
+        try:
+            from qgis.core import QgsProject
+            
+            project = QgsProject.instance()
+            
+            # Define temporary layer names to delete
+            temporary_layer_names = ["New Objects", "New Features", "New Small Finds"]
+            
+            layers_to_remove = []
+            
+            # Find temporary layers
+            for layer in project.mapLayers().values():
+                if layer.name() in temporary_layer_names:
+                    layers_to_remove.append(layer.id())
+                    print(f"Found temporary layer to delete: {layer.name()}")
+            
+            # Remove temporary layers from project
+            for layer_id in layers_to_remove:
+                project.removeMapLayer(layer_id)
+                print(f"Deleted temporary layer: {layer_id}")
+            
+            if layers_to_remove:
+                print(f"Successfully deleted {len(layers_to_remove)} temporary layer(s)")
+            else:
+                print("No temporary layers found to delete")
+                
+        except Exception as e:
+            print(f"Error deleting temporary layers: {e}")
+            import traceback
+            traceback.print_exc()
+            # Don't raise the exception - this is not critical for the validation process
+    
+    def _archive_imported_data(self) -> None:
+        """Archive imported files and folders after successful validation."""
+        try:
+            # Archive CSV files if CSV import service is available
+            if self._csv_import_service:
+                self._csv_import_service.archive_last_imported_files()
+                print("Archived CSV files after validation")
+            
+            # Archive field projects if field project import service is available
+            if self._field_project_import_service:
+                self._field_project_import_service.archive_last_imported_projects()
+                print("Archived field projects after validation")
+                
+        except Exception as e:
+            print(f"Error archiving imported data: {e}")
+            import traceback
+            traceback.print_exc()
+            # Don't raise the exception - this is not critical for the validation process
     
     def _get_definitive_layer_id(self, layer_setting_key: str) -> Optional[str]:
         """Get the definitive layer ID from settings."""

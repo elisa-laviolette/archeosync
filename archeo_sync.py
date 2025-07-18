@@ -608,7 +608,13 @@ class ArcheoSyncPlugin:
             )
             
             # Show the dialog with QGIS interface for attribute table functionality
-            dialog = ImportSummaryDialog(summary, iface=self._iface, settings_manager=self._settings_manager)
+            dialog = ImportSummaryDialog(
+                summary, 
+                iface=self._iface, 
+                settings_manager=self._settings_manager,
+                csv_import_service=self._csv_import_service,
+                field_project_import_service=self._field_project_import_service
+            )
             dialog.exec_()
             
         except Exception as e:

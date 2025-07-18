@@ -168,9 +168,8 @@ class FieldProjectImportService(IFieldProjectImportService):
                     QgsProject.instance().addMapLayer(small_finds_layer)
                     layers_created += 1
             
-            # Archive projects if archive folder is configured
-            if self._settings_manager.get_value('field_project_archive_folder', ''):
-                self._archive_projects(project_paths)
+            # Store imported projects for later archiving instead of archiving immediately
+            self._last_imported_projects = project_paths
             
             # Store import statistics for summary
             self._last_import_stats = {
@@ -196,25 +195,32 @@ class FieldProjectImportService(IFieldProjectImportService):
     
     def get_last_import_stats(self) -> Dict[str, int]:
         """
-        Get the statistics from the last import operation.
+        Get the import statistics from the last import operation.
         
         Returns:
-            Dictionary containing import statistics with keys:
-            - features_count: Number of features imported
-            - objects_count: Number of objects imported
-            - small_finds_count: Number of small finds imported
-            - features_duplicates: Number of duplicate features detected
-            - objects_duplicates: Number of duplicate objects detected
-            - small_finds_duplicates: Number of duplicate small finds detected
+            Dictionary containing import statistics
         """
-        return getattr(self, '_last_import_stats', {
-            'features_count': 0,
-            'objects_count': 0,
-            'small_finds_count': 0,
-            'features_duplicates': 0,
-            'objects_duplicates': 0,
-            'small_finds_duplicates': 0
-        })
+        return getattr(self, '_last_import_stats', {})
+    
+    def get_last_imported_projects(self) -> List[str]:
+        """
+        Get the list of projects imported in the last import operation.
+        
+        Returns:
+            List of imported project paths, or empty list if no import has been performed
+        """
+        return getattr(self, '_last_imported_projects', [])
+    
+    def archive_last_imported_projects(self) -> None:
+        """
+        Archive the projects from the last import operation.
+        This method should be called after validation is complete.
+        """
+        imported_projects = self.get_last_imported_projects()
+        if imported_projects:
+            self._archive_projects(imported_projects)
+            # Clear the stored projects after archiving
+            self._last_imported_projects = []
     
     def _scan_project_layers(self, project_path: str) -> Dict[str, List[str]]:
         """

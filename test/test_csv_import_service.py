@@ -343,7 +343,7 @@ class TestCSVImportService:
         assert "Failed to create vector layer" in result.message
     
     def test_import_csv_files_archives_files_when_configured(self):
-        """Test that CSV files are archived after successful import when archive folder is configured."""
+        """Test that CSV files are tracked for later archiving after successful import when archive folder is configured."""
         # Create valid CSV file
         csv1 = self._create_test_csv(
             "test1.csv",
@@ -397,14 +397,22 @@ class TestCSVImportService:
                 # Verify import was successful
                 assert result.is_valid is True
                 
-                # Verify archive folder was checked
-                self.mock_settings_manager.get_value.assert_called_with('csv_archive_folder', '')
+                # Verify files are tracked for later archiving
+                tracked_files = self.csv_service.get_last_imported_files()
+                assert csv1 in tracked_files
                 
-                # Verify file was moved to archive
+                # Verify no archiving happened immediately
+                self.mock_file_system_service.move_file.assert_not_called()
+                
+                # Now test the archiving functionality
+                self.csv_service.archive_last_imported_files()
+                
+                # Verify archive folder was checked and file was moved
+                self.mock_settings_manager.get_value.assert_called_with('csv_archive_folder', '')
                 self.mock_file_system_service.move_file.assert_called_once()
     
     def test_import_csv_files_does_not_archive_when_not_configured(self):
-        """Test that CSV files are not archived when archive folder is not configured."""
+        """Test that CSV files are tracked for later archiving but not archived when archive folder is not configured."""
         # Create valid CSV file
         csv1 = self._create_test_csv(
             "test1.csv",
@@ -453,10 +461,18 @@ class TestCSVImportService:
                 # Verify import was successful
                 assert result.is_valid is True
                 
-                # Verify archive folder was checked
-                self.mock_settings_manager.get_value.assert_called_with('csv_archive_folder', '')
+                # Verify files are tracked for later archiving
+                tracked_files = self.csv_service.get_last_imported_files()
+                assert csv1 in tracked_files
                 
-                # Verify no file operations were performed
+                # Verify no archiving happened immediately
+                self.mock_file_system_service.move_file.assert_not_called()
+                
+                # Now test the archiving functionality with no archive folder configured
+                self.csv_service.archive_last_imported_files()
+                
+                # Verify archive folder was checked but no file operations were performed
+                self.mock_settings_manager.get_value.assert_called_with('csv_archive_folder', '')
                 self.mock_file_system_service.move_file.assert_not_called()
     
     @patch('archeosync.services.csv_import_service.QgsVectorLayer')
