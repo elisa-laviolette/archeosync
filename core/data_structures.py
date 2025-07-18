@@ -18,6 +18,8 @@ class WarningData:
     # Fields for between-layer warnings
     second_layer_name: Optional[str] = None
     second_filter_expression: Optional[str] = None
+    # Fields for out-of-bounds warnings
+    out_of_bounds_features: Optional[List[dict]] = None
 
 
 @dataclass
@@ -33,10 +35,13 @@ class ImportSummaryData:
     small_finds_duplicates: int = 0
     duplicate_objects_warnings: List[Union[str, WarningData]] = None
     skipped_numbers_warnings: List[Union[str, WarningData]] = None
+    out_of_bounds_warnings: List[Union[str, WarningData]] = None
     
     def __post_init__(self):
         """Initialize default values for mutable fields."""
         if self.duplicate_objects_warnings is None:
             self.duplicate_objects_warnings = []
         if self.skipped_numbers_warnings is None:
-            self.skipped_numbers_warnings = [] 
+            self.skipped_numbers_warnings = []
+        if self.out_of_bounds_warnings is None:
+            self.out_of_bounds_warnings = [] 

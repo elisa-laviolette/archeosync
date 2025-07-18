@@ -263,6 +263,22 @@ class QGISLayerService(ILayerService):
             return layer
         return None
     
+    def get_layer_by_name(self, layer_name: str) -> Optional[QgsVectorLayer]:
+        """
+        Get a layer by its name.
+        
+        Args:
+            layer_name: The layer name to find
+            
+        Returns:
+            The layer if found, None otherwise
+        """
+        project = QgsProject.instance()
+        for layer in project.mapLayers().values():
+            if layer.name() == layer_name:
+                return layer
+        return None
+    
     def is_valid_polygon_layer(self, layer_id: str) -> bool:
         """
         Check if a layer is a valid polygon layer.

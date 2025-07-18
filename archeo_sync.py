@@ -586,6 +586,7 @@ class ArcheoSyncPlugin:
             from .ui.import_summary_dialog import ImportSummaryDockWidget, ImportSummaryData
             from .services.duplicate_objects_detector_service import DuplicateObjectsDetectorService
             from .services.skipped_numbers_detector_service import SkippedNumbersDetectorService
+            from .services.out_of_bounds_detector_service import OutOfBoundsDetectorService
             from qgis.PyQt.QtCore import Qt
             
             # Detect duplicate objects if objects were imported
@@ -608,6 +609,27 @@ class ArcheoSyncPlugin:
                 )
                 skipped_numbers_warnings = skipped_detector.detect_skipped_numbers()
             
+            # Detect out-of-bounds features if any features were imported
+            out_of_bounds_warnings = []
+            if (summary_data.get('objects_count', 0) > 0 or 
+                summary_data.get('features_count', 0) > 0 or 
+                summary_data.get('small_finds_count', 0) > 0):
+                print(f"[DEBUG] Running out-of-bounds detection in main plugin")
+                print(f"[DEBUG] Summary data: {summary_data}")
+                out_of_bounds_detector = OutOfBoundsDetectorService(
+                    settings_manager=self._settings_manager,
+                    layer_service=self._layer_service,
+                    translation_service=self._translation_service
+                )
+                out_of_bounds_warnings = out_of_bounds_detector.detect_out_of_bounds_features()
+                print(f"[DEBUG] Out-of-bounds detection completed, found {len(out_of_bounds_warnings)} warnings")
+                for i, warning in enumerate(out_of_bounds_warnings):
+                    print(f"[DEBUG] Out-of-bounds warning {i+1}: {warning}")
+                    if hasattr(warning, 'message'):
+                        print(f"[DEBUG]   Message: {warning.message}")
+            else:
+                print(f"[DEBUG] Skipping out-of-bounds detection - no features imported")
+            
             # Create summary data
             summary = ImportSummaryData(
                 csv_points_count=summary_data.get('csv_points_count', 0),
@@ -623,6 +645,13 @@ class ArcheoSyncPlugin:
             # Add warnings to summary data
             summary.duplicate_objects_warnings = duplicate_objects_warnings
             summary.skipped_numbers_warnings = skipped_numbers_warnings
+            summary.out_of_bounds_warnings = out_of_bounds_warnings
+            
+            print(f"[DEBUG] Summary data warnings - duplicates: {len(duplicate_objects_warnings)}, skipped: {len(skipped_numbers_warnings)}, out-of-bounds: {len(out_of_bounds_warnings)}")
+            print(f"[DEBUG] Summary object attributes: {dir(summary)}")
+            print(f"[DEBUG] Summary out_of_bounds_warnings attribute: {hasattr(summary, 'out_of_bounds_warnings')}")
+            if hasattr(summary, 'out_of_bounds_warnings'):
+                print(f"[DEBUG] Summary out_of_bounds_warnings value: {summary.out_of_bounds_warnings}")
             
             # Create and show the dock widget
             dock_widget = ImportSummaryDockWidget(

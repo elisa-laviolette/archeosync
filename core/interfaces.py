@@ -339,6 +339,11 @@ class ILayerService(ABC):
         pass
     
     @abstractmethod
+    def get_layer_by_name(self, layer_name: str) -> Optional[Any]:
+        """Get a layer by its name."""
+        pass
+    
+    @abstractmethod
     def is_valid_polygon_layer(self, layer_id: str) -> bool:
         """Check if a layer is a valid polygon layer."""
         pass

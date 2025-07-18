@@ -52,10 +52,12 @@ except ImportError:
 # Import detection services at module level for testability
 DuplicateObjectsDetectorService = None
 SkippedNumbersDetectorService = None
+OutOfBoundsDetectorService = None
 
 try:
     from services.duplicate_objects_detector_service import DuplicateObjectsDetectorService
     from services.skipped_numbers_detector_service import SkippedNumbersDetectorService
+    from services.out_of_bounds_detector_service import OutOfBoundsDetectorService
 except ImportError:
     # Fallback for when running as a plugin
     try:
@@ -68,6 +70,7 @@ except ImportError:
         
         from services.duplicate_objects_detector_service import DuplicateObjectsDetectorService
         from services.skipped_numbers_detector_service import SkippedNumbersDetectorService
+        from services.out_of_bounds_detector_service import OutOfBoundsDetectorService
     except ImportError:
         # For testing purposes, these will be mocked
         pass
@@ -354,6 +357,51 @@ class ImportSummaryDockWidget(QDockWidget):
         else:
             print(f"Debug: No skipped numbers warnings found. hasattr: {hasattr(self._summary_data, 'skipped_numbers_warnings')}, warnings: {getattr(self._summary_data, 'skipped_numbers_warnings', None)}")
         
+        # Out-of-bounds warnings
+        print(f"[DEBUG] Checking out-of-bounds warnings. hasattr: {hasattr(self._summary_data, 'out_of_bounds_warnings')}, warnings: {getattr(self._summary_data, 'out_of_bounds_warnings', None)}")
+        if hasattr(self._summary_data, 'out_of_bounds_warnings') and self._summary_data.out_of_bounds_warnings:
+            print(f"[DEBUG] Displaying {len(self._summary_data.out_of_bounds_warnings)} out-of-bounds warnings")
+            warnings_layout = QtWidgets.QVBoxLayout()
+            warnings_label = QtWidgets.QLabel(self.tr("Out-of-Bounds Warnings:"))
+            warnings_label.setStyleSheet("font-weight: bold; color: #DC143C;")
+            warnings_layout.addWidget(warnings_label)
+            
+            for i, warning in enumerate(self._summary_data.out_of_bounds_warnings):
+                print(f"[DEBUG] Processing out-of-bounds warning {i+1}: {warning}")
+                print(f"[DEBUG] Warning type: {type(warning)}")
+                print(f"[DEBUG] Warning attributes: {dir(warning)}")
+                
+                warning_item_layout = QtWidgets.QHBoxLayout()
+                
+                # Warning text - check if it has the expected attributes
+                if hasattr(warning, 'message'):
+                    warning_text = warning.message
+                    print(f"[DEBUG] Using warning.message: {warning_text}")
+                else:
+                    warning_text = str(warning)
+                    print(f"[DEBUG] Using str(warning): {warning_text}")
+                
+                warning_item = QtWidgets.QLabel(f"• {warning_text}")
+                warning_item.setStyleSheet("color: #DC143C; margin-left: 10px;")
+                warning_item.setWordWrap(True)
+                warning_item_layout.addWidget(warning_item)
+                
+                # Add button if we have structured data and QGIS interface
+                if hasattr(warning, 'message') and self._iface:
+                    button = QtWidgets.QPushButton(self.tr("Select and Show Entities"))
+                    button.setStyleSheet("background-color: #DC143C; color: white; border: none; padding: 5px; border-radius: 3px;")
+                    button.clicked.connect(lambda checked, w=warning: self._open_filtered_attribute_table(w))
+                    warning_item_layout.addWidget(button)
+                
+                warning_item_layout.addStretch()
+                warnings_layout.addLayout(warning_item_layout)
+            
+            layout.addLayout(warnings_layout)
+        else:
+            print(f"[DEBUG] No out-of-bounds warnings to display")
+            print(f"[DEBUG] Summary data attributes: {dir(self._summary_data)}")
+            print(f"[DEBUG] Summary data dict: {self._summary_data.__dict__}")
+        
         return group
     
     def _create_small_finds_section(self) -> QtWidgets.QGroupBox:
@@ -453,13 +501,15 @@ class ImportSummaryDockWidget(QDockWidget):
         """Check if there are any warnings present in the summary data."""
         duplicate_warnings = getattr(self._summary_data, 'duplicate_objects_warnings', [])
         skipped_warnings = getattr(self._summary_data, 'skipped_numbers_warnings', [])
+        out_of_bounds_warnings = getattr(self._summary_data, 'out_of_bounds_warnings', [])
         
-        return len(duplicate_warnings) > 0 or len(skipped_warnings) > 0
+        return len(duplicate_warnings) > 0 or len(skipped_warnings) > 0 or len(out_of_bounds_warnings) > 0
     
     def _confirm_validation_with_warnings(self) -> bool:
         """Show confirmation dialog when warnings are present."""
         duplicate_count = len(getattr(self._summary_data, 'duplicate_objects_warnings', []))
         skipped_count = len(getattr(self._summary_data, 'skipped_numbers_warnings', []))
+        out_of_bounds_count = len(getattr(self._summary_data, 'out_of_bounds_warnings', []))
         
         # Build warning summary message
         warning_summary = []
@@ -467,6 +517,8 @@ class ImportSummaryDockWidget(QDockWidget):
             warning_summary.append(self.tr(f"• {duplicate_count} duplicate object warning(s)"))
         if skipped_count > 0:
             warning_summary.append(self.tr(f"• {skipped_count} skipped numbers warning(s)"))
+        if out_of_bounds_count > 0:
+            warning_summary.append(self.tr(f"• {out_of_bounds_count} out-of-bounds warning(s)"))
         
         warning_message = "\n".join(warning_summary)
         
@@ -558,14 +610,44 @@ class ImportSummaryDockWidget(QDockWidget):
                 for warning in skipped_numbers_warnings:
                     print(f"Debug: Skipped warning: {warning}")
             
+            # Re-run out-of-bounds detection if any features were imported
+            out_of_bounds_warnings = []
+            if (self._summary_data.objects_count > 0 or 
+                self._summary_data.features_count > 0 or 
+                self._summary_data.small_finds_count > 0):
+                print(f"[DEBUG] Running out-of-bounds detection")
+                try:
+                    from services.out_of_bounds_detector_service import OutOfBoundsDetectorService
+                except ImportError:
+                    # Fallback for relative import
+                    import sys
+                    import os
+                    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+                    from services.out_of_bounds_detector_service import OutOfBoundsDetectorService
+                
+                out_of_bounds_detector = OutOfBoundsDetectorService(
+                    settings_manager=self._settings_manager,
+                    layer_service=self._layer_service,
+                    translation_service=self._translation_service
+                )
+                out_of_bounds_warnings = out_of_bounds_detector.detect_out_of_bounds_features()
+                print(f"[DEBUG] Detected {len(out_of_bounds_warnings)} out-of-bounds warnings")
+                for i, warning in enumerate(out_of_bounds_warnings):
+                    print(f"[DEBUG] Out-of-bounds warning {i+1}: {warning}")
+                    if hasattr(warning, 'message'):
+                        print(f"[DEBUG]   Message: {warning.message}")
+            else:
+                print(f"[DEBUG] Skipping out-of-bounds detection - no features imported")
+            
             # Update the summary data with new warnings
-            print(f"Debug: Updating summary data with {len(duplicate_objects_warnings)} duplicates and {len(skipped_numbers_warnings)} skipped")
+            print(f"[DEBUG] Updating summary data with {len(duplicate_objects_warnings)} duplicates, {len(skipped_numbers_warnings)} skipped, and {len(out_of_bounds_warnings)} out-of-bounds")
             self._summary_data.duplicate_objects_warnings = duplicate_objects_warnings
             self._summary_data.skipped_numbers_warnings = skipped_numbers_warnings
-            print(f"Debug: Summary data now has {len(self._summary_data.duplicate_objects_warnings)} duplicates and {len(self._summary_data.skipped_numbers_warnings)} skipped")
+            self._summary_data.out_of_bounds_warnings = out_of_bounds_warnings
+            print(f"[DEBUG] Summary data now has {len(self._summary_data.duplicate_objects_warnings)} duplicates, {len(self._summary_data.skipped_numbers_warnings)} skipped, and {len(self._summary_data.out_of_bounds_warnings)} out-of-bounds")
             
             # Recreate the UI to show updated warnings
-            print("Debug: Recreating summary content")
+            print("[DEBUG] Recreating summary content")
             self._recreate_summary_content()
             
             # Show success message
@@ -954,14 +1036,32 @@ class ImportSummaryDockWidget(QDockWidget):
                 print(f"Layer '{warning_data.layer_name}' not found in project")
                 return
             
+            # Apply the filter expression
+            print(f"[DEBUG] Applying filter expression: {warning_data.filter_expression}")
+            print(f"[DEBUG] Layer name: {warning_data.layer_name}")
+            
+            # Get the layer
+            layer = self._layer_service.get_layer_by_name(warning_data.layer_name)
+            if not layer:
+                print(f"[DEBUG] ERROR: Layer '{warning_data.layer_name}' not found!")
+                return
+            
+            print(f"[DEBUG] Found layer: {layer.name()}, feature count: {layer.featureCount()}")
+            
             # Clear any existing selection
-            target_layer.removeSelection()
+            layer.removeSelection()
             
             # Select the concerned entities
-            target_layer.selectByExpression(warning_data.filter_expression)
+            print(f"[DEBUG] Selecting features with expression: {warning_data.filter_expression}")
+            selected_count = layer.selectByExpression(warning_data.filter_expression)
+            print(f"[DEBUG] Selected {selected_count} features")
+            
+            # Get the selected features to verify
+            selected_features = layer.selectedFeatures()
+            print(f"[DEBUG] Selected feature IDs: {[f.id() for f in selected_features]}")
             
             # Set the layer as active
-            self._iface.setActiveLayer(target_layer)
+            self._iface.setActiveLayer(layer)
             
             # Open the attribute table
             self._iface.actionOpenTable().trigger()
