@@ -402,6 +402,49 @@ class ImportSummaryDockWidget(QDockWidget):
             print(f"[DEBUG] Summary data attributes: {dir(self._summary_data)}")
             print(f"[DEBUG] Summary data dict: {self._summary_data.__dict__}")
         
+        # Distance warnings
+        print(f"[DEBUG] Checking distance warnings. hasattr: {hasattr(self._summary_data, 'distance_warnings')}, warnings: {getattr(self._summary_data, 'distance_warnings', None)}")
+        if hasattr(self._summary_data, 'distance_warnings') and self._summary_data.distance_warnings:
+            print(f"[DEBUG] Displaying {len(self._summary_data.distance_warnings)} distance warnings")
+            warnings_layout = QtWidgets.QVBoxLayout()
+            warnings_label = QtWidgets.QLabel(self.tr("Distance Warnings:"))
+            warnings_label.setStyleSheet("font-weight: bold; color: #DC143C;")
+            warnings_layout.addWidget(warnings_label)
+            
+            for i, warning in enumerate(self._summary_data.distance_warnings):
+                print(f"[DEBUG] Processing distance warning {i+1}: {warning}")
+                print(f"[DEBUG] Warning type: {type(warning)}")
+                print(f"[DEBUG] Warning attributes: {dir(warning)}")
+                
+                warning_item_layout = QtWidgets.QHBoxLayout()
+                
+                # Warning text - check if it has the expected attributes
+                if hasattr(warning, 'message'):
+                    warning_text = warning.message
+                    print(f"[DEBUG] Using warning.message: {warning_text}")
+                else:
+                    warning_text = str(warning)
+                    print(f"[DEBUG] Using str(warning): {warning_text}")
+                
+                warning_item = QtWidgets.QLabel(f"• {warning_text}")
+                warning_item.setStyleSheet("color: #DC143C; margin-left: 10px;")
+                warning_item.setWordWrap(True)
+                warning_item_layout.addWidget(warning_item)
+                
+                # Add button if we have structured data and QGIS interface
+                if hasattr(warning, 'message') and self._iface:
+                    button = QtWidgets.QPushButton(self.tr("Select and Show Entities"))
+                    button.setStyleSheet("background-color: #DC143C; color: white; border: none; padding: 5px; border-radius: 3px;")
+                    button.clicked.connect(lambda checked, w=warning: self._open_both_filtered_attribute_tables(w))
+                    warning_item_layout.addWidget(button)
+                
+                warning_item_layout.addStretch()
+                warnings_layout.addLayout(warning_item_layout)
+            
+            layout.addLayout(warnings_layout)
+        else:
+            print(f"[DEBUG] No distance warnings to display")
+        
         return group
     
     def _create_small_finds_section(self) -> QtWidgets.QGroupBox:
@@ -502,14 +545,16 @@ class ImportSummaryDockWidget(QDockWidget):
         duplicate_warnings = getattr(self._summary_data, 'duplicate_objects_warnings', [])
         skipped_warnings = getattr(self._summary_data, 'skipped_numbers_warnings', [])
         out_of_bounds_warnings = getattr(self._summary_data, 'out_of_bounds_warnings', [])
+        distance_warnings = getattr(self._summary_data, 'distance_warnings', [])
         
-        return len(duplicate_warnings) > 0 or len(skipped_warnings) > 0 or len(out_of_bounds_warnings) > 0
+        return len(duplicate_warnings) > 0 or len(skipped_warnings) > 0 or len(out_of_bounds_warnings) > 0 or len(distance_warnings) > 0
     
     def _confirm_validation_with_warnings(self) -> bool:
         """Show confirmation dialog when warnings are present."""
         duplicate_count = len(getattr(self._summary_data, 'duplicate_objects_warnings', []))
         skipped_count = len(getattr(self._summary_data, 'skipped_numbers_warnings', []))
         out_of_bounds_count = len(getattr(self._summary_data, 'out_of_bounds_warnings', []))
+        distance_count = len(getattr(self._summary_data, 'distance_warnings', []))
         
         # Build warning summary message
         warning_summary = []
@@ -519,6 +564,8 @@ class ImportSummaryDockWidget(QDockWidget):
             warning_summary.append(self.tr(f"• {skipped_count} skipped numbers warning(s)"))
         if out_of_bounds_count > 0:
             warning_summary.append(self.tr(f"• {out_of_bounds_count} out-of-bounds warning(s)"))
+        if distance_count > 0:
+            warning_summary.append(self.tr(f"• {distance_count} distance warning(s)"))
         
         warning_message = "\n".join(warning_summary)
         
@@ -639,12 +686,41 @@ class ImportSummaryDockWidget(QDockWidget):
             else:
                 print(f"[DEBUG] Skipping out-of-bounds detection - no features imported")
             
+            # Re-run distance detection if both total station points and objects were imported
+            distance_warnings = []
+            if (self._summary_data.csv_points_count > 0 and 
+                self._summary_data.objects_count > 0):
+                print(f"[DEBUG] Running distance detection")
+                try:
+                    from services.distance_detector_service import DistanceDetectorService
+                except ImportError:
+                    # Fallback for relative import
+                    import sys
+                    import os
+                    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+                    from services.distance_detector_service import DistanceDetectorService
+                
+                distance_detector = DistanceDetectorService(
+                    settings_manager=self._settings_manager,
+                    layer_service=self._layer_service,
+                    translation_service=self._translation_service
+                )
+                distance_warnings = distance_detector.detect_distance_warnings()
+                print(f"[DEBUG] Detected {len(distance_warnings)} distance warnings")
+                for i, warning in enumerate(distance_warnings):
+                    print(f"[DEBUG] Distance warning {i+1}: {warning}")
+                    if hasattr(warning, 'message'):
+                        print(f"[DEBUG]   Message: {warning.message}")
+            else:
+                print(f"[DEBUG] Skipping distance detection - missing total station points or objects")
+            
             # Update the summary data with new warnings
-            print(f"[DEBUG] Updating summary data with {len(duplicate_objects_warnings)} duplicates, {len(skipped_numbers_warnings)} skipped, and {len(out_of_bounds_warnings)} out-of-bounds")
+            print(f"[DEBUG] Updating summary data with {len(duplicate_objects_warnings)} duplicates, {len(skipped_numbers_warnings)} skipped, {len(out_of_bounds_warnings)} out-of-bounds, and {len(distance_warnings)} distance")
             self._summary_data.duplicate_objects_warnings = duplicate_objects_warnings
             self._summary_data.skipped_numbers_warnings = skipped_numbers_warnings
             self._summary_data.out_of_bounds_warnings = out_of_bounds_warnings
-            print(f"[DEBUG] Summary data now has {len(self._summary_data.duplicate_objects_warnings)} duplicates, {len(self._summary_data.skipped_numbers_warnings)} skipped, and {len(self._summary_data.out_of_bounds_warnings)} out-of-bounds")
+            self._summary_data.distance_warnings = distance_warnings
+            print(f"[DEBUG] Summary data now has {len(self._summary_data.duplicate_objects_warnings)} duplicates, {len(self._summary_data.skipped_numbers_warnings)} skipped, {len(self._summary_data.out_of_bounds_warnings)} out-of-bounds, and {len(self._summary_data.distance_warnings)} distance")
             
             # Recreate the UI to show updated warnings
             print("[DEBUG] Recreating summary content")

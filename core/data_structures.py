@@ -20,6 +20,8 @@ class WarningData:
     second_filter_expression: Optional[str] = None
     # Fields for out-of-bounds warnings
     out_of_bounds_features: Optional[List[dict]] = None
+    # Fields for distance warnings
+    distance_issues: Optional[List[dict]] = None
 
 
 @dataclass
@@ -36,6 +38,7 @@ class ImportSummaryData:
     duplicate_objects_warnings: List[Union[str, WarningData]] = None
     skipped_numbers_warnings: List[Union[str, WarningData]] = None
     out_of_bounds_warnings: List[Union[str, WarningData]] = None
+    distance_warnings: List[Union[str, WarningData]] = None
     
     def __post_init__(self):
         """Initialize default values for mutable fields."""
@@ -44,4 +47,6 @@ class ImportSummaryData:
         if self.skipped_numbers_warnings is None:
             self.skipped_numbers_warnings = []
         if self.out_of_bounds_warnings is None:
-            self.out_of_bounds_warnings = [] 
+            self.out_of_bounds_warnings = []
+        if self.distance_warnings is None:
+            self.distance_warnings = [] 

@@ -587,6 +587,7 @@ class ArcheoSyncPlugin:
             from .services.duplicate_objects_detector_service import DuplicateObjectsDetectorService
             from .services.skipped_numbers_detector_service import SkippedNumbersDetectorService
             from .services.out_of_bounds_detector_service import OutOfBoundsDetectorService
+            from .services.distance_detector_service import DistanceDetectorService
             from qgis.PyQt.QtCore import Qt
             
             # Detect duplicate objects if objects were imported
@@ -630,6 +631,25 @@ class ArcheoSyncPlugin:
             else:
                 print(f"[DEBUG] Skipping out-of-bounds detection - no features imported")
             
+            # Detect distance warnings if both total station points and objects were imported
+            distance_warnings = []
+            if (summary_data.get('csv_points_count', 0) > 0 and 
+                summary_data.get('objects_count', 0) > 0):
+                print(f"[DEBUG] Running distance detection in main plugin")
+                distance_detector = DistanceDetectorService(
+                    settings_manager=self._settings_manager,
+                    layer_service=self._layer_service,
+                    translation_service=self._translation_service
+                )
+                distance_warnings = distance_detector.detect_distance_warnings()
+                print(f"[DEBUG] Distance detection completed, found {len(distance_warnings)} warnings")
+                for i, warning in enumerate(distance_warnings):
+                    print(f"[DEBUG] Distance warning {i+1}: {warning}")
+                    if hasattr(warning, 'message'):
+                        print(f"[DEBUG]   Message: {warning.message}")
+            else:
+                print(f"[DEBUG] Skipping distance detection - missing total station points or objects")
+            
             # Create summary data
             summary = ImportSummaryData(
                 csv_points_count=summary_data.get('csv_points_count', 0),
@@ -646,6 +666,7 @@ class ArcheoSyncPlugin:
             summary.duplicate_objects_warnings = duplicate_objects_warnings
             summary.skipped_numbers_warnings = skipped_numbers_warnings
             summary.out_of_bounds_warnings = out_of_bounds_warnings
+            summary.distance_warnings = distance_warnings
             
             print(f"[DEBUG] Summary data warnings - duplicates: {len(duplicate_objects_warnings)}, skipped: {len(skipped_numbers_warnings)}, out-of-bounds: {len(out_of_bounds_warnings)}")
             print(f"[DEBUG] Summary object attributes: {dir(summary)}")
