@@ -250,6 +250,13 @@ Dialog for managing plugin configuration with:
   - **Folders Tab**: All folder-related settings (field projects, total station, archives)
   - **Layers Tab**: Layer selection, field configuration, and extra layers
   - **Raster Tab**: Raster processing configuration (clipping offset, brightness, contrast, saturation)
+- **Layer Configuration**: Comprehensive layer management for archaeological data
+  - **Recording Areas Layer**: Polygon layer for archaeological recording areas
+  - **Objects Layer**: Polygon/multipolygon layer for archaeological objects with number and level field configuration
+  - **Features Layer**: Polygon/multipolygon layer for archaeological features
+  - **Small Finds Layer**: Point/multipoint or no geometry layer for small finds
+  - **Total Station Points Layer**: Point/multipoint layer for total station survey points
+  - **Extra Layers**: Additional vector layers to include in field projects
 - Archive folder configuration for CSV files and QField projects
 - Folder selection widgets with browse functionality
 - Real-time validation of archive folder paths
@@ -300,6 +307,16 @@ Dialog for displaying comprehensive import statistics after successful data impo
   - **Multi-Layer Detection**: Detects duplicates within "New Objects" layer, original "Objects" layer, and between both layers
   - **Detailed Information**: Shows specific recording area names and object numbers for each duplicate
   - **User-Friendly Display**: Color-coded warnings in orange for easy identification
+- **Validation and Layer Copying**: Feature validation and copying workflow
+  - **Validate Button**: Replaces "OK" button to initiate feature validation process
+  - **Automatic Copying**: Copies features from temporary layers to configured definitive layers
+    - "New Objects" → configured Objects layer
+    - "New Features" → configured Features layer
+    - "New Small Finds" → configured Small Finds layer
+    - "Imported_CSV_Points" → configured Total Station Points layer
+  - **Edit Mode Management**: Keeps definitive layers in edit mode for user review
+  - **Feature Selection**: Automatically selects newly copied features for easy identification
+  - **User Control**: Allows users to save or cancel changes as needed
 - **User-Friendly Interface**: Clean, organized dialog with intuitive design
   - **Organized Sections**: Clear sections for each data type with descriptive headings
   - **Scrollable Content**: Handles large amounts of data with scrollable area

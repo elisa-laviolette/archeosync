@@ -172,7 +172,7 @@ class QGISLayerService(ILayerService):
     def get_point_and_multipoint_layers(self) -> List[Dict[str, Any]]:
         """
         Get all point and multipoint layers from the current QGIS project.
-        This method is specifically for small finds layers which can be
+        This method is specifically for total station points layers which can be
         either point or multipoint geometry types.
         
         Returns:
@@ -183,8 +183,8 @@ class QGISLayerService(ILayerService):
         
         for layer in project.mapLayers().values():
             # Check if it's a vector layer with point or multipoint geometry
-            # Geometry types: 1 = Point/MultiPoint
-            if isinstance(layer, QgsVectorLayer) and layer.geometryType() == 1:
+            # Geometry types: 0 = Point/MultiPoint (QgsWkbTypes.PointGeometry)
+            if isinstance(layer, QgsVectorLayer) and layer.geometryType() == 0:
                 layer_info = {
                     'id': layer.id(),
                     'name': layer.name(),
@@ -317,7 +317,7 @@ class QGISLayerService(ILayerService):
     def is_valid_point_or_multipoint_layer(self, layer_id: str) -> bool:
         """
         Check if a layer is a valid point or multipoint layer.
-        This method is specifically for small finds layers.
+        This method is specifically for total station points layers.
         
         Args:
             layer_id: The layer ID to check
@@ -329,8 +329,8 @@ class QGISLayerService(ILayerService):
         if layer is None:
             return False
         
-        # Geometry types: 1 = Point/MultiPoint
-        return layer.geometryType() == 1
+        # Geometry types: 0 = Point/MultiPoint (QgsWkbTypes.PointGeometry)
+        return layer.geometryType() == 0
 
     def is_valid_no_geometry_layer(self, layer_id: str) -> bool:
         """

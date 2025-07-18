@@ -6,12 +6,19 @@ All notable changes to the ArcheoSync QGIS plugin will be documented in this fil
 
 ### New Features
 
+- **Total Station Points Layer Configuration**: Added configuration for total station points layer
+  - **Layer Selection**: Configure a point or multipoint layer for total station points in settings
+  - **Validation**: Comprehensive validation ensuring the selected layer is a valid point/multipoint layer
+  - **Import Integration**: Total station points from CSV imports are automatically copied to the configured layer during validation
+  - **Translation Support**: Full internationalization with French translations for UI elements
+
 - **Import Summary Validation**: Enhanced import summary dialog with validation functionality
   - **Validate Button**: Replaced "OK" button with "Validate" button for feature validation workflow
   - **Feature Copying**: Automatically copies features from temporary layers to definitive layers
     - Copies from "New Objects" to configured Objects layer
     - Copies from "New Features" to configured Features layer  
     - Copies from "New Small Finds" to configured Small Finds layer
+    - Copies from "Imported_CSV_Points" to configured Total Station Points layer
   - **Edit Mode Preservation**: Keeps definitive layers in edit mode after copying for continued editing
   - **Success Feedback**: Shows summary message with count of copied features for each layer type
   - **Error Handling**: Comprehensive error handling with user-friendly error messages

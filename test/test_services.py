@@ -1643,6 +1643,7 @@ class TestArcheoSyncConfigurationValidator(unittest.TestCase):
         # Mock layer service for valid layers but no relationships
         self.layer_service.is_valid_polygon_layer.return_value = True
         self.layer_service.is_valid_polygon_or_multipolygon_layer.return_value = True
+        self.layer_service.is_valid_point_or_multipoint_layer.return_value = True
         self.layer_service.get_layer_info.return_value = {
             'id': 'test_layer',
             'name': 'Test Layer',
@@ -1661,6 +1662,7 @@ class TestArcheoSyncConfigurationValidator(unittest.TestCase):
             'field_projects_folder': '/valid/path',
             'total_station_folder': '/valid/path',
             'completed_projects_folder': '/valid/path',
+            'total_station_points_layer': 'test_points_layer',
             'raster_brightness': 50,
             'raster_contrast': 25,
             'raster_saturation': -10
@@ -1674,6 +1676,7 @@ class TestArcheoSyncConfigurationValidator(unittest.TestCase):
         self.assertIn('field_projects_folder', results)
         self.assertIn('total_station_folder', results)
         self.assertIn('completed_projects_folder', results)
+        self.assertIn('total_station_points_layer', results)
         self.assertIn('raster_brightness', results)
         self.assertIn('raster_contrast', results)
         self.assertIn('raster_saturation', results)
@@ -2071,6 +2074,78 @@ class TestArcheoSyncConfigurationValidator(unittest.TestCase):
         errors = self.validator.validate_raster_saturation(-150)
         self.assertEqual(len(errors), 1)
         self.assertIn("Saturation value must be between -100 and 100", errors[0])
+
+    def test_validate_total_station_points_layer_valid(self):
+        """Test validation of valid total station points layer."""
+        # Mock layer service for valid point layer
+        self.layer_service.is_valid_point_or_multipoint_layer.return_value = True
+        self.layer_service.get_layer_info.return_value = {
+            'id': 'test_layer',
+            'name': 'Test Points Layer',
+            'is_valid': True
+        }
+        
+        result = self.validator.validate_total_station_points_layer('test_layer')
+        
+        self.assertEqual(result, [])
+        self.layer_service.is_valid_point_or_multipoint_layer.assert_called_once_with('test_layer')
+        self.layer_service.get_layer_info.assert_called_once_with('test_layer')
+    
+    def test_validate_total_station_points_layer_empty(self):
+        """Test validation of empty total station points layer (should be valid)."""
+        result = self.validator.validate_total_station_points_layer('')
+        
+        self.assertEqual(result, [])
+    
+    def test_validate_total_station_points_layer_invalid_geometry(self):
+        """Test validation of total station points layer with invalid geometry type."""
+        # Mock layer service for invalid geometry type
+        self.layer_service.is_valid_point_or_multipoint_layer.return_value = False
+        self.layer_service.get_layer_info.return_value = {
+            'id': 'test_layer',
+            'name': 'Test Polygon Layer',
+            'is_valid': True
+        }
+        
+        result = self.validator.validate_total_station_points_layer('test_layer')
+        
+        self.assertEqual(len(result), 1)
+        self.assertIn("not a valid point/multipoint layer", result[0])
+    
+    def test_validate_total_station_points_layer_not_found(self):
+        """Test validation of total station points layer that doesn't exist."""
+        # Mock layer service for non-existent layer
+        self.layer_service.is_valid_point_or_multipoint_layer.return_value = True
+        self.layer_service.get_layer_info.return_value = None
+        
+        result = self.validator.validate_total_station_points_layer('nonexistent_layer')
+        
+        self.assertEqual(len(result), 1)
+        self.assertIn("Layer not found", result[0])
+    
+    def test_validate_total_station_points_layer_invalid_layer(self):
+        """Test validation of total station points layer that is invalid."""
+        # Mock layer service for invalid layer
+        self.layer_service.is_valid_point_or_multipoint_layer.return_value = True
+        self.layer_service.get_layer_info.return_value = {
+            'id': 'test_layer',
+            'name': 'Test Invalid Layer',
+            'is_valid': False
+        }
+        
+        result = self.validator.validate_total_station_points_layer('test_layer')
+        
+        self.assertEqual(len(result), 1)
+        self.assertIn("not valid", result[0])
+    
+    def test_validate_total_station_points_layer_no_service(self):
+        """Test validation of total station points layer without layer service."""
+        validator = ArcheoSyncConfigurationValidator(self.file_system_service, None)
+        
+        result = validator.validate_total_station_points_layer('test_layer')
+        
+        self.assertEqual(len(result), 1)
+        self.assertIn("Layer service not available", result[0])
 
 
 if __name__ == '__main__':

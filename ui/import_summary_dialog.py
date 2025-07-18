@@ -755,7 +755,8 @@ class ImportSummaryDockWidget(QDockWidget):
             layer_mappings = {
                 "New Objects": "objects_layer",
                 "New Features": "features_layer", 
-                "New Small Finds": "small_finds_layer"
+                "New Small Finds": "small_finds_layer",
+                "Imported_CSV_Points": "total_station_points_layer"
             }
             
             copied_counts = {}

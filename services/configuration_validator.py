@@ -334,6 +334,40 @@ class ArcheoSyncConfigurationValidator(IConfigurationValidator):
             errors.append(f"Selected layer is not valid: {layer_info.get('name', layer_id)}")
         
         return errors
+
+    def validate_total_station_points_layer(self, layer_id: str) -> List[str]:
+        """
+        Validate total station points layer configuration.
+        
+        Args:
+            layer_id: Layer ID to validate
+            
+        Returns:
+            List of validation error messages (empty if valid)
+        """
+        errors = []
+        
+        if not layer_id:
+            # Total station points layer is optional, so no error if not set
+            return errors
+        
+        if not self._layer_service:
+            errors.append("Layer service not available for validation")
+            return errors
+        
+        # Check if it's a valid point/multipoint layer
+        is_valid_point = self._layer_service.is_valid_point_or_multipoint_layer(layer_id)
+        
+        if not is_valid_point:
+            errors.append(f"Selected layer is not a valid point/multipoint layer: {layer_id}")
+        
+        layer_info = self._layer_service.get_layer_info(layer_id)
+        if not layer_info:
+            errors.append(f"Layer not found in current project: {layer_id}")
+        elif not layer_info.get('is_valid', False):
+            errors.append(f"Selected layer is not valid: {layer_info.get('name', layer_id)}")
+        
+        return errors
     
     def validate_objects_layer_fields(self, layer_id: str, number_field: Optional[str], level_field: Optional[str]) -> ValidationResult:
         """
@@ -525,6 +559,11 @@ class ArcheoSyncConfigurationValidator(IConfigurationValidator):
         if 'small_finds_layer' in settings:
             validation_results['small_finds_layer'] = self.validate_small_finds_layer(
                 settings['small_finds_layer']
+            )
+        
+        if 'total_station_points_layer' in settings:
+            validation_results['total_station_points_layer'] = self.validate_total_station_points_layer(
+                settings['total_station_points_layer']
             )
         
         # Validate layer relationships if layers are configured

@@ -207,11 +207,11 @@ class SettingsDialog(QtWidgets.QDialog):
         form_layout = QtWidgets.QFormLayout()
         
         # Recording areas layer
-        self._recording_areas_widget = self._create_layer_selector()
+        self._recording_areas_widget = self._create_layer_selector(self.tr("-- Select a polygon layer --"))
         form_layout.addRow(self.tr("Recording Areas Layer:"), self._recording_areas_widget)
         
         # Objects layer
-        self._objects_widget = self._create_layer_selector()
+        self._objects_widget = self._create_layer_selector(self.tr("-- Select a polygon or multipolygon layer --"))
         form_layout.addRow(self.tr("Objects Layer:"), self._objects_widget)
         
         # Objects layer field selections (initially hidden)
@@ -219,12 +219,16 @@ class SettingsDialog(QtWidgets.QDialog):
         form_layout.addRow("", self._objects_fields_widget)  # Empty label for indentation
         
         # Features layer
-        self._features_widget = self._create_layer_selector()
+        self._features_widget = self._create_layer_selector(self.tr("-- Select a polygon or multipolygon layer --"))
         form_layout.addRow(self.tr("Features Layer:"), self._features_widget)
         
         # Small finds layer
-        self._small_finds_widget = self._create_layer_selector()
+        self._small_finds_widget = self._create_layer_selector(self.tr("-- Select a point, multipoint, or no geometry layer --"))
         form_layout.addRow(self.tr("Small Finds Layer:"), self._small_finds_widget)
+        
+        # Total station points layer
+        self._total_station_points_widget = self._create_layer_selector(self.tr("-- Select a point or multipoint layer --"))
+        form_layout.addRow(self.tr("Total Station Points Layer:"), self._total_station_points_widget)
         
         # Extra layers for field projects
         self._extra_layers_widget = self._create_extra_layers_widget()
@@ -308,7 +312,7 @@ class SettingsDialog(QtWidgets.QDialog):
         
         return widget
     
-    def _create_layer_selector(self) -> QtWidgets.QWidget:
+    def _create_layer_selector(self, placeholder: str = None) -> QtWidgets.QWidget:
         """Create a layer selection widget."""
         widget = QtWidgets.QWidget()
         layout = QtWidgets.QHBoxLayout(widget)
@@ -317,11 +321,14 @@ class SettingsDialog(QtWidgets.QDialog):
         # Combo box for layer selection
         combo_box = QtWidgets.QComboBox()
         combo_box.setMinimumWidth(300)
-        combo_box.addItem(self.tr("-- Select a polygon layer --"), "")
+        if placeholder:
+            combo_box.addItem(placeholder, "")
+        else:
+            combo_box.addItem(self.tr("-- Select a polygon layer --"), "")
         
         # Refresh button
         refresh_button = QtWidgets.QPushButton(self.tr("Refresh"))
-        refresh_button.setToolTip(self.tr("Refresh the list of available polygon layers"))
+        refresh_button.setToolTip(self.tr("Refresh the list of available layers"))
         
         layout.addWidget(combo_box)
         layout.addWidget(refresh_button)
@@ -494,6 +501,7 @@ class SettingsDialog(QtWidgets.QDialog):
         self._objects_widget.combo_box.currentIndexChanged.connect(self._on_objects_layer_changed)
         self._features_widget.refresh_button.clicked.connect(self._refresh_features_layer_list)
         self._small_finds_widget.refresh_button.clicked.connect(self._refresh_small_finds_layer_list)
+        self._total_station_points_widget.refresh_button.clicked.connect(self._refresh_total_station_points_layer_list)
         # Extra layers connections
         self._extra_layers_widget.refresh_button.clicked.connect(self._refresh_extra_layers_list)
         # No slider signal connections needed for spinboxes
@@ -622,6 +630,36 @@ class SettingsDialog(QtWidgets.QDialog):
             
         except Exception as e:
             self._show_error(self.tr("Layer Error"), self.tr(f"Failed to refresh small finds layer list: {str(e)}"))
+
+    def _refresh_total_station_points_layer_list(self) -> None:
+        """Refresh the list of available point and multipoint layers for total station points."""
+        try:
+            combo_box = self._total_station_points_widget.combo_box
+            current_layer_id = combo_box.currentData()
+            
+            # Clear existing items except the first placeholder
+            combo_box.clear()
+            combo_box.addItem(self.tr("-- Select a point or multipoint layer --"), "")
+            
+            # Get point and multipoint layers from the service
+            point_layers = self._layer_service.get_point_and_multipoint_layers()
+            
+            # Sort layers by name
+            point_layers.sort(key=lambda x: x['name'].lower())
+            
+            # Add layers to combo box
+            for layer_info in point_layers:
+                display_text = self.tr(f"{layer_info['name']} ({layer_info['feature_count']} features)")
+                combo_box.addItem(display_text, layer_info['id'])
+            
+            # Restore previously selected layer if it still exists
+            if current_layer_id:
+                index = combo_box.findData(current_layer_id)
+                if index >= 0:
+                    combo_box.setCurrentIndex(index)
+            
+        except Exception as e:
+            self._show_error(self.tr("Layer Error"), self.tr(f"Failed to refresh total station points layer list: {str(e)}"))
     
     def _refresh_extra_layers_list(self) -> None:
         """Refresh the list of available vector layers for extra QField layers."""
@@ -784,6 +822,14 @@ class SettingsDialog(QtWidgets.QDialog):
                 if index >= 0:
                     self._small_finds_widget.combo_box.setCurrentIndex(index)
             
+            # Load total station points layer
+            total_station_points_layer_id = self._settings_manager.get_value('total_station_points_layer', '')
+            self._refresh_total_station_points_layer_list()  # Populate the combo box
+            if total_station_points_layer_id:
+                index = self._total_station_points_widget.combo_box.findData(total_station_points_layer_id)
+                if index >= 0:
+                    self._total_station_points_widget.combo_box.setCurrentIndex(index)
+            
 
             
             # Load raster clipping offset
@@ -827,6 +873,7 @@ class SettingsDialog(QtWidgets.QDialog):
                 'objects_level_field': self._settings_manager.get_value('objects_level_field', ''),
                 'features_layer': features_layer_id,
                 'small_finds_layer': small_finds_layer_id,
+                'total_station_points_layer': total_station_points_layer_id,
 
                 'raster_clipping_offset': float(raster_offset),
                 'raster_brightness': int(brightness),
@@ -855,6 +902,7 @@ class SettingsDialog(QtWidgets.QDialog):
                 'objects_level_field': self._level_field_combo.currentData(),
                 'features_layer': self._features_widget.combo_box.currentData(),
                 'small_finds_layer': self._small_finds_widget.combo_box.currentData(),
+                'total_station_points_layer': self._total_station_points_widget.combo_box.currentData(),
 
                 'raster_clipping_offset': self._raster_offset_spinbox.value(),
                 'raster_brightness': self._sliders['Brightness'].value(),
@@ -959,6 +1007,28 @@ class SettingsDialog(QtWidgets.QDialog):
                     self._features_widget.combo_box.setCurrentIndex(0)
             else:
                 self._features_widget.combo_box.setCurrentIndex(0)
+            
+            # Revert small finds layer selection
+            small_finds_layer_id = self._original_values.get('small_finds_layer', '')
+            if small_finds_layer_id:
+                index = self._small_finds_widget.combo_box.findData(small_finds_layer_id)
+                if index >= 0:
+                    self._small_finds_widget.combo_box.setCurrentIndex(index)
+                else:
+                    self._small_finds_widget.combo_box.setCurrentIndex(0)
+            else:
+                self._small_finds_widget.combo_box.setCurrentIndex(0)
+            
+            # Revert total station points layer selection
+            total_station_points_layer_id = self._original_values.get('total_station_points_layer', '')
+            if total_station_points_layer_id:
+                index = self._total_station_points_widget.combo_box.findData(total_station_points_layer_id)
+                if index >= 0:
+                    self._total_station_points_widget.combo_box.setCurrentIndex(index)
+                else:
+                    self._total_station_points_widget.combo_box.setCurrentIndex(0)
+            else:
+                self._total_station_points_widget.combo_box.setCurrentIndex(0)
             
             # Revert settings in manager
             for key, value in self._original_values.items():

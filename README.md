@@ -62,6 +62,7 @@ A QGIS plugin for archaeologists to prepare data for field work and import it ba
    - **Objects Layer**: Select the layer for archaeological objects
    - **Features Layer**: Select the layer for archaeological features
    - **Small Finds Layer**: Select the layer for small finds (supports point, multipoint, and no geometry types)
+   - **Total Station Points Layer**: Select the layer for total station points (supports point and multipoint types)
    - **Objects Field Configuration**: Configure number and level fields for the objects layer
    - **Extra Layers for Field Projects**: Select additional vector layers to include in field projects
 
@@ -148,6 +149,17 @@ After successful import, the plugin displays a comprehensive summary dialog show
   - Detects duplicates between both layers
   - Shows specific recording area names and object numbers for each duplicate
   - Color-coded warnings in orange for easy identification
+
+#### Validation and Layer Copying
+When you click the "Validate" button in the import summary dialog:
+- **Feature Copying**: Features are automatically copied from temporary layers to your configured definitive layers:
+  - "New Objects" → configured Objects layer
+  - "New Features" → configured Features layer
+  - "New Small Finds" → configured Small Finds layer
+  - "Imported_CSV_Points" → configured Total Station Points layer
+- **Edit Mode**: The definitive layers are kept in edit mode for review
+- **Feature Selection**: Newly copied features are automatically selected for easy identification
+- **User Control**: You can save or cancel the changes as needed
 - **Validation Button**: "Validate" button to copy features from temporary to definitive layers
   - Copies features from "New Objects" to the configured Objects layer
   - Copies features from "New Features" to the configured Features layer

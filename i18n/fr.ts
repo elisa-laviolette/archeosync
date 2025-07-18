@@ -506,6 +506,11 @@ Consultez la console pour plus de détails sur les erreurs.</translation>
         <translation>Couche des petits objets :</translation>
     </message>
     <message>
+        <location filename="../ui/settings_dialog.py" line="230"/>
+        <source>Total Station Points Layer:</source>
+        <translation>Couche des points de station totale :</translation>
+    </message>
+    <message>
         <location filename="../ui/settings_dialog.py" line="233"/>
         <source>Layers &amp; Fields</source>
         <translation>Couches et champs</translation>
@@ -611,6 +616,11 @@ Consultez la console pour plus de détails sur les erreurs.</translation>
         <translation>-- Sélectionnez une couche ponctuelle, multiponctuelle ou sans géométrie --</translation>
     </message>
     <message>
+        <location filename="../ui/settings_dialog.py" line="634"/>
+        <source>-- Select a point or multipoint layer --</source>
+        <translation>-- Sélectionnez une couche de points ou multipoints --</translation>
+    </message>
+    <message>
         <location filename="../ui/settings_dialog.py" line="372"/>
         <source>Select additional vector layers to include in field projects. </source>
         <translation>Sélectionnez des couches vectorielles supplémentaires à inclure dans les projets de terrain.</translation>
@@ -704,6 +714,11 @@ Consultez la console pour plus de détails sur les erreurs.</translation>
         <location filename="../ui/settings_dialog.py" line="623"/>
         <source>Failed to refresh small finds layer list: {str(e)}</source>
         <translation>Échec du rafraîchissement de la liste des couches de petits objets : {str(e)}</translation>
+    </message>
+    <message>
+        <location filename="../ui/settings_dialog.py" line="657"/>
+        <source>Failed to refresh total station points layer list: {str(e)}</source>
+        <translation>Échec du rafraîchissement de la liste des couches de points de station totale : {str(e)}</translation>
     </message>
     <message>
         <location filename="../ui/settings_dialog.py" line="616"/>

@@ -255,6 +255,11 @@ class IConfigurationValidator(ABC):
         pass
 
     @abstractmethod
+    def validate_total_station_points_layer(self, layer_id: str) -> List[str]:
+        """Validate total station points layer configuration."""
+        pass
+
+    @abstractmethod
     def validate_objects_layer_fields(self, layer_id: str, number_field: Optional[str], level_field: Optional[str]) -> ValidationResult:
         """
         Validate the field selections for the objects layer.

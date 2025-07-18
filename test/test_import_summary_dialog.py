@@ -366,6 +366,56 @@ class TestImportSummaryDialog(unittest.TestCase):
             mock_project.removeMapLayer.assert_any_call("features_layer_id")
             mock_project.removeMapLayer.assert_any_call("csv_layer_id")
     
+    def test_copy_temporary_to_definitive_layers_includes_csv_points(self):
+        """Test that the copy temporary to definitive layers method includes the CSV points layer."""
+        with patch('qgis.core.QgsProject') as mock_project_class:
+            
+            # Create mock project and layers
+            mock_project = Mock()
+            mock_project_class.instance.return_value = mock_project
+            
+            # Create mock temporary CSV layer
+            mock_csv_layer = Mock()
+            mock_csv_layer.name.return_value = "Imported_CSV_Points"
+            mock_csv_layer.getFeatures.return_value = [Mock(), Mock()]  # 2 features
+            
+            # Create mock definitive total station points layer
+            mock_definitive_layer = Mock()
+            mock_definitive_layer.name.return_value = "Total Station Points"
+            mock_definitive_layer.id.return_value = "definitive_layer_id"
+            mock_definitive_layer.isEditable.return_value = False
+            mock_definitive_layer.startEditing = Mock()
+            mock_definitive_layer.addFeature = Mock(return_value=True)
+            mock_definitive_layer.removeSelection = Mock()
+            mock_definitive_layer.select = Mock()
+            
+            # Set up the project to return our mock layers
+            # The method iterates through project.mapLayers().values() and looks for layers by name
+            mock_project.mapLayers.return_value = {
+                "csv_layer_id": mock_csv_layer,
+                "definitive_layer_id": mock_definitive_layer
+            }
+            
+            # Mock settings manager to return the definitive layer ID for total_station_points_layer
+            def mock_get_value(key, default=None):
+                if key == 'total_station_points_layer':
+                    return "definitive_layer_id"
+                return default
+            
+            self.dialog._settings_manager.get_value = mock_get_value
+            
+            # Call the copy method
+            self.dialog._copy_temporary_to_definitive_layers()
+            
+            # Verify that the CSV layer was processed
+            mock_csv_layer.getFeatures.assert_called_once()
+            
+            # Verify that the definitive layer was put in edit mode
+            mock_definitive_layer.startEditing.assert_called_once()
+            
+            # Verify that features were added to the definitive layer
+            self.assertEqual(mock_definitive_layer.addFeature.call_count, 2)
+    
     def test_validate_button_exists(self):
         """Test that the validate button is created."""
         self.assertIsNotNone(self.dialog._validate_button)
