@@ -31,9 +31,9 @@ Usage:
 from typing import List, Dict, Any, Optional, Union
 
 try:
-    from ..ui.import_summary_dialog import WarningData
+    from ..core.data_structures import WarningData
 except ImportError:
-    from ui.import_summary_dialog import WarningData
+    from core.data_structures import WarningData
 
 from qgis.core import QgsProject
 

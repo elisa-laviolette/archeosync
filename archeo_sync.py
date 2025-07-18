@@ -567,11 +567,12 @@ class ArcheoSyncPlugin:
             return None
     
     def _show_import_summary(self, summary_data: Dict[str, int]) -> None:
-        """Show the import summary dialog."""
+        """Show the import summary dock widget."""
         try:
-            from .ui.import_summary_dialog import ImportSummaryDialog, ImportSummaryData
+            from .ui.import_summary_dialog import ImportSummaryDockWidget, ImportSummaryData
             from .services.duplicate_objects_detector_service import DuplicateObjectsDetectorService
             from .services.skipped_numbers_detector_service import SkippedNumbersDetectorService
+            from qgis.PyQt.QtCore import Qt
             
             # Detect duplicate objects if objects were imported
             duplicate_objects_warnings = []
@@ -602,20 +603,27 @@ class ArcheoSyncPlugin:
                 csv_duplicates=summary_data.get('csv_duplicates', 0),
                 features_duplicates=summary_data.get('features_duplicates', 0),
                 objects_duplicates=summary_data.get('objects_duplicates', 0),
-                small_finds_duplicates=summary_data.get('small_finds_duplicates', 0),
-                duplicate_objects_warnings=duplicate_objects_warnings,
-                skipped_numbers_warnings=skipped_numbers_warnings
+                small_finds_duplicates=summary_data.get('small_finds_duplicates', 0)
             )
             
-            # Show the dialog with QGIS interface for attribute table functionality
-            dialog = ImportSummaryDialog(
+            # Add warnings to summary data
+            summary.duplicate_objects_warnings = duplicate_objects_warnings
+            summary.skipped_numbers_warnings = skipped_numbers_warnings
+            
+            # Create and show the dock widget
+            dock_widget = ImportSummaryDockWidget(
                 summary, 
                 iface=self._iface, 
                 settings_manager=self._settings_manager,
                 csv_import_service=self._csv_import_service,
-                field_project_import_service=self._field_project_import_service
+                field_project_import_service=self._field_project_import_service,
+                layer_service=self._layer_service,
+                translation_service=self._translation_service,
+                parent=self._iface.mainWindow()
             )
-            dialog.exec_()
+            
+            # Add the dock widget to the main window
+            self._iface.addDockWidget(Qt.RightDockWidgetArea, dock_widget)
             
         except Exception as e:
             print(f"Error showing import summary: {e}")

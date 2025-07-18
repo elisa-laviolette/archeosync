@@ -786,7 +786,7 @@ Consultez la console pour plus de détails sur les erreurs.</translation>
     </message>
 </context>
 <context>
-    <name>ImportSummaryDialog</name>
+    <name>ImportSummaryDockWidget</name>
     <message>
         <location filename="../ui/import_summary_dialog.py" line="85"/>
         <source>Import Summary</source>
@@ -971,6 +971,81 @@ Consultez la console pour plus de détails sur les erreurs.</translation>
         <location filename="../ui/import_summary_dialog.py" line="495"/>
         <source>No Layers to Validate</source>
         <translation>Aucune couche à valider</translation>
+    </message>
+    <message>
+        <location filename="../ui/import_summary_dialog.py" line="407"/>
+        <source>Refresh Warnings</source>
+        <translation>Actualiser les avertissements</translation>
+    </message>
+    <message>
+        <location filename="../ui/import_summary_dialog.py" line="462"/>
+        <source>Services Not Available</source>
+        <translation>Services non disponibles</translation>
+    </message>
+    <message>
+        <location filename="../ui/import_summary_dialog.py" line="463"/>
+        <source>Detection services are not available. Please ensure the plugin is properly installed.</source>
+        <translation>Les services de détection ne sont pas disponibles. Veuillez vous assurer que le plugin est correctement installé.</translation>
+    </message>
+    <message>
+        <location filename="../ui/import_summary_dialog.py" line="508"/>
+        <source>Warnings Refreshed</source>
+        <translation>Avertissements actualisés</translation>
+    </message>
+    <message>
+        <location filename="../ui/import_summary_dialog.py" line="509"/>
+        <source>Warnings have been refreshed successfully.</source>
+        <translation>Les avertissements ont été actualisés avec succès.</translation>
+    </message>
+    <message>
+        <location filename="../ui/import_summary_dialog.py" line="520"/>
+        <source>Refresh Error</source>
+        <translation>Erreur d'actualisation</translation>
+    </message>
+    <message>
+        <location filename="../ui/import_summary_dialog.py" line="521"/>
+        <source>An error occurred while refreshing warnings: {error}</source>
+        <translation>Une erreur s'est produite lors de l'actualisation des avertissements : {error}</translation>
+    </message>
+    <message>
+        <location filename="../ui/import_summary_dialog.py" line="315"/>
+        <source>Select and Show Both Entities</source>
+        <translation>Sélectionner et afficher les deux entités</translation>
+    </message>
+    <message>
+        <location filename="../ui/import_summary_dialog.py" line="320"/>
+        <source>Select and Show Entities</source>
+        <translation>Sélectionner et afficher les entités</translation>
+    </message>
+    <message>
+        <location filename="../ui/import_summary_dialog.py" line="355"/>
+        <source>Select and Show Both Entities</source>
+        <translation>Sélectionner et afficher les deux entités</translation>
+    </message>
+    <message>
+        <location filename="../ui/import_summary_dialog.py" line="360"/>
+        <source>Select and Show Entities</source>
+        <translation>Sélectionner et afficher les entités</translation>
+    </message>
+    <message>
+        <location filename="../ui/import_summary_dialog.py" line="956"/>
+        <source>Attribute Tables Opened</source>
+        <translation>Tables attributaires ouvertes</translation>
+    </message>
+    <message>
+        <location filename="../ui/import_summary_dialog.py" line="957"/>
+        <source>Attribute tables for '{layer_name}' and '{second_layer_name}' have been opened with selected entities.</source>
+        <translation>Les tables attributaires pour '{layer_name}' et '{second_layer_name}' ont été ouvertes avec les entités sélectionnées.</translation>
+    </message>
+    <message>
+        <location filename="../ui/import_summary_dialog.py" line="963"/>
+        <source>Error</source>
+        <translation>Erreur</translation>
+    </message>
+    <message>
+        <location filename="../ui/import_summary_dialog.py" line="964"/>
+        <source>Could not open both attribute tables: {error}</source>
+        <translation>Impossible d'ouvrir les deux tables attributaires : {error}</translation>
     </message>
 </context>
 <context>

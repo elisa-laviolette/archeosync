@@ -10,10 +10,10 @@ from typing import List, Dict, Any
 
 try:
     from services.skipped_numbers_detector_service import SkippedNumbersDetectorService
-    from ui.import_summary_dialog import WarningData
+    from core.data_structures import WarningData
 except ImportError:
     from ..services.skipped_numbers_detector_service import SkippedNumbersDetectorService
-    from ..ui.import_summary_dialog import WarningData
+    from ..core.data_structures import WarningData
 
 
 class TestSkippedNumbersDetectorService(unittest.TestCase):

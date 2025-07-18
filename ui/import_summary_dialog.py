@@ -1,7 +1,7 @@
 """
 Import Summary Dialog for ArcheoSync plugin.
 
-This module provides a dialog that displays a summary of imported data after
+This module provides a dock widget that displays a summary of imported data after
 the import process is complete. It shows statistics about imported points,
 features, objects, small finds, and detected duplicates.
 
@@ -12,6 +12,7 @@ Key Features:
 - Clean, user-friendly interface
 - Supports translation
 - Provides buttons to open attribute tables filtered to show concerned entities
+- Uses QDockWidget to prevent floating above other windows
 
 Architecture Benefits:
 - Single Responsibility: Only handles summary display
@@ -31,65 +32,57 @@ Usage:
         small_finds_duplicates=2
     )
     
-    # Non-modal dialog (default) - allows interaction with other windows
-    dialog = ImportSummaryDialog(summary_data, parent=parent_widget)
-    dialog.exec_()
-    
-    # Modal dialog - blocks interaction with other windows
-    dialog = ImportSummaryDialog(summary_data, parent=parent_widget, modal=True)
-    dialog.exec_()
+    # Create dock widget
+    dock_widget = ImportSummaryDockWidget(summary_data, iface=iface, parent=parent_widget)
+    iface.addDockWidget(Qt.RightDockWidgetArea, dock_widget)
 """
 
 from typing import Optional, List, Dict, Any, Union
-from dataclasses import dataclass
 from qgis.PyQt import QtWidgets
+from qgis.PyQt.QtWidgets import QMessageBox, QDockWidget
 from qgis.PyQt.QtCore import Qt
 
+try:
+    from ..core.interfaces import ISettingsManager, ILayerService, ITranslationService
+    from ..core.data_structures import WarningData, ImportSummaryData
+except ImportError:
+    from core.interfaces import ISettingsManager, ILayerService, ITranslationService
+    from core.data_structures import WarningData, ImportSummaryData
 
-@dataclass
-class WarningData:
-    """Data structure for warning information with filtering details."""
-    message: str
-    recording_area_name: str
-    layer_name: str
-    filter_expression: str
-    # Additional fields for specific warning types
-    object_number: Optional[int] = None
-    skipped_numbers: Optional[List[int]] = None
-    # Fields for between-layer warnings
-    second_layer_name: Optional[str] = None
-    second_filter_expression: Optional[str] = None
+# Import detection services at module level for testability
+DuplicateObjectsDetectorService = None
+SkippedNumbersDetectorService = None
 
-
-@dataclass
-class ImportSummaryData:
-    """Data structure for import summary information."""
-    csv_points_count: int = 0
-    features_count: int = 0
-    objects_count: int = 0
-    small_finds_count: int = 0
-    csv_duplicates: int = 0
-    features_duplicates: int = 0
-    objects_duplicates: int = 0
-    small_finds_duplicates: int = 0
-    duplicate_objects_warnings: List[Union[str, WarningData]] = None
-    skipped_numbers_warnings: List[Union[str, WarningData]] = None
-    
-    def __post_init__(self):
-        """Initialize default values for mutable fields."""
-        if self.duplicate_objects_warnings is None:
-            self.duplicate_objects_warnings = []
-        if self.skipped_numbers_warnings is None:
-            self.skipped_numbers_warnings = []
+try:
+    from services.duplicate_objects_detector_service import DuplicateObjectsDetectorService
+    from services.skipped_numbers_detector_service import SkippedNumbersDetectorService
+except ImportError:
+    # Fallback for when running as a plugin
+    try:
+        import sys
+        import os
+        # Add the project root to the path to enable absolute imports
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        if project_root not in sys.path:
+            sys.path.insert(0, project_root)
+        
+        from services.duplicate_objects_detector_service import DuplicateObjectsDetectorService
+        from services.skipped_numbers_detector_service import SkippedNumbersDetectorService
+    except ImportError:
+        # For testing purposes, these will be mocked
+        pass
 
 
-class ImportSummaryDialog(QtWidgets.QDialog):
+
+
+
+class ImportSummaryDockWidget(QDockWidget):
     """
-    Import Summary dialog for ArcheoSync plugin.
+    Import Summary dock widget for ArcheoSync plugin.
     
     Displays a summary of imported data after the import process is complete.
-    By default, the dialog is non-modal, allowing users to interact with other
-    windows (including attribute tables) while the summary is displayed.
+    Uses QDockWidget to prevent floating above other windows and allow docking
+    into the main QGIS interface.
     All user-facing strings are wrapped in self.tr() for translation.
     """
     
@@ -99,10 +92,11 @@ class ImportSummaryDialog(QtWidgets.QDialog):
                  settings_manager=None,
                  csv_import_service=None,
                  field_project_import_service=None,
-                 parent=None,
-                 modal=False):
+                 layer_service=None,
+                 translation_service=None,
+                 parent=None):
         """
-        Initialize the import summary dialog.
+        Initialize the import summary dock widget.
         
         Args:
             summary_data: Data containing import statistics
@@ -110,8 +104,9 @@ class ImportSummaryDialog(QtWidgets.QDialog):
             settings_manager: Settings manager for accessing layer configurations
             csv_import_service: CSV import service for archiving files after validation
             field_project_import_service: Field project import service for archiving projects after validation
-            parent: Parent widget for the dialog
-            modal: Whether the dialog should be modal (default: False)
+            layer_service: Layer service for layer operations
+            translation_service: Translation service for internationalization
+            parent: Parent widget for the dock widget
         """
         super().__init__(parent)
         
@@ -121,7 +116,8 @@ class ImportSummaryDialog(QtWidgets.QDialog):
         self._settings_manager = settings_manager
         self._csv_import_service = csv_import_service
         self._field_project_import_service = field_project_import_service
-        self._modal = modal
+        self._layer_service = layer_service
+        self._translation_service = translation_service
         
         # Initialize UI
         self._setup_ui()
@@ -130,29 +126,30 @@ class ImportSummaryDialog(QtWidgets.QDialog):
     def _setup_ui(self) -> None:
         """Set up the user interface components."""
         self.setWindowTitle(self.tr("Import Summary"))
-        self.setGeometry(0, 0, 500, 400)
-        self.setModal(self._modal)
+        self.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea | Qt.TopDockWidgetArea | Qt.BottomDockWidgetArea)
+        self.setFeatures(QDockWidget.DockWidgetClosable | QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable)
+        
+        # Create the main widget
+        main_widget = QtWidgets.QWidget()
+        self.setWidget(main_widget)
         
         # Create main layout
-        main_layout = QtWidgets.QVBoxLayout(self)
+        main_layout = QtWidgets.QVBoxLayout(main_widget)
         
         # Add title
         title_label = QtWidgets.QLabel(self.tr("Import Summary"))
         title_label.setAlignment(Qt.AlignCenter)
-        title_label.setStyleSheet("font-size: 16px; font-weight: bold; margin: 10px;")
+        title_label.setStyleSheet("font-size: 14px; font-weight: bold; margin: 5px;")
         main_layout.addWidget(title_label)
-        
-        # Add description
-        description_label = QtWidgets.QLabel(self.tr("The following data has been imported and added to your project:"))
-        description_label.setWordWrap(True)
-        description_label.setStyleSheet("margin: 5px; color: #666;")
-        main_layout.addWidget(description_label)
         
         # Add summary content
         self._create_summary_content(main_layout)
         
-        # Add button box
-        self._create_button_box(main_layout)
+        # Add buttons
+        self._create_buttons(main_layout)
+        
+        # Set size
+        self.resize(400, 500)
     
     def _create_summary_content(self, parent_layout: QtWidgets.QVBoxLayout) -> None:
         """Create the summary content section."""
@@ -276,7 +273,7 @@ class ImportSummaryDialog(QtWidgets.QDialog):
             layout.addLayout(duplicates_layout)
         
         # Duplicate objects warnings
-        if self._summary_data.duplicate_objects_warnings:
+        if hasattr(self._summary_data, 'duplicate_objects_warnings') and self._summary_data.duplicate_objects_warnings:
             warnings_layout = QtWidgets.QVBoxLayout()
             warnings_label = QtWidgets.QLabel(self.tr("Duplicate Objects Warnings:"))
             warnings_label.setStyleSheet("font-weight: bold; color: #FF4500;")
@@ -285,11 +282,11 @@ class ImportSummaryDialog(QtWidgets.QDialog):
             for warning in self._summary_data.duplicate_objects_warnings:
                 warning_item_layout = QtWidgets.QHBoxLayout()
                 
-                # Warning text
-                if isinstance(warning, WarningData):
+                # Warning text - check if it has the expected attributes
+                if hasattr(warning, 'message'):
                     warning_text = warning.message
                 else:
-                    warning_text = warning
+                    warning_text = str(warning)
                 
                 warning_item = QtWidgets.QLabel(f"• {warning_text}")
                 warning_item.setStyleSheet("color: #FF4500; margin-left: 10px;")
@@ -297,7 +294,7 @@ class ImportSummaryDialog(QtWidgets.QDialog):
                 warning_item_layout.addWidget(warning_item)
                 
                 # Add button if we have structured data and QGIS interface
-                if isinstance(warning, WarningData) and self._iface:
+                if hasattr(warning, 'message') and self._iface:
                     if getattr(warning, "second_layer_name", None):
                         # Between-layer warning - open both tables
                         button = QtWidgets.QPushButton(self.tr("Select and Show Both Entities"))
@@ -316,7 +313,7 @@ class ImportSummaryDialog(QtWidgets.QDialog):
             layout.addLayout(warnings_layout)
         
         # Skipped numbers warnings
-        if self._summary_data.skipped_numbers_warnings:
+        if hasattr(self._summary_data, 'skipped_numbers_warnings') and self._summary_data.skipped_numbers_warnings:
             warnings_layout = QtWidgets.QVBoxLayout()
             warnings_label = QtWidgets.QLabel(self.tr("Skipped Numbers Warnings:"))
             warnings_label.setStyleSheet("font-weight: bold; color: #FF8C00;")
@@ -325,11 +322,11 @@ class ImportSummaryDialog(QtWidgets.QDialog):
             for warning in self._summary_data.skipped_numbers_warnings:
                 warning_item_layout = QtWidgets.QHBoxLayout()
                 
-                # Warning text
-                if isinstance(warning, WarningData):
+                # Warning text - check if it has the expected attributes
+                if hasattr(warning, 'message'):
                     warning_text = warning.message
                 else:
-                    warning_text = warning
+                    warning_text = str(warning)
                 
                 warning_item = QtWidgets.QLabel(f"• {warning_text}")
                 warning_item.setStyleSheet("color: #FF8C00; margin-left: 10px;")
@@ -337,7 +334,7 @@ class ImportSummaryDialog(QtWidgets.QDialog):
                 warning_item_layout.addWidget(warning_item)
                 
                 # Add button if we have structured data and QGIS interface
-                if isinstance(warning, WarningData) and self._iface:
+                if hasattr(warning, 'message') and self._iface:
                     if getattr(warning, "second_layer_name", None):
                         # Between-layer warning - open both tables
                         button = QtWidgets.QPushButton(self.tr("Select and Show Both Entities"))
@@ -354,6 +351,8 @@ class ImportSummaryDialog(QtWidgets.QDialog):
                 warnings_layout.addLayout(warning_item_layout)
             
             layout.addLayout(warnings_layout)
+        else:
+            print(f"Debug: No skipped numbers warnings found. hasattr: {hasattr(self._summary_data, 'skipped_numbers_warnings')}, warnings: {getattr(self._summary_data, 'skipped_numbers_warnings', None)}")
         
         return group
     
@@ -385,15 +384,19 @@ class ImportSummaryDialog(QtWidgets.QDialog):
         
         return group
     
-    def _create_button_box(self, parent_layout: QtWidgets.QVBoxLayout) -> None:
-        """Create the dialog button box."""
+    def _create_buttons(self, parent_layout: QtWidgets.QVBoxLayout) -> None:
+        """Create the button section."""
         button_layout = QtWidgets.QHBoxLayout()
+        
+        # Create Refresh button for warnings
+        self._refresh_button = QtWidgets.QPushButton(self.tr("Refresh Warnings"))
         
         # Create Validate button (instead of OK)
         self._validate_button = QtWidgets.QPushButton(self.tr("Validate"))
         self._validate_button.setDefault(True)
         
-        # Add button to layout
+        # Add buttons to layout
+        button_layout.addWidget(self._refresh_button)
         button_layout.addStretch()
         button_layout.addWidget(self._validate_button)
         
@@ -402,6 +405,7 @@ class ImportSummaryDialog(QtWidgets.QDialog):
     def _setup_connections(self) -> None:
         """Set up signal connections."""
         # Button connections
+        self._refresh_button.clicked.connect(self._handle_refresh_warnings)
         self._validate_button.clicked.connect(self._handle_validate)
     
     def _handle_validate(self) -> None:
@@ -416,8 +420,8 @@ class ImportSummaryDialog(QtWidgets.QDialog):
             # Archive imported files and folders after successful validation
             self._archive_imported_data()
             
-            # Close the dialog
-            self.accept()
+            # Close the dock widget
+            self.close()
             
         except Exception as e:
             print(f"Error during validation: {e}")
@@ -425,12 +429,157 @@ class ImportSummaryDialog(QtWidgets.QDialog):
             traceback.print_exc()
             
             # Show error message to user
-            from qgis.PyQt.QtWidgets import QMessageBox
             QMessageBox.critical(
                 self,
                 self.tr("Validation Error"),
                 self.tr(f"An error occurred during validation: {str(e)}")
             )
+    
+    def _handle_refresh_warnings(self) -> None:
+        """Handle the refresh warnings button click - re-run detection services to refresh warnings."""
+        try:
+            print("Debug: Starting refresh warnings")
+            # Check if detection services are available
+            if DuplicateObjectsDetectorService is None or SkippedNumbersDetectorService is None:
+                print("Debug: Detection services not available")
+                QMessageBox.warning(
+                    self,
+                    self.tr("Services Not Available"),
+                    self.tr("Detection services are not available. Please ensure the plugin is properly installed.")
+                )
+                return
+            
+            # Re-run duplicate objects detection if objects were imported
+            duplicate_objects_warnings = []
+            if self._summary_data.objects_count > 0:
+                print(f"Debug: Running duplicate detection for {self._summary_data.objects_count} objects")
+                detector = DuplicateObjectsDetectorService(
+                    settings_manager=self._settings_manager,
+                    layer_service=self._layer_service,
+                    translation_service=self._translation_service
+                )
+                duplicate_objects_warnings = detector.detect_duplicate_objects()
+                print(f"Debug: Detected {len(duplicate_objects_warnings)} duplicate warnings")
+                for warning in duplicate_objects_warnings:
+                    print(f"Debug: Duplicate warning: {warning}")
+            
+            # Re-run skipped numbers detection if objects were imported
+            skipped_numbers_warnings = []
+            if self._summary_data.objects_count > 0:
+                print(f"Debug: Running skipped numbers detection for {self._summary_data.objects_count} objects")
+                skipped_detector = SkippedNumbersDetectorService(
+                    settings_manager=self._settings_manager,
+                    layer_service=self._layer_service,
+                    translation_service=self._translation_service
+                )
+                skipped_numbers_warnings = skipped_detector.detect_skipped_numbers()
+                print(f"Debug: Detected {len(skipped_numbers_warnings)} skipped warnings")
+                for warning in skipped_numbers_warnings:
+                    print(f"Debug: Skipped warning: {warning}")
+            
+            # Update the summary data with new warnings
+            print(f"Debug: Updating summary data with {len(duplicate_objects_warnings)} duplicates and {len(skipped_numbers_warnings)} skipped")
+            self._summary_data.duplicate_objects_warnings = duplicate_objects_warnings
+            self._summary_data.skipped_numbers_warnings = skipped_numbers_warnings
+            print(f"Debug: Summary data now has {len(self._summary_data.duplicate_objects_warnings)} duplicates and {len(self._summary_data.skipped_numbers_warnings)} skipped")
+            
+            # Recreate the UI to show updated warnings
+            print("Debug: Recreating summary content")
+            self._recreate_summary_content()
+            
+            # Show success message
+            QMessageBox.information(
+                self,
+                self.tr("Warnings Refreshed"),
+                self.tr("Warnings have been refreshed successfully.")
+            )
+            
+        except Exception as e:
+            print(f"Error refreshing warnings: {e}")
+            import traceback
+            traceback.print_exc()
+            
+            # Show error message to user
+            QMessageBox.critical(
+                self,
+                self.tr("Refresh Error"),
+                self.tr(f"An error occurred while refreshing warnings: {str(e)}")
+            )
+    
+    def _recreate_summary_content(self) -> None:
+        """Recreate the summary content to show updated warnings."""
+        try:
+            # Get the main widget and its layout
+            main_widget = self.widget()
+            if not main_widget:
+                print("No main widget found")
+                return
+                
+            main_layout = main_widget.layout()
+            if not main_layout:
+                print("No main layout found")
+                return
+            
+            # Find and remove the existing scroll area (should be after title, before buttons)
+            scroll_area_index = None
+            for i in range(main_layout.count()):
+                item = main_layout.itemAt(i)
+                if item and item.widget() and isinstance(item.widget(), QtWidgets.QScrollArea):
+                    scroll_area = item.widget()
+                    main_layout.removeWidget(scroll_area)
+                    scroll_area.deleteLater()
+                    scroll_area_index = i
+                    break
+            
+            if scroll_area_index is None:
+                print("No scroll area found to recreate")
+                return
+            
+            # Recreate the summary content in the correct position (after title, before buttons)
+            # Insert at the same index where the old scroll area was
+            self._create_summary_content_at_index(main_layout, scroll_area_index)
+            
+            # Force a layout update
+            main_widget.updateGeometry()
+        
+        except Exception as e:
+            print(f"Error recreating summary content: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def _create_summary_content_at_index(self, parent_layout: QtWidgets.QVBoxLayout, insert_index: int) -> None:
+        """Create the summary content section and insert at a specific index."""
+        scroll_area = QtWidgets.QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        
+        content_widget = QtWidgets.QWidget()
+        content_layout = QtWidgets.QVBoxLayout(content_widget)
+        
+        # CSV Points section
+        if self._summary_data.csv_points_count > 0:
+            csv_group = self._create_csv_section()
+            content_layout.addWidget(csv_group)
+        
+        # Features section
+        if self._summary_data.features_count > 0:
+            features_group = self._create_features_section()
+            content_layout.addWidget(features_group)
+        
+        # Objects section
+        if self._summary_data.objects_count > 0:
+            objects_group = self._create_objects_section()
+            content_layout.addWidget(objects_group)
+        
+        # Small Finds section
+        if self._summary_data.small_finds_count > 0:
+            small_finds_group = self._create_small_finds_section()
+            content_layout.addWidget(small_finds_group)
+        
+        content_layout.addStretch()
+        scroll_area.setWidget(content_widget)
+        parent_layout.insertWidget(insert_index, scroll_area)
     
     def _copy_temporary_to_definitive_layers(self) -> None:
         """Copy features from temporary layers to definitive layers and keep them in edit mode."""
@@ -496,7 +645,6 @@ class ImportSummaryDialog(QtWidgets.QDialog):
                 success_message += f"• {self.tr('Save changes if you want to keep them')}\n"
                 success_message += f"• {self.tr('Cancel changes if you want to discard them')}"
                 
-                from qgis.PyQt.QtWidgets import QMessageBox
                 QMessageBox.information(
                     self,
                     self.tr("Validation Complete"),
@@ -505,7 +653,6 @@ class ImportSummaryDialog(QtWidgets.QDialog):
             else:
                 # Show message if no layers were configured
                 if missing_configurations:
-                    from qgis.PyQt.QtWidgets import QMessageBox
                     QMessageBox.information(
                         self,
                         self.tr("No Layers to Validate"),
@@ -587,7 +734,7 @@ class ImportSummaryDialog(QtWidgets.QDialog):
                 layer_id = settings.value(layer_setting_key, "")
                 settings.endGroup()
                 return layer_id if layer_id else None
-            
+                
         except Exception as e:
             print(f"Error getting definitive layer ID for {layer_setting_key}: {e}")
             return None
@@ -739,7 +886,6 @@ class ImportSummaryDialog(QtWidgets.QDialog):
             self._iface.actionOpenTable().trigger()
             
             # Show a message to inform the user about the selection
-            from qgis.PyQt.QtWidgets import QMessageBox
             QMessageBox.information(
                 self,
                 self.tr("Attribute Table Opened"),
@@ -747,7 +893,6 @@ class ImportSummaryDialog(QtWidgets.QDialog):
             )
         except Exception as e:
             print(f"Error opening attribute table with selection: {e}")
-            from qgis.PyQt.QtWidgets import QMessageBox
             QMessageBox.warning(
                 self,
                 self.tr("Error"),
@@ -791,7 +936,6 @@ class ImportSummaryDialog(QtWidgets.QDialog):
                 # Open the attribute table
                 self._iface.actionOpenTable().trigger()
             
-            from qgis.PyQt.QtWidgets import QMessageBox
             QMessageBox.information(
                 self,
                 self.tr("Attribute Tables Opened"),
@@ -799,9 +943,21 @@ class ImportSummaryDialog(QtWidgets.QDialog):
             )
         except Exception as e:
             print(f"Error opening both attribute tables with selection: {e}")
-            from qgis.PyQt.QtWidgets import QMessageBox
             QMessageBox.warning(
                 self,
                 self.tr("Error"),
                 self.tr(f"Could not open both attribute tables: {str(e)}")
-            ) 
+            )
+
+
+# Keep the old dialog class for backward compatibility
+class ImportSummaryDialog(ImportSummaryDockWidget):
+    """
+    Import Summary dialog for ArcheoSync plugin (legacy).
+    
+    This is kept for backward compatibility. New code should use ImportSummaryDockWidget.
+    """
+    
+    def __init__(self, *args, **kwargs):
+        """Initialize the import summary dialog (legacy)."""
+        super().__init__(*args, **kwargs) 

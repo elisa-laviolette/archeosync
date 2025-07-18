@@ -32,10 +32,10 @@ from typing import List, Optional, Any, Union
 
 try:
     from ..core.interfaces import ISettingsManager, ILayerService, ITranslationService
-    from ..ui.import_summary_dialog import WarningData
+    from ..core.data_structures import WarningData
 except ImportError:
     from core.interfaces import ISettingsManager, ILayerService, ITranslationService
-    from ui.import_summary_dialog import WarningData
+    from core.data_structures import WarningData
 
 
 class DuplicateObjectsDetectorService:
