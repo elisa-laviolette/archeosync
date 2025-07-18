@@ -22,6 +22,8 @@ class WarningData:
     out_of_bounds_features: Optional[List[dict]] = None
     # Fields for distance warnings
     distance_issues: Optional[List[dict]] = None
+    # Fields for missing total station warnings
+    missing_total_station_issues: Optional[List[dict]] = None
 
 
 @dataclass
@@ -39,6 +41,7 @@ class ImportSummaryData:
     skipped_numbers_warnings: List[Union[str, WarningData]] = None
     out_of_bounds_warnings: List[Union[str, WarningData]] = None
     distance_warnings: List[Union[str, WarningData]] = None
+    missing_total_station_warnings: List[Union[str, WarningData]] = None
     
     def __post_init__(self):
         """Initialize default values for mutable fields."""
@@ -49,4 +52,6 @@ class ImportSummaryData:
         if self.out_of_bounds_warnings is None:
             self.out_of_bounds_warnings = []
         if self.distance_warnings is None:
-            self.distance_warnings = [] 
+            self.distance_warnings = []
+        if self.missing_total_station_warnings is None:
+            self.missing_total_station_warnings = [] 

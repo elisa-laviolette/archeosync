@@ -420,6 +420,39 @@ class ImportSummaryDockWidget(QDockWidget):
             
             layout.addLayout(warnings_layout)
         
+        # Missing total station warnings
+        if hasattr(self._summary_data, 'missing_total_station_warnings') and self._summary_data.missing_total_station_warnings:
+            warnings_layout = QtWidgets.QVBoxLayout()
+            warnings_label = QtWidgets.QLabel(self.tr("Missing Total Station Warnings:"))
+            warnings_label.setStyleSheet("font-weight: bold; color: #8B0000;")
+            warnings_layout.addWidget(warnings_label)
+            
+            for i, warning in enumerate(self._summary_data.missing_total_station_warnings):
+                warning_item_layout = QtWidgets.QHBoxLayout()
+                
+                # Warning text - check if it has the expected attributes
+                if hasattr(warning, 'message'):
+                    warning_text = warning.message
+                else:
+                    warning_text = str(warning)
+                
+                warning_item = QtWidgets.QLabel(f"• {warning_text}")
+                warning_item.setStyleSheet("color: #8B0000; margin-left: 10px;")
+                warning_item.setWordWrap(True)
+                warning_item_layout.addWidget(warning_item)
+                
+                # Add button if we have structured data and QGIS interface
+                if hasattr(warning, 'message') and self._iface:
+                    button = QtWidgets.QPushButton(self.tr("Select and Show Entities"))
+                    button.setStyleSheet("background-color: #8B0000; color: white; border: none; padding: 5px; border-radius: 3px;")
+                    button.clicked.connect(lambda checked, w=warning: self._open_both_filtered_attribute_tables(w))
+                    warning_item_layout.addWidget(button)
+                
+                warning_item_layout.addStretch()
+                warnings_layout.addLayout(warning_item_layout)
+            
+            layout.addLayout(warnings_layout)
+        
         return group
     
     def _create_small_finds_section(self) -> QtWidgets.QGroupBox:
@@ -689,13 +722,42 @@ class ImportSummaryDockWidget(QDockWidget):
             else:
                 print(f"[DEBUG] Skipping distance detection - missing total station points or objects")
             
+            # Re-run missing total station detection if both total station points and objects were imported
+            missing_total_station_warnings = []
+            if (self._summary_data.csv_points_count > 0 and 
+                self._summary_data.objects_count > 0):
+                print(f"[DEBUG] Running missing total station detection")
+                try:
+                    from services.missing_total_station_detector_service import MissingTotalStationDetectorService
+                except ImportError:
+                    # Fallback for relative import
+                    import sys
+                    import os
+                    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+                    from services.missing_total_station_detector_service import MissingTotalStationDetectorService
+                
+                missing_total_station_detector = MissingTotalStationDetectorService(
+                    settings_manager=self._settings_manager,
+                    layer_service=self._layer_service,
+                    translation_service=self._translation_service
+                )
+                missing_total_station_warnings = missing_total_station_detector.detect_missing_total_station_warnings()
+                print(f"[DEBUG] Detected {len(missing_total_station_warnings)} missing total station warnings")
+                for i, warning in enumerate(missing_total_station_warnings):
+                    print(f"[DEBUG] Missing total station warning {i+1}: {warning}")
+                    if hasattr(warning, 'message'):
+                        print(f"[DEBUG]   Message: {warning.message}")
+            else:
+                print(f"[DEBUG] Skipping missing total station detection - missing total station points or objects")
+            
             # Update the summary data with new warnings
-            print(f"[DEBUG] Updating summary data with {len(duplicate_objects_warnings)} duplicates, {len(skipped_numbers_warnings)} skipped, {len(out_of_bounds_warnings)} out-of-bounds, and {len(distance_warnings)} distance")
+            print(f"[DEBUG] Updating summary data with {len(duplicate_objects_warnings)} duplicates, {len(skipped_numbers_warnings)} skipped, {len(out_of_bounds_warnings)} out-of-bounds, {len(distance_warnings)} distance, and {len(missing_total_station_warnings)} missing total station")
             self._summary_data.duplicate_objects_warnings = duplicate_objects_warnings
             self._summary_data.skipped_numbers_warnings = skipped_numbers_warnings
             self._summary_data.out_of_bounds_warnings = out_of_bounds_warnings
             self._summary_data.distance_warnings = distance_warnings
-            print(f"[DEBUG] Summary data now has {len(self._summary_data.duplicate_objects_warnings)} duplicates, {len(self._summary_data.skipped_numbers_warnings)} skipped, {len(self._summary_data.out_of_bounds_warnings)} out-of-bounds, and {len(self._summary_data.distance_warnings)} distance")
+            self._summary_data.missing_total_station_warnings = missing_total_station_warnings
+            print(f"[DEBUG] Summary data now has {len(self._summary_data.duplicate_objects_warnings)} duplicates, {len(self._summary_data.skipped_numbers_warnings)} skipped, {len(self._summary_data.out_of_bounds_warnings)} out-of-bounds, {len(self._summary_data.distance_warnings)} distance, and {len(self._summary_data.missing_total_station_warnings)} missing total station")
             
             # Recreate the UI to show updated warnings
             print("[DEBUG] Recreating summary content")

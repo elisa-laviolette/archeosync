@@ -650,6 +650,34 @@ class ArcheoSyncPlugin:
             else:
                 print(f"[DEBUG] Skipping distance detection - missing total station points or objects")
             
+            # Run missing total station detection if both total station points and objects were imported
+            missing_total_station_warnings = []
+            if (summary_data.get('csv_points_count', 0) > 0 and 
+                summary_data.get('objects_count', 0) > 0):
+                print(f"[DEBUG] Running missing total station detection in main plugin")
+                try:
+                    from services.missing_total_station_detector_service import MissingTotalStationDetectorService
+                except ImportError:
+                    # Fallback for relative import
+                    import sys
+                    import os
+                    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+                    from services.missing_total_station_detector_service import MissingTotalStationDetectorService
+                
+                missing_total_station_detector = MissingTotalStationDetectorService(
+                    settings_manager=self._settings_manager,
+                    layer_service=self._layer_service,
+                    translation_service=self._translation_service
+                )
+                missing_total_station_warnings = missing_total_station_detector.detect_missing_total_station_warnings()
+                print(f"[DEBUG] Missing total station detection completed, found {len(missing_total_station_warnings)} warnings")
+                for i, warning in enumerate(missing_total_station_warnings):
+                    print(f"[DEBUG] Missing total station warning {i+1}: {warning}")
+                    if hasattr(warning, 'message'):
+                        print(f"[DEBUG]   Message: {warning.message}")
+            else:
+                print(f"[DEBUG] Skipping missing total station detection - missing total station points or objects")
+            
             # Create summary data
             summary = ImportSummaryData(
                 csv_points_count=summary_data.get('csv_points_count', 0),
@@ -667,6 +695,7 @@ class ArcheoSyncPlugin:
             summary.skipped_numbers_warnings = skipped_numbers_warnings
             summary.out_of_bounds_warnings = out_of_bounds_warnings
             summary.distance_warnings = distance_warnings
+            summary.missing_total_station_warnings = missing_total_station_warnings
             
             print(f"[DEBUG] Summary data warnings - duplicates: {len(duplicate_objects_warnings)}, skipped: {len(skipped_numbers_warnings)}, out-of-bounds: {len(out_of_bounds_warnings)}")
             print(f"[DEBUG] Summary object attributes: {dir(summary)}")

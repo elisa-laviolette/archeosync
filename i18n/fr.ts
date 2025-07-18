@@ -516,6 +516,21 @@ Consultez la console pour plus de détails sur les erreurs.</translation>
         <translation>Couches et champs</translation>
     </message>
     <message>
+        <location filename="../ui/import_summary_dialog.py" line="420"/>
+        <source>Missing Total Station Warnings:</source>
+        <translation>Avertissements de station totale manquante :</translation>
+    </message>
+    <message>
+        <location filename="../ui/import_summary_dialog.py" line="430"/>
+        <source>Select and Show Entities</source>
+        <translation>Sélectionner et afficher les entités</translation>
+    </message>
+    <message>
+        <location filename="../services/missing_total_station_detector_service.py" line="580"/>
+        <source>{feature_text} have no matching total station points</source>
+        <translation>{feature_text} n'ont pas de points de station totale correspondants</translation>
+    </message>
+    <message>
         <location filename="../ui/settings_dialog.py" line="241"/>
         <source>Configure raster processing settings for field project creation.</source>
         <translation>Configurez les paramètres de traitement raster pour la création de projets de terrain.</translation>
