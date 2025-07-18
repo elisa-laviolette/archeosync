@@ -24,6 +24,8 @@ class WarningData:
     distance_issues: Optional[List[dict]] = None
     # Fields for missing total station warnings
     missing_total_station_issues: Optional[List[dict]] = None
+    # Fields for height difference warnings
+    height_difference_issues: Optional[List[dict]] = None
 
 
 @dataclass
@@ -43,6 +45,7 @@ class ImportSummaryData:
     distance_warnings: List[Union[str, WarningData]] = None
     missing_total_station_warnings: List[Union[str, WarningData]] = None
     duplicate_total_station_identifiers_warnings: List[Union[str, WarningData]] = None
+    height_difference_warnings: List[Union[str, WarningData]] = None
     
     def __post_init__(self):
         """Initialize default values for mutable fields."""
@@ -57,4 +60,6 @@ class ImportSummaryData:
         if self.missing_total_station_warnings is None:
             self.missing_total_station_warnings = []
         if self.duplicate_total_station_identifiers_warnings is None:
-            self.duplicate_total_station_identifiers_warnings = [] 
+            self.duplicate_total_station_identifiers_warnings = []
+        if self.height_difference_warnings is None:
+            self.height_difference_warnings = [] 

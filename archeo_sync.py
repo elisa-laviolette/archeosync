@@ -710,6 +710,33 @@ class ArcheoSyncPlugin:
             else:
                 print(f"[DEBUG] Skipping duplicate total station identifiers detection - no total station points imported")
             
+            # Run height difference detection if total station points were imported
+            height_difference_warnings = []
+            if summary_data.get('csv_points_count', 0) > 0:
+                print(f"[DEBUG] Running height difference detection in main plugin")
+                try:
+                    from services.height_difference_detector_service import HeightDifferenceDetectorService
+                except ImportError:
+                    # Fallback for relative import
+                    import sys
+                    import os
+                    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+                    from services.height_difference_detector_service import HeightDifferenceDetectorService
+                
+                height_difference_detector = HeightDifferenceDetectorService(
+                    settings_manager=self._settings_manager,
+                    layer_service=self._layer_service,
+                    translation_service=self._translation_service
+                )
+                height_difference_warnings = height_difference_detector.detect_height_difference_warnings()
+                print(f"[DEBUG] Height difference detection completed, found {len(height_difference_warnings)} warnings")
+                for i, warning in enumerate(height_difference_warnings):
+                    print(f"[DEBUG] Height difference warning {i+1}: {warning}")
+                    if hasattr(warning, 'message'):
+                        print(f"[DEBUG]   Message: {warning.message}")
+            else:
+                print(f"[DEBUG] Skipping height difference detection - no total station points imported")
+            
             # Create summary data
             summary = ImportSummaryData(
                 csv_points_count=summary_data.get('csv_points_count', 0),
@@ -729,6 +756,7 @@ class ArcheoSyncPlugin:
             summary.distance_warnings = distance_warnings
             summary.missing_total_station_warnings = missing_total_station_warnings
             summary.duplicate_total_station_identifiers_warnings = duplicate_total_station_identifiers_warnings
+            summary.height_difference_warnings = height_difference_warnings
             
             print(f"[DEBUG] Summary data warnings - duplicates: {len(duplicate_objects_warnings)}, skipped: {len(skipped_numbers_warnings)}, out-of-bounds: {len(out_of_bounds_warnings)}")
             print(f"[DEBUG] Summary object attributes: {dir(summary)}")
