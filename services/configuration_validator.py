@@ -566,6 +566,41 @@ class ArcheoSyncConfigurationValidator(IConfigurationValidator):
                 settings['total_station_points_layer']
             )
         
+        # Validate warning settings
+        if 'distance_max_distance' in settings:
+            validation_results['distance_max_distance'] = self.validate_distance_max_distance(
+                settings['distance_max_distance']
+            )
+        
+        if 'height_max_distance' in settings:
+            validation_results['height_max_distance'] = self.validate_height_max_distance(
+                settings['height_max_distance']
+            )
+        
+        if 'height_max_difference' in settings:
+            validation_results['height_max_difference'] = self.validate_height_max_difference(
+                settings['height_max_difference']
+            )
+        
+        if 'bounds_max_distance' in settings:
+            validation_results['bounds_max_distance'] = self.validate_bounds_max_distance(
+                settings['bounds_max_distance']
+            )
+        
+        # Validate enable_*_warnings settings (should be bool)
+        for key in [
+            'enable_distance_warnings',
+            'enable_height_warnings',
+            'enable_bounds_warnings',
+            'enable_duplicate_objects_warnings',
+            'enable_duplicate_total_station_identifiers_warnings',
+            'enable_skipped_numbers_warnings',
+            'enable_missing_total_station_warnings',
+        ]:
+            if key in settings:
+                if not isinstance(settings[key], bool):
+                    validation_results[key] = [f"{key} must be a boolean value (True or False)"]
+        
         # Validate layer relationships if layers are configured
         recording_areas_layer = settings.get('recording_areas_layer', '')
         objects_layer = settings.get('objects_layer', '')
@@ -666,5 +701,81 @@ class ArcheoSyncConfigurationValidator(IConfigurationValidator):
             errors.append("Saturation value must be an integer")
         elif value < -100 or value > 100:
             errors.append("Saturation value must be between -100 and 100")
+        
+        return errors 
+
+    def validate_distance_max_distance(self, value: float) -> List[str]:
+        """
+        Validate distance max distance setting.
+        
+        Args:
+            value: Distance value to validate
+            
+        Returns:
+            List of validation error messages (empty if valid)
+        """
+        errors = []
+        
+        if not isinstance(value, (int, float)):
+            errors.append("Distance max distance must be a number")
+        elif value < 0.01 or value > 10.0:
+            errors.append("Distance max distance must be between 0.01 and 10.0 meters")
+        
+        return errors
+    
+    def validate_height_max_distance(self, value: float) -> List[str]:
+        """
+        Validate height max distance setting.
+        
+        Args:
+            value: Distance value to validate
+            
+        Returns:
+            List of validation error messages (empty if valid)
+        """
+        errors = []
+        
+        if not isinstance(value, (int, float)):
+            errors.append("Height max distance must be a number")
+        elif value < 0.1 or value > 10.0:
+            errors.append("Height max distance must be between 0.1 and 10.0 meters")
+        
+        return errors
+    
+    def validate_height_max_difference(self, value: float) -> List[str]:
+        """
+        Validate height max difference setting.
+        
+        Args:
+            value: Height difference value to validate
+            
+        Returns:
+            List of validation error messages (empty if valid)
+        """
+        errors = []
+        
+        if not isinstance(value, (int, float)):
+            errors.append("Height max difference must be a number")
+        elif value < 0.01 or value > 5.0:
+            errors.append("Height max difference must be between 0.01 and 5.0 meters")
+        
+        return errors
+    
+    def validate_bounds_max_distance(self, value: float) -> List[str]:
+        """
+        Validate bounds max distance setting.
+        
+        Args:
+            value: Distance value to validate
+            
+        Returns:
+            List of validation error messages (empty if valid)
+        """
+        errors = []
+        
+        if not isinstance(value, (int, float)):
+            errors.append("Bounds max distance must be a number")
+        elif value < 0.01 or value > 10.0:
+            errors.append("Bounds max distance must be between 0.01 and 10.0 meters")
         
         return errors 

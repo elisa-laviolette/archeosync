@@ -50,7 +50,7 @@ class OutOfBoundsDetectorService:
     positioned outside the expected boundaries by more than a specified distance.
     """
     
-    def __init__(self, settings_manager, layer_service, translation_service, max_distance_meters: float = 0.2):
+    def __init__(self, settings_manager, layer_service, translation_service):
         """
         Initialize the service with required dependencies.
         
@@ -58,12 +58,13 @@ class OutOfBoundsDetectorService:
             settings_manager: Service for managing settings
             layer_service: Service for layer operations
             translation_service: Service for translations
-            max_distance_meters: Maximum allowed distance outside recording area in meters (default: 0.2 = 20 cm)
         """
         self._settings_manager = settings_manager
         self._layer_service = layer_service
         self._translation_service = translation_service
-        self._max_distance_meters = max_distance_meters
+        
+        # Get configurable thresholds from settings with defaults
+        self._max_distance_meters = self._settings_manager.get_value('bounds_max_distance', 0.2)
     
     def detect_out_of_bounds_features(self) -> List[Union[str, WarningData]]:
         """
@@ -73,6 +74,11 @@ class OutOfBoundsDetectorService:
             List of warning messages or structured warning data about out-of-bounds features
         """
         warnings = []
+        
+        # Check if out of bounds warnings are enabled
+        if not self._settings_manager.get_value('enable_bounds_warnings', True):
+            print(f"[DEBUG] Out of bounds warnings are disabled, skipping detection")
+            return warnings
         
         print(f"[DEBUG] Starting out-of-bounds detection with max_distance_meters: {self._max_distance_meters}")
         

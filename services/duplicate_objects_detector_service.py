@@ -93,6 +93,10 @@ class DuplicateObjectsDetectorService:
         Returns:
             List of warning messages or structured warning data about duplicate objects
         """
+        # Check if duplicate objects warnings are enabled
+        if not self._settings_manager.get_value('enable_duplicate_objects_warnings', True):
+            print("[DEBUG] Duplicate objects warnings are disabled, skipping detection")
+            return []
         warnings = []
         
         try:

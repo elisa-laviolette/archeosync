@@ -50,7 +50,7 @@ class DistanceDetectorService:
     apart (> 5 cm) and not overlapping.
     """
     
-    def __init__(self, settings_manager, layer_service, translation_service, max_distance_meters: float = 0.05):
+    def __init__(self, settings_manager, layer_service, translation_service):
         """
         Initialize the service with required dependencies.
         
@@ -58,12 +58,13 @@ class DistanceDetectorService:
             settings_manager: Service for managing settings
             layer_service: Service for layer operations
             translation_service: Service for translations
-            max_distance_meters: Maximum allowed distance between points and objects in meters (default: 0.05 = 5 cm)
         """
         self._settings_manager = settings_manager
         self._layer_service = layer_service
         self._translation_service = translation_service
-        self._max_distance_meters = max_distance_meters
+        
+        # Get configurable thresholds from settings with defaults
+        self._max_distance_meters = self._settings_manager.get_value('distance_max_distance', 0.05)
     
     def detect_distance_warnings(self) -> List[Union[str, WarningData]]:
         """
@@ -73,6 +74,11 @@ class DistanceDetectorService:
             List of warning messages or structured warning data about distance issues
         """
         warnings = []
+        
+        # Check if distance warnings are enabled
+        if not self._settings_manager.get_value('enable_distance_warnings', True):
+            print(f"[DEBUG] Distance warnings are disabled, skipping detection")
+            return warnings
         
         print(f"[DEBUG] Starting distance detection with max_distance_meters: {self._max_distance_meters}")
         

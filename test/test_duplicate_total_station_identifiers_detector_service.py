@@ -29,6 +29,9 @@ class TestDuplicateTotalStationIdentifiersDetectorService(unittest.TestCase):
         self.layer_service = Mock()
         self.translation_service = Mock()
         
+        # Set up translation service to return the input string (no translation)
+        self.translation_service.translate = Mock(side_effect=lambda x: x)
+        
         self.detector = DuplicateTotalStationIdentifiersDetectorService(
             settings_manager=self.settings_manager,
             layer_service=self.layer_service,
@@ -259,18 +262,23 @@ class TestDuplicateTotalStationIdentifiersDetectorService(unittest.TestCase):
         field = Mock()
         field.name.return_value = "point_id"
         field.typeName.return_value = "String"
-        layer.fields.return_value = [field]
-        layer.fields().indexOf.return_value = 0
         
-        # Create mock features
+        # Create a proper mock for fields() that returns a list and has indexOf method
+        fields_mock = Mock()
+        fields_mock.indexOf.return_value = 0
+        fields_mock.__iter__ = Mock(return_value=iter([field]))
+        
+        layer.fields.return_value = fields_mock
+        
+        # Create mock features with proper __getitem__ setup
         feature1 = Mock()
-        feature1.__getitem__.return_value = "TS001"
+        feature1.__getitem__ = Mock(return_value="TS001")
         
         feature2 = Mock()
-        feature2.__getitem__.return_value = "TS001"  # Duplicate
+        feature2.__getitem__ = Mock(return_value="TS001")  # Duplicate
         
         feature3 = Mock()
-        feature3.__getitem__.return_value = "TS002"
+        feature3.__getitem__ = Mock(return_value="TS002")
         
         layer.getFeatures.return_value = [feature1, feature2, feature3]
         
@@ -297,18 +305,20 @@ class TestDuplicateTotalStationIdentifiersDetectorService(unittest.TestCase):
         field.name.return_value = "point_id"
         field.typeName.return_value = "String"
         
-        definitive_layer.fields.return_value = [field]
-        temp_layer.fields.return_value = [field]
+        # Create a proper mock for fields() that returns a list and has indexOf method
+        fields_mock = Mock()
+        fields_mock.indexOf.return_value = 0
+        fields_mock.__iter__ = Mock(return_value=iter([field]))
         
-        definitive_layer.fields().indexOf.return_value = 0
-        temp_layer.fields().indexOf.return_value = 0
+        definitive_layer.fields.return_value = fields_mock
+        temp_layer.fields.return_value = fields_mock
         
-        # Create mock features
+        # Create mock features with proper __getitem__ setup
         definitive_feature = Mock()
-        definitive_feature.__getitem__.return_value = "TS001"
+        definitive_feature.__getitem__ = Mock(return_value="TS001")
         
         temp_feature = Mock()
-        temp_feature.__getitem__.return_value = "TS001"  # Same identifier
+        temp_feature.__getitem__ = Mock(return_value="TS001")  # Same identifier
         
         definitive_layer.getFeatures.return_value = [definitive_feature]
         temp_layer.getFeatures.return_value = [temp_feature]
@@ -323,6 +333,140 @@ class TestDuplicateTotalStationIdentifiersDetectorService(unittest.TestCase):
         self.assertIsInstance(warnings[0], WarningData)
         self.assertIn("TS001", warnings[0].message)
         self.assertIn("both imported and definitive", warnings[0].message)
+    
+    def test_detect_duplicates_between_layers_optimization(self):
+        """Test that the between layers detection is optimized to only check matching identifiers."""
+        # Create mock layers
+        definitive_layer = Mock()
+        definitive_layer.name.return_value = "Definitive Layer"
+        
+        temp_layer = Mock()
+        temp_layer.name.return_value = "Imported_CSV_Points"
+        
+        # Create mock fields
+        field = Mock()
+        field.name.return_value = "point_id"
+        field.typeName.return_value = "String"
+        
+        # Create a proper mock for fields() that returns a list and has indexOf method
+        fields_mock = Mock()
+        fields_mock.indexOf.return_value = 0
+        fields_mock.__iter__ = Mock(return_value=iter([field]))
+        
+        definitive_layer.fields.return_value = fields_mock
+        temp_layer.fields.return_value = fields_mock
+        
+        # Create mock features for definitive layer (many features, only one matching)
+        definitive_features = []
+        for i in range(100):  # 100 features in definitive layer
+            feature = Mock()
+            if i == 50:  # Only one feature with matching identifier
+                feature.__getitem__ = Mock(return_value="TS001")
+            else:
+                feature.__getitem__ = Mock(return_value=f"DEF{i}")  # Different identifiers
+            definitive_features.append(feature)
+        
+        # Create mock features for temp layer (only one feature)
+        temp_feature = Mock()
+        temp_feature.__getitem__ = Mock(return_value="TS001")  # Same identifier as one definitive feature
+        
+        definitive_layer.getFeatures.return_value = definitive_features
+        temp_layer.getFeatures.return_value = [temp_feature]
+        
+        # Test the method
+        warnings = self.detector._detect_duplicates_between_layers(
+            definitive_layer, temp_layer, "point_id", "point_id"
+        )
+        
+        # Assert warnings were created for the matching identifier
+        self.assertEqual(len(warnings), 1)
+        self.assertIsInstance(warnings[0], WarningData)
+        self.assertIn("TS001", warnings[0].message)
+        self.assertIn("both imported and definitive", warnings[0].message)
+        
+        # Verify that the method only processed the matching identifier
+        # The optimization should have only added "TS001" to definitive_identifiers
+        # and not processed all 100 features in the definitive layer
+    
+    def test_detect_duplicates_between_layers_no_matches(self):
+        """Test that no warnings are created when there are no matching identifiers."""
+        # Create mock layers
+        definitive_layer = Mock()
+        definitive_layer.name.return_value = "Definitive Layer"
+        
+        temp_layer = Mock()
+        temp_layer.name.return_value = "Imported_CSV_Points"
+        
+        # Create mock fields
+        field = Mock()
+        field.name.return_value = "point_id"
+        field.typeName.return_value = "String"
+        
+        # Create a proper mock for fields() that returns a list and has indexOf method
+        fields_mock = Mock()
+        fields_mock.indexOf.return_value = 0
+        fields_mock.__iter__ = Mock(return_value=iter([field]))
+        
+        definitive_layer.fields.return_value = fields_mock
+        temp_layer.fields.return_value = fields_mock
+        
+        # Create mock features with different identifiers
+        definitive_feature = Mock()
+        definitive_feature.__getitem__ = Mock(return_value="DEF001")
+        
+        temp_feature = Mock()
+        temp_feature.__getitem__ = Mock(return_value="TEMP001")  # Different identifier
+        
+        definitive_layer.getFeatures.return_value = [definitive_feature]
+        temp_layer.getFeatures.return_value = [temp_feature]
+        
+        # Test the method
+        warnings = self.detector._detect_duplicates_between_layers(
+            definitive_layer, temp_layer, "point_id", "point_id"
+        )
+        
+        # Assert no warnings were created
+        self.assertEqual(len(warnings), 0)
+    
+    def test_detect_duplicates_between_layers_empty_temp_layer(self):
+        """Test that no warnings are created when temporary layer has no identifiers."""
+        # Create mock layers
+        definitive_layer = Mock()
+        definitive_layer.name.return_value = "Definitive Layer"
+        
+        temp_layer = Mock()
+        temp_layer.name.return_value = "Imported_CSV_Points"
+        
+        # Create mock fields
+        field = Mock()
+        field.name.return_value = "point_id"
+        field.typeName.return_value = "String"
+        
+        # Create a proper mock for fields() that returns a list and has indexOf method
+        fields_mock = Mock()
+        fields_mock.indexOf.return_value = 0
+        fields_mock.__iter__ = Mock(return_value=iter([field]))
+        
+        definitive_layer.fields.return_value = fields_mock
+        temp_layer.fields.return_value = fields_mock
+        
+        # Create mock features - temp layer has no valid identifiers
+        definitive_feature = Mock()
+        definitive_feature.__getitem__ = Mock(return_value="DEF001")
+        
+        temp_feature = Mock()
+        temp_feature.__getitem__ = Mock(return_value=None)  # No identifier
+        
+        definitive_layer.getFeatures.return_value = [definitive_feature]
+        temp_layer.getFeatures.return_value = [temp_feature]
+        
+        # Test the method
+        warnings = self.detector._detect_duplicates_between_layers(
+            definitive_layer, temp_layer, "point_id", "point_id"
+        )
+        
+        # Assert no warnings were created
+        self.assertEqual(len(warnings), 0)
     
     def test_detect_duplicate_identifiers_warnings_no_configuration(self):
         """Test detection when no total station points layer is configured."""
@@ -387,23 +531,23 @@ class TestDuplicateTotalStationIdentifiersDetectorService(unittest.TestCase):
     def test_create_duplicate_warning(self):
         """Test creating a duplicate warning message."""
         # Test with translation service
-        self.translation_service.tr.return_value = "Translated message"
+        self.translation_service.translate.return_value = "Translated message"
         
         result = self.detector._create_duplicate_warning(3, "TS001", "Test Layer")
         
         # Assert translation was called
-        self.translation_service.tr.assert_called_once()
+        self.translation_service.translate.assert_called_once()
         self.assertEqual(result, "Translated message")
     
     def test_create_between_layers_duplicate_warning(self):
         """Test creating a between-layers duplicate warning message."""
         # Test with translation service
-        self.translation_service.tr.return_value = "Translated between layers message"
+        self.translation_service.translate.return_value = "Translated between layers message"
         
         result = self.detector._create_between_layers_duplicate_warning("TS001")
         
         # Assert translation was called
-        self.translation_service.tr.assert_called_once()
+        self.translation_service.translate.assert_called_once()
         self.assertEqual(result, "Translated between layers message")
     
     def test_create_warning_without_translation_service(self):

@@ -35,6 +35,14 @@ class TestOutOfBoundsDetectorService(unittest.TestCase):
         self.translation_service = Mock()
         self.translation_service.translate.return_value = "Translated message"
         
+        # Mock settings values
+        self.settings_manager.get_value.side_effect = lambda key, default=None: {
+            'bounds_max_distance': 0.2,
+            'enable_bounds_warnings': True,
+            'recording_areas_layer': 'test_layer_id',
+            'objects_layer': 'test_layer_id'
+        }.get(key, default)
+        
         self.service = OutOfBoundsDetectorService(
             settings_manager=self.settings_manager,
             layer_service=self.layer_service,
@@ -52,11 +60,12 @@ class TestOutOfBoundsDetectorService(unittest.TestCase):
     
     def test_init_with_custom_distance(self):
         """Test initialization with custom distance."""
+        # Mock settings to return custom distance
+        self.settings_manager.get_value.return_value = 0.5
         service = OutOfBoundsDetectorService(
             settings_manager=self.settings_manager,
             layer_service=self.layer_service,
-            translation_service=self.translation_service,
-            max_distance_meters=0.5
+            translation_service=self.translation_service
         )
         self.assertEqual(service._max_distance_meters, 0.5)
     
@@ -72,10 +81,12 @@ class TestOutOfBoundsDetectorService(unittest.TestCase):
     
     def test_detect_out_of_bounds_features_no_recording_areas_layer(self):
         """Test detection when recording areas layer is not found."""
-        self.settings_manager.get_value.side_effect = lambda key: {
+        self.settings_manager.get_value.side_effect = lambda key, default=None: {
+            'enable_bounds_warnings': True,
+            'bounds_max_distance': 0.2,
             'recording_areas_layer': 'recording_layer_id',
             'objects_layer': 'objects_layer_id'
-        }.get(key, '')
+        }.get(key, default)
         
         self.layer_service.get_layer_by_id.return_value = None
         
@@ -86,12 +97,12 @@ class TestOutOfBoundsDetectorService(unittest.TestCase):
     
     def test_detect_out_of_bounds_features_no_objects_layer(self):
         """Test detection when objects layer is not configured."""
-        self.settings_manager.get_value.side_effect = lambda key: {
+        self.settings_manager.get_value.side_effect = lambda key, default=None: {
             'recording_areas_layer': 'recording_layer_id',
             'objects_layer': '',
             'features_layer': '',
             'small_finds_layer': ''
-        }.get(key, '')
+        }.get(key, default)
         
         recording_layer = Mock()
         self.layer_service.get_layer_by_id.return_value = recording_layer

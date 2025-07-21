@@ -67,6 +67,10 @@ class SkippedNumbersDetectorService:
         Returns:
             List of warning messages or structured warning data about skipped numbers
         """
+        # Check if skipped numbers warnings are enabled
+        if not self._settings_manager.get_value('enable_skipped_numbers_warnings', True):
+            print("[DEBUG] Skipped numbers warnings are disabled, skipping detection")
+            return []
         warnings = []
         
         try:

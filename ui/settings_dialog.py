@@ -123,6 +123,7 @@ class SettingsDialog(QtWidgets.QDialog):
         # Create tabs
         self._create_folders_tab()
         self._create_layers_fields_tab()
+        self._create_warnings_tab()
         self._create_raster_tab()
         
         # Add button box
@@ -239,6 +240,130 @@ class SettingsDialog(QtWidgets.QDialog):
         
         # Add tab to widget
         self._tab_widget.addTab(layers_widget, self.tr("Layers & Fields"))
+    
+    def _create_warnings_tab(self) -> None:
+        """Create the warnings configuration tab."""
+        warnings_widget = QtWidgets.QWidget()
+        warnings_layout = QtWidgets.QVBoxLayout(warnings_widget)
+        
+        # Add description
+        description_label = QtWidgets.QLabel(
+            self.tr("Configure warning settings for data quality checks in ArcheoSync.")
+        )
+        description_label.setWordWrap(True)
+        description_label.setStyleSheet("color: gray; font-size: 11px; margin-bottom: 10px;")
+        warnings_layout.addWidget(description_label)
+        
+        # Create form layout for warning settings
+        form_layout = QtWidgets.QFormLayout()
+        
+        # Distance Detection Settings
+        distance_group = QtWidgets.QGroupBox(self.tr("Distance Detection"))
+        distance_layout = QtWidgets.QFormLayout(distance_group)
+        
+        # Enable distance warnings
+        self._enable_distance_warnings = QtWidgets.QCheckBox()
+        self._enable_distance_warnings.setChecked(self._settings_manager.get_value('enable_distance_warnings', True))
+        distance_layout.addRow(self.tr("Enable Distance Warnings:"), self._enable_distance_warnings)
+        
+        # Maximum distance for distance warnings (between total station points and objects)
+        self._distance_max_distance = QtWidgets.QDoubleSpinBox()
+        self._distance_max_distance.setMinimum(0.01)
+        self._distance_max_distance.setMaximum(10.0)
+        self._distance_max_distance.setSingleStep(0.01)
+        self._distance_max_distance.setDecimals(2)
+        self._distance_max_distance.setSuffix(self.tr(" m"))
+        self._distance_max_distance.setValue(self._settings_manager.get_value('distance_max_distance', 0.05))
+        self._distance_max_distance.setMinimumWidth(100)
+        distance_layout.addRow(self.tr("Maximum Distance (Total Station to Objects):"), self._distance_max_distance)
+        
+        warnings_layout.addWidget(distance_group)
+        
+        # Height Difference Detection Settings
+        height_group = QtWidgets.QGroupBox(self.tr("Height Difference Detection"))
+        height_layout = QtWidgets.QFormLayout(height_group)
+        
+        # Enable height difference warnings
+        self._enable_height_warnings = QtWidgets.QCheckBox()
+        self._enable_height_warnings.setChecked(self._settings_manager.get_value('enable_height_warnings', True))
+        height_layout.addRow(self.tr("Enable Height Difference Warnings:"), self._enable_height_warnings)
+        
+        # Maximum distance for height difference detection
+        self._height_max_distance = QtWidgets.QDoubleSpinBox()
+        self._height_max_distance.setMinimum(0.1)
+        self._height_max_distance.setMaximum(10.0)
+        self._height_max_distance.setSingleStep(0.1)
+        self._height_max_distance.setDecimals(1)
+        self._height_max_distance.setSuffix(self.tr(" m"))
+        self._height_max_distance.setValue(self._settings_manager.get_value('height_max_distance', 1.0))
+        self._height_max_distance.setMinimumWidth(100)
+        height_layout.addRow(self.tr("Maximum Distance (Close Points):"), self._height_max_distance)
+        
+        # Maximum height difference
+        self._height_max_difference = QtWidgets.QDoubleSpinBox()
+        self._height_max_difference.setMinimum(0.01)
+        self._height_max_difference.setMaximum(5.0)
+        self._height_max_difference.setSingleStep(0.01)
+        self._height_max_difference.setDecimals(2)
+        self._height_max_difference.setSuffix(self.tr(" m"))
+        self._height_max_difference.setValue(self._settings_manager.get_value('height_max_difference', 0.2))
+        self._height_max_difference.setMinimumWidth(100)
+        height_layout.addRow(self.tr("Maximum Height Difference:"), self._height_max_difference)
+        
+        warnings_layout.addWidget(height_group)
+        
+        # Out of Bounds Detection Settings
+        bounds_group = QtWidgets.QGroupBox(self.tr("Out of Bounds Detection"))
+        bounds_layout = QtWidgets.QFormLayout(bounds_group)
+        
+        # Enable out of bounds warnings
+        self._enable_bounds_warnings = QtWidgets.QCheckBox()
+        self._enable_bounds_warnings.setChecked(self._settings_manager.get_value('enable_bounds_warnings', True))
+        bounds_layout.addRow(self.tr("Enable Out of Bounds Warnings:"), self._enable_bounds_warnings)
+        
+        # Maximum distance outside recording area
+        self._bounds_max_distance = QtWidgets.QDoubleSpinBox()
+        self._bounds_max_distance.setMinimum(0.01)
+        self._bounds_max_distance.setMaximum(10.0)
+        self._bounds_max_distance.setSingleStep(0.01)
+        self._bounds_max_distance.setDecimals(2)
+        self._bounds_max_distance.setSuffix(self.tr(" m"))
+        self._bounds_max_distance.setValue(self._settings_manager.get_value('bounds_max_distance', 0.2))
+        self._bounds_max_distance.setMinimumWidth(100)
+        bounds_layout.addRow(self.tr("Maximum Distance Outside Recording Area:"), self._bounds_max_distance)
+        
+        warnings_layout.addWidget(bounds_group)
+        
+        # Other Warnings (non-distance-based)
+        other_group = QtWidgets.QGroupBox(self.tr("Other Warnings"))
+        other_layout = QtWidgets.QFormLayout(other_group)
+        
+        # Enable duplicate objects warnings
+        self._enable_duplicate_objects_warnings = QtWidgets.QCheckBox()
+        self._enable_duplicate_objects_warnings.setChecked(self._settings_manager.get_value('enable_duplicate_objects_warnings', True))
+        other_layout.addRow(self.tr("Enable Duplicate Objects Warnings:"), self._enable_duplicate_objects_warnings)
+        
+        # Enable duplicate total station identifiers warnings
+        self._enable_duplicate_total_station_identifiers_warnings = QtWidgets.QCheckBox()
+        self._enable_duplicate_total_station_identifiers_warnings.setChecked(self._settings_manager.get_value('enable_duplicate_total_station_identifiers_warnings', True))
+        other_layout.addRow(self.tr("Enable Duplicate Total Station Identifiers Warnings:"), self._enable_duplicate_total_station_identifiers_warnings)
+        
+        # Enable skipped numbers warnings
+        self._enable_skipped_numbers_warnings = QtWidgets.QCheckBox()
+        self._enable_skipped_numbers_warnings.setChecked(self._settings_manager.get_value('enable_skipped_numbers_warnings', True))
+        other_layout.addRow(self.tr("Enable Skipped Numbers Warnings:"), self._enable_skipped_numbers_warnings)
+        
+        # Enable missing total station warnings
+        self._enable_missing_total_station_warnings = QtWidgets.QCheckBox()
+        self._enable_missing_total_station_warnings.setChecked(self._settings_manager.get_value('enable_missing_total_station_warnings', True))
+        other_layout.addRow(self.tr("Enable Missing Total Station Warnings:"), self._enable_missing_total_station_warnings)
+        
+        warnings_layout.addWidget(other_group)
+        
+        warnings_layout.addStretch()
+        
+        # Add tab to widget
+        self._tab_widget.addTab(warnings_widget, self.tr("Error detection"))
     
     def _create_raster_tab(self) -> None:
         """Create the raster configuration tab."""
@@ -858,7 +983,18 @@ class SettingsDialog(QtWidgets.QDialog):
                 elif item.flags() & Qt.ItemIsEnabled:
                     item.setCheckState(Qt.Unchecked)
             
-
+            # Load warning settings
+            self._enable_distance_warnings.setChecked(self._settings_manager.get_value('enable_distance_warnings', True))
+            self._distance_max_distance.setValue(self._settings_manager.get_value('distance_max_distance', 0.05))
+            self._enable_height_warnings.setChecked(self._settings_manager.get_value('enable_height_warnings', True))
+            self._height_max_distance.setValue(self._settings_manager.get_value('height_max_distance', 1.0))
+            self._height_max_difference.setValue(self._settings_manager.get_value('height_max_difference', 0.2))
+            self._enable_bounds_warnings.setChecked(self._settings_manager.get_value('enable_bounds_warnings', True))
+            self._bounds_max_distance.setValue(self._settings_manager.get_value('bounds_max_distance', 0.2))
+            self._enable_duplicate_objects_warnings.setChecked(self._settings_manager.get_value('enable_duplicate_objects_warnings', True))
+            self._enable_duplicate_total_station_identifiers_warnings.setChecked(self._settings_manager.get_value('enable_duplicate_total_station_identifiers_warnings', True))
+            self._enable_skipped_numbers_warnings.setChecked(self._settings_manager.get_value('enable_skipped_numbers_warnings', True))
+            self._enable_missing_total_station_warnings.setChecked(self._settings_manager.get_value('enable_missing_total_station_warnings', True))
             
             # Store original values
             self._original_values = {
@@ -880,6 +1016,17 @@ class SettingsDialog(QtWidgets.QDialog):
                 'raster_contrast': int(contrast),
                 'raster_saturation': int(saturation),
                 'extra_field_layers': extra_layers,
+                'enable_distance_warnings': self._settings_manager.get_value('enable_distance_warnings', True),
+                'distance_max_distance': self._settings_manager.get_value('distance_max_distance', 0.05),
+                'enable_height_warnings': self._settings_manager.get_value('enable_height_warnings', True),
+                'height_max_distance': self._settings_manager.get_value('height_max_distance', 1.0),
+                'height_max_difference': self._settings_manager.get_value('height_max_difference', 0.2),
+                'enable_bounds_warnings': self._settings_manager.get_value('enable_bounds_warnings', True),
+                'bounds_max_distance': self._settings_manager.get_value('bounds_max_distance', 0.2),
+                'enable_duplicate_objects_warnings': self._settings_manager.get_value('enable_duplicate_objects_warnings', True),
+                'enable_duplicate_total_station_identifiers_warnings': self._settings_manager.get_value('enable_duplicate_total_station_identifiers_warnings', True),
+                'enable_skipped_numbers_warnings': self._settings_manager.get_value('enable_skipped_numbers_warnings', True),
+                'enable_missing_total_station_warnings': self._settings_manager.get_value('enable_missing_total_station_warnings', True),
 
             }
             
@@ -909,6 +1056,17 @@ class SettingsDialog(QtWidgets.QDialog):
                 'raster_contrast': self._sliders['Contrast'].value(),
                 'raster_saturation': self._sliders['Saturation'].value(),
                 'extra_field_layers': self._get_selected_extra_layers(),
+                'enable_distance_warnings': self._enable_distance_warnings.isChecked(),
+                'distance_max_distance': self._distance_max_distance.value(),
+                'enable_height_warnings': self._enable_height_warnings.isChecked(),
+                'height_max_distance': self._height_max_distance.value(),
+                'height_max_difference': self._height_max_difference.value(),
+                'enable_bounds_warnings': self._enable_bounds_warnings.isChecked(),
+                'bounds_max_distance': self._bounds_max_distance.value(),
+                'enable_duplicate_objects_warnings': self._enable_duplicate_objects_warnings.isChecked(),
+                'enable_duplicate_total_station_identifiers_warnings': self._enable_duplicate_total_station_identifiers_warnings.isChecked(),
+                'enable_skipped_numbers_warnings': self._enable_skipped_numbers_warnings.isChecked(),
+                'enable_missing_total_station_warnings': self._enable_missing_total_station_warnings.isChecked(),
 
             }
             
@@ -1029,6 +1187,21 @@ class SettingsDialog(QtWidgets.QDialog):
                     self._total_station_points_widget.combo_box.setCurrentIndex(0)
             else:
                 self._total_station_points_widget.combo_box.setCurrentIndex(0)
+            
+            # Revert warning settings
+            self._enable_distance_warnings.setChecked(self._original_values.get('enable_distance_warnings', True))
+            self._distance_max_distance.setValue(self._original_values.get('distance_max_distance', 0.05))
+            
+            self._enable_height_warnings.setChecked(self._original_values.get('enable_height_warnings', True))
+            self._height_max_distance.setValue(self._original_values.get('height_max_distance', 1.0))
+            self._height_max_difference.setValue(self._original_values.get('height_max_difference', 0.2))
+            
+            self._enable_bounds_warnings.setChecked(self._original_values.get('enable_bounds_warnings', True))
+            self._bounds_max_distance.setValue(self._original_values.get('bounds_max_distance', 0.2))
+            self._enable_duplicate_objects_warnings.setChecked(self._original_values.get('enable_duplicate_objects_warnings', True))
+            self._enable_duplicate_total_station_identifiers_warnings.setChecked(self._original_values.get('enable_duplicate_total_station_identifiers_warnings', True))
+            self._enable_skipped_numbers_warnings.setChecked(self._original_values.get('enable_skipped_numbers_warnings', True))
+            self._enable_missing_total_station_warnings.setChecked(self._original_values.get('enable_missing_total_station_warnings', True))
             
             # Revert settings in manager
             for key, value in self._original_values.items():

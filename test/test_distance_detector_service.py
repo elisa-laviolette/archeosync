@@ -33,6 +33,14 @@ class TestDistanceDetectorService(unittest.TestCase):
         # Mock translation service
         self.translation_service.translate.return_value = "Test warning message"
         
+        # Mock settings values
+        self.settings_manager.get_value.side_effect = lambda key, default=None: {
+            'distance_max_distance': 0.05,
+            'enable_distance_warnings': True,
+            'total_station_points_layer': 'test_layer_id',
+            'objects_layer': 'test_layer_id'
+        }.get(key, default)
+        
         # Create the service
         self.service = DistanceDetectorService(
             settings_manager=self.settings_manager,
@@ -49,7 +57,12 @@ class TestDistanceDetectorService(unittest.TestCase):
     
     def test_detect_distance_warnings_no_layers_configured(self):
         """Test detection when no layers are configured."""
-        self.settings_manager.get_value.side_effect = lambda key: None
+        self.settings_manager.get_value.side_effect = lambda key, default=None: {
+            'enable_distance_warnings': True,
+            'distance_max_distance': 0.05,
+            'total_station_points_layer': None,
+            'objects_layer': None
+        }.get(key, default)
         
         warnings = self.service.detect_distance_warnings()
         
@@ -60,7 +73,12 @@ class TestDistanceDetectorService(unittest.TestCase):
     
     def test_detect_distance_warnings_layers_not_found(self):
         """Test detection when layers are not found."""
-        self.settings_manager.get_value.side_effect = lambda key: 'test_layer_id'
+        self.settings_manager.get_value.side_effect = lambda key, default=None: {
+            'enable_distance_warnings': True,
+            'distance_max_distance': 0.05,
+            'total_station_points_layer': 'test_layer_id',
+            'objects_layer': 'test_layer_id'
+        }.get(key, default)
         self.layer_service.get_layer_by_id.return_value = None
         
         warnings = self.service.detect_distance_warnings()
@@ -76,7 +94,12 @@ class TestDistanceDetectorService(unittest.TestCase):
         objects_layer = Mock()
         objects_layer.name.return_value = "Objects"
         
-        self.settings_manager.get_value.side_effect = lambda key: 'test_layer_id'
+        self.settings_manager.get_value.side_effect = lambda key, default=None: {
+            'enable_distance_warnings': True,
+            'distance_max_distance': 0.05,
+            'total_station_points_layer': 'test_layer_id',
+            'objects_layer': 'test_layer_id'
+        }.get(key, default)
         self.layer_service.get_layer_by_id.side_effect = [points_layer, objects_layer]
         
         # Mock no relation
@@ -110,7 +133,12 @@ class TestDistanceDetectorService(unittest.TestCase):
         points_layer.fields.return_value.__getitem__ = lambda idx: points_field
         objects_layer.fields.return_value.__getitem__ = lambda idx: objects_field
         
-        self.settings_manager.get_value.side_effect = lambda key: 'test_layer_id'
+        self.settings_manager.get_value.side_effect = lambda key, default=None: {
+            'enable_distance_warnings': True,
+            'distance_max_distance': 0.05,
+            'total_station_points_layer': 'test_layer_id',
+            'objects_layer': 'test_layer_id'
+        }.get(key, default)
         self.layer_service.get_layer_by_id.side_effect = [points_layer, objects_layer]
         
         # Mock relation
@@ -162,10 +190,16 @@ class TestDistanceDetectorService(unittest.TestCase):
         objects_field = Mock()
         objects_field.name.return_value = "id"
         
-        points_layer.fields.return_value.__getitem__.return_value = points_field
-        objects_layer.fields.return_value.__getitem__.return_value = objects_field
+        # Mock fields list behavior
+        points_layer.fields.return_value.__getitem__ = lambda idx: points_field
+        objects_layer.fields.return_value.__getitem__ = lambda idx: objects_field
         
-        self.settings_manager.get_value.side_effect = lambda key: 'test_layer_id'
+        self.settings_manager.get_value.side_effect = lambda key, default=None: {
+            'enable_distance_warnings': True,
+            'distance_max_distance': 0.05,
+            'total_station_points_layer': 'test_layer_id',
+            'objects_layer': 'test_layer_id'
+        }.get(key, default)
         self.layer_service.get_layer_by_id.side_effect = [points_layer, objects_layer]
         
         # Mock relation

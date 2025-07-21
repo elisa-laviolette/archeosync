@@ -35,8 +35,8 @@ class TestHeightDifferenceDetectorService(unittest.TestCase):
         
         # Mock settings values
         self.settings_manager.get_value.side_effect = lambda key, default=None: {
-            'height_detection_max_distance': 1.0,
-            'height_detection_max_difference': 0.2,
+            'height_max_distance': 1.0,
+            'height_max_difference': 0.2,
             'total_station_points_layer': 'test_layer_id'
         }.get(key, default)
         
@@ -57,7 +57,12 @@ class TestHeightDifferenceDetectorService(unittest.TestCase):
     
     def test_detect_height_difference_warnings_no_layer_configured(self):
         """Test detection when no layer is configured."""
-        self.settings_manager.get_value.side_effect = lambda key, default=None: None
+        self.settings_manager.get_value.side_effect = lambda key, default=None: {
+            'enable_height_warnings': True,
+            'height_max_distance': 1.0,
+            'height_max_difference': 0.2,
+            'total_station_points_layer': None
+        }.get(key, default)
         
         warnings = self.service.detect_height_difference_warnings()
         

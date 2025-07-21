@@ -69,6 +69,10 @@ class MissingTotalStationDetectorService:
         Returns:
             List of warning messages or structured warning data about missing total station points
         """
+        # Check if missing total station warnings are enabled
+        if not self._settings_manager.get_value('enable_missing_total_station_warnings', True):
+            print("[DEBUG] Missing total station warnings are disabled, skipping detection")
+            return []
         warnings = []
         
         print(f"[DEBUG] Starting missing total station detection")

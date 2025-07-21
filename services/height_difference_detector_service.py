@@ -66,8 +66,8 @@ class HeightDifferenceDetectorService:
         self._translation_service = translation_service
         
         # Get configurable thresholds from settings with defaults
-        self._max_distance_meters = self._settings_manager.get_value('height_detection_max_distance', 1.0)
-        self._max_height_difference_meters = self._settings_manager.get_value('height_detection_max_difference', 0.2)
+        self._max_distance_meters = self._settings_manager.get_value('height_max_distance', 1.0)
+        self._max_height_difference_meters = self._settings_manager.get_value('height_max_difference', 0.2)
     
     def detect_height_difference_warnings(self) -> List[Union[str, WarningData]]:
         """
@@ -77,6 +77,11 @@ class HeightDifferenceDetectorService:
             List of warning messages or structured warning data about height difference issues
         """
         warnings = []
+        
+        # Check if height difference warnings are enabled
+        if not self._settings_manager.get_value('enable_height_warnings', True):
+            print(f"[DEBUG] Height difference warnings are disabled, skipping detection")
+            return warnings
         
         print(f"[DEBUG] Starting height difference detection with max_distance_meters: {self._max_distance_meters}, max_height_difference_meters: {self._max_height_difference_meters}")
         

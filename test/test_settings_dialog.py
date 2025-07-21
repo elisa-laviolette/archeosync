@@ -65,8 +65,33 @@ class TestSettingsDialog:
         self.mock_layer_service = Mock()
         self.mock_validator = Mock()
         
-        # Mock the settings manager to return empty values to prevent setText errors
-        self.mock_settings.get_value.return_value = ''
+        # Mock the settings manager to return proper values
+        self.mock_settings.get_value.side_effect = lambda key, default=None: {
+            'enable_distance_warnings': True,
+            'distance_max_distance': 0.05,
+            'enable_height_warnings': True,
+            'height_max_distance': 1.0,
+            'height_max_difference': 0.2,
+            'enable_bounds_warnings': True,
+            'bounds_max_distance': 0.2,
+            'field_projects_folder': '',
+            'total_station_folder': '',
+            'completed_projects_folder': '',
+            'csv_archive_folder': '',
+            'field_project_archive_folder': '',
+            'recording_areas_layer': '',
+            'objects_layer': '',
+            'objects_number_field': '',
+            'objects_level_field': '',
+            'features_layer': '',
+            'small_finds_layer': '',
+            'total_station_points_layer': '',
+            'raster_clipping_offset': 0.2,
+            'raster_brightness': 0,
+            'raster_contrast': 0,
+            'raster_saturation': 0,
+            'extra_field_layers': []
+        }.get(key, default)
         
         # Mock the layer service to return empty list
         self.mock_layer_service.get_polygon_layers.return_value = []
@@ -127,10 +152,11 @@ class TestSettingsDialog:
         
         # Test that the tab widget exists and has the expected tabs
         assert hasattr(self.dialog, '_tab_widget')
-        assert self.dialog._tab_widget.count() == 3
+        assert self.dialog._tab_widget.count() == 4
         assert self.dialog._tab_widget.tabText(0) == "Folders"
         assert self.dialog._tab_widget.tabText(1) == "Layers & Fields"
-        assert self.dialog._tab_widget.tabText(2) == "Raster"
+        assert self.dialog._tab_widget.tabText(2) == "Warnings"
+        assert self.dialog._tab_widget.tabText(3) == "Raster"
 
     def test_field_projects_input_properties(self):
         assert self.dialog._field_projects_widget.input_field.isReadOnly() is True
@@ -149,6 +175,16 @@ class TestSettingsDialog:
         assert hasattr(self.dialog._recording_areas_widget, 'refresh_button')
         assert self.dialog._recording_areas_widget.combo_box.count() > 0
         assert self.dialog._recording_areas_widget.combo_box.itemText(0) == "-- Select a polygon layer --"
+    
+    def test_warnings_tab_ui_elements_exist(self):
+        """Test that the warnings tab UI elements exist."""
+        assert hasattr(self.dialog, '_enable_distance_warnings')
+        assert hasattr(self.dialog, '_distance_max_distance')
+        assert hasattr(self.dialog, '_enable_height_warnings')
+        assert hasattr(self.dialog, '_height_max_distance')
+        assert hasattr(self.dialog, '_height_max_difference')
+        assert hasattr(self.dialog, '_enable_bounds_warnings')
+        assert hasattr(self.dialog, '_bounds_max_distance')
 
 
 
