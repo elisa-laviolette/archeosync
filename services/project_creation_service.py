@@ -695,45 +695,70 @@ class QGISProjectCreationService(QObject):
             return False
 
     def _save_raster_style_with_enhancement(self, layer: QgsRasterLayer, qml_path: str) -> bool:
-        """Save raster style to QML file with enhancement values explicitly included."""
+        """Save raster style to QML file with enhancement values explicitly included, using XML parsing for correct structure."""
         try:
+            import xml.etree.ElementTree as ET
             # Get enhancement settings
             brightness = self._settings_manager.get_value('raster_brightness', 0)
             contrast = self._settings_manager.get_value('raster_contrast', 0)
             saturation = self._settings_manager.get_value('raster_saturation', 0)
-            
+
             # First save the basic style
             style_result = layer.saveNamedStyle(qml_path)
             if not style_result[0]:
                 print(f"[DEBUG] Failed to save basic raster style: {qml_path}")
                 return False
-            
-            # Read the QML file
-            with open(qml_path, 'r', encoding='utf-8') as f:
-                qml_content = f.read()
-            
-            # Update the brightness/contrast and hue/saturation elements using simple string replacement
-            
-            # Find and replace brightness/contrast
-            import re
-            brightness_contrast_pattern = r'<brightnesscontrast[^>]*gamma="[^"]*" contrast="[^"]*" brightness="[^"]*"[^>]*/>'
-            new_brightness_contrast = f'<brightnesscontrast gamma="1" contrast="{contrast}" brightness="{brightness}"/>'
-            qml_content = re.sub(brightness_contrast_pattern, new_brightness_contrast, qml_content)
-            
-            # Find and replace saturation
-            hue_saturation_pattern = r'<huesaturation[^>]*saturation="[^"]*"[^>]*/>'
-            new_hue_saturation = f'<huesaturation colorizeOn="0" invertColors="0" colorizeRed="255" colorizeGreen="128" colorizeStrength="100" grayscaleMode="0" saturation="{saturation}" colorizeBlue="128"/>'
-            qml_content = re.sub(hue_saturation_pattern, new_hue_saturation, qml_content)
-            
+
+            # Parse the QML file as XML
+            tree = ET.parse(qml_path)
+            root = tree.getroot()
+
+            # Find the <pipe> element
+            pipe = root.find('pipe')
+            if pipe is None:
+                print(f"[DEBUG] No <pipe> element found in QML: {qml_path}")
+                return False
+
+            # Remove any existing <brightnesscontrast> and <huesaturation> elements
+            for tag in ['brightnesscontrast', 'huesaturation']:
+                for elem in pipe.findall(tag):
+                    pipe.remove(elem)
+
+            # Prepare new enhancement elements
+            brightness_elem = ET.Element('brightnesscontrast', {
+                'gamma': '1',
+                'brightness': str(brightness),
+                'contrast': str(contrast)
+            })
+            hue_elem = ET.Element('huesaturation', {
+                'colorizeOn': '0',
+                'invertColors': '0',
+                'colorizeRed': '255',
+                'colorizeGreen': '128',
+                'colorizeStrength': '100',
+                'grayscaleMode': '0',
+                'saturation': str(saturation),
+                'colorizeBlue': '128'
+            })
+
+            # Find the <rasterrenderer> element to insert after
+            renderer = pipe.find('rasterrenderer')
+            insert_index = 0
+            for idx, child in enumerate(pipe):
+                if child.tag == 'rasterrenderer':
+                    insert_index = idx + 1
+                    break
+            # Insert enhancements after <rasterrenderer>
+            pipe.insert(insert_index, brightness_elem)
+            pipe.insert(insert_index + 1, hue_elem)
+
             # Write the updated QML content back
-            with open(qml_path, 'w', encoding='utf-8') as f:
-                f.write(qml_content)
-            
-            print(f"[DEBUG] Saved raster QML style file with enhancement - Brightness: {brightness}, Contrast: {contrast}, Saturation: {saturation}")
+            tree.write(qml_path, encoding='utf-8', xml_declaration=False)
+
+            print(f"[DEBUG] Saved raster QML style file with enhancement (XML) - Brightness: {brightness}, Contrast: {contrast}, Saturation: {saturation}")
             return True
-            
         except Exception as e:
-            print(f"Error saving raster style with enhancement: {str(e)}")
+            print(f"Error saving raster style with enhancement (XML): {str(e)}")
             return False
 
     def _apply_raster_enhancement(self, raster_layer: QgsRasterLayer) -> bool:
@@ -748,12 +773,19 @@ class QGISProjectCreationService(QObject):
         """
         try:
             if not raster_layer or not raster_layer.isValid():
+                print("[DEBUG] Raster layer is invalid or None.")
                 return False
             
             # Get the renderer
             renderer = raster_layer.renderer()
             if not renderer:
+                print("[DEBUG] No renderer found for raster layer.")
                 return False
+            
+            print(f"[DEBUG] Renderer type: {type(renderer)}")
+            print(f"[DEBUG] Renderer has setBrightness: {hasattr(renderer, 'setBrightness')}")
+            print(f"[DEBUG] Renderer has setContrast: {hasattr(renderer, 'setContrast')}")
+            print(f"[DEBUG] Renderer has setSaturation: {hasattr(renderer, 'setSaturation')}")
             
             # Get enhancement settings from settings manager
             brightness = self._settings_manager.get_value('raster_brightness', 0)
@@ -766,14 +798,20 @@ class QGISProjectCreationService(QObject):
             if hasattr(renderer, 'setBrightness'):
                 renderer.setBrightness(brightness)
                 print(f"[DEBUG] Set brightness to: {brightness}")
+            else:
+                print("[DEBUG] Renderer does not support setBrightness.")
             if hasattr(renderer, 'setContrast'):
                 renderer.setContrast(contrast)
                 print(f"[DEBUG] Set contrast to: {contrast}")
+            else:
+                print("[DEBUG] Renderer does not support setContrast.")
             
             # Apply saturation (hue/saturation)
             if hasattr(renderer, 'setSaturation'):
                 renderer.setSaturation(saturation)
                 print(f"[DEBUG] Set saturation to: {saturation}")
+            else:
+                print("[DEBUG] Renderer does not support setSaturation.")
             
             # Trigger repaint to apply changes
             raster_layer.triggerRepaint()
