@@ -142,14 +142,6 @@ class DuplicateTotalStationIdentifiersDetectorService:
             
             print(f"[DEBUG] Using common identifier field: {common_identifier_field}")
             
-            # Check for duplicates within the definitive total station points layer
-            print(f"[DEBUG] Checking definitive layer: {definitive_total_station_points_layer.name()}")
-            definitive_warnings = self._detect_duplicates_within_layer(
-                definitive_total_station_points_layer, common_identifier_field, definitive_total_station_points_layer.name()
-            )
-            print(f"[DEBUG] Definitive layer warnings: {len(definitive_warnings)}")
-            warnings.extend(definitive_warnings)
-            
             # Check for duplicates within the temporary total station points layer
             print(f"[DEBUG] About to check temporary layer, temp_total_station_points_layer: {temp_total_station_points_layer}")
             if temp_total_station_points_layer:
@@ -413,6 +405,9 @@ class DuplicateTotalStationIdentifiersDetectorService:
         """
         Detect duplicates between definitive and temporary total station points layers.
         
+        Optimized to only check entities in the definitive layer that have the same 
+        identifiers as those in the temporary layer, rather than processing all entities.
+        
         Args:
             definitive_layer: The definitive total station points layer
             temp_layer: The temporary total station points layer
@@ -432,21 +427,25 @@ class DuplicateTotalStationIdentifiersDetectorService:
             if definitive_identifier_field_idx < 0 or temp_identifier_field_idx < 0:
                 return warnings
             
-            # Collect all identifiers from both layers
-            definitive_identifiers = set()
+            # First, collect all identifiers from the temporary layer
             temp_identifiers = set()
-            
-            # Get identifiers from definitive layer
-            for feature in definitive_layer.getFeatures():
-                identifier = feature[definitive_identifier_field_idx]
-                if identifier:
-                    definitive_identifiers.add(identifier)
-            
-            # Get identifiers from temporary layer
             for feature in temp_layer.getFeatures():
                 identifier = feature[temp_identifier_field_idx]
                 if identifier:
                     temp_identifiers.add(identifier)
+            
+            print(f"[DEBUG] Found {len(temp_identifiers)} unique identifiers in temporary layer")
+            
+            if not temp_identifiers:
+                print("[DEBUG] No identifiers found in temporary layer, skipping between-layers check")
+                return warnings
+            
+            # Now only check entities in the definitive layer that have matching identifiers
+            definitive_identifiers = set()
+            for feature in definitive_layer.getFeatures():
+                identifier = feature[definitive_identifier_field_idx]
+                if identifier and identifier in temp_identifiers:
+                    definitive_identifiers.add(identifier)
             
             # Find common identifiers (duplicates between layers)
             common_identifiers = definitive_identifiers & temp_identifiers
