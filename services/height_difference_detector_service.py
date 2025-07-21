@@ -34,10 +34,11 @@ from typing import List, Optional, Any, Union, Dict, Tuple
 from qgis.core import QgsProject, QgsGeometry, QgsPointXY, QgsDistanceArea
 
 try:
-    from ..core.interfaces import ISettingsManager, ILayerService, ITranslationService
+    from ..core.interfaces import ISettingsManager, ILayerService
+    from core.interfaces import ITranslationService
     from ..core.data_structures import WarningData
 except ImportError:
-    from core.interfaces import ISettingsManager, ILayerService, ITranslationService
+    from core.interfaces import ISettingsManager, ILayerService
     from core.data_structures import WarningData
 
 

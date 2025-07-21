@@ -8,19 +8,15 @@ and enable clean architecture throughout the application.
 from .interfaces import (
     ISettingsManager,
     IFileSystemService,
-    ITranslationService,
-    IPluginActionManager,
-    IUserInterface,
-    IProjectManager,
-    IConfigurationValidator
+    ILayerService,
+    IRasterProcessingService,
+    IConfigurationValidator,
 )
 
 __all__ = [
     'ISettingsManager',
     'IFileSystemService',
-    'ITranslationService',
-    'IPluginActionManager',
-    'IUserInterface',
-    'IProjectManager',
-    'IConfigurationValidator'
+    'ILayerService',
+    'IRasterProcessingService',
+    'IConfigurationValidator',
 ] 

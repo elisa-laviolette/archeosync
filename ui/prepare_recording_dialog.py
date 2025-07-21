@@ -194,7 +194,7 @@ class PrepareRecordingDialog(QtWidgets.QDialog):
                 return
             
             # Update layer name
-            self._recording_areas_label.setText(self.tr(f"Recording Areas Layer: {layer_info['name']}"))
+            self._recording_areas_label.setText(self.tr("Recording Areas Layer: {name}").format(name=layer_info['name']))
             
             # Get the actual layer to access selected features
             recording_layer = self._layer_service.get_layer_by_id(recording_areas_layer_id)

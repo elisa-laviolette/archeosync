@@ -40,8 +40,8 @@ from dataclasses import dataclass
 
 try:
     from qgis.core import QgsVectorLayer, QgsFeature, QgsProject, QgsVectorFileWriter, QgsGeometry, QgsWkbTypes
-    from qgis.PyQt.QtCore import QVariant
-    from ..core.interfaces import IFieldProjectImportService, ISettingsManager, ILayerService, IFileSystemService, ValidationResult, ITranslationService
+    from qgis.PyQt.QtCore import QVariant, QObject
+    from ..core.interfaces import IFieldProjectImportService, ISettingsManager, ILayerService, IFileSystemService, ValidationResult
 except ImportError:
     # For testing without QGIS
     QgsVectorLayer = None
@@ -50,10 +50,10 @@ except ImportError:
     QgsVectorFileWriter = None
     QgsGeometry = None
     QVariant = None
-    from core.interfaces import IFieldProjectImportService, ISettingsManager, ILayerService, IFileSystemService, ValidationResult, ITranslationService
+    from core.interfaces import IFieldProjectImportService, ISettingsManager, ILayerService, IFileSystemService, ValidationResult
 
 
-class FieldProjectImportService(IFieldProjectImportService):
+class FieldProjectImportService(QObject):
     """
     QGIS-specific implementation for importing completed field projects.
     
@@ -69,8 +69,7 @@ class FieldProjectImportService(IFieldProjectImportService):
     def __init__(self, 
                  settings_manager: ISettingsManager,
                  layer_service: ILayerService,
-                 file_system_service: IFileSystemService,
-                 translation_service: Optional[ITranslationService] = None):
+                 file_system_service: IFileSystemService):
         """
         Initialize the field project import service.
         
@@ -79,10 +78,10 @@ class FieldProjectImportService(IFieldProjectImportService):
             layer_service: Service for layer operations
             file_system_service: Service for file system operations
         """
+        QObject.__init__(self)
         self._settings_manager = settings_manager
         self._layer_service = layer_service
         self._file_system_service = file_system_service
-        self._translation_service = translation_service
     
     def import_field_projects(self, project_paths: List[str]) -> ValidationResult:
         """

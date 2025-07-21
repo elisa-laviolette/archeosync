@@ -24,7 +24,7 @@
 import os.path
 from typing import List, Optional, Dict
 
-from qgis.PyQt.QtCore import QSettings
+from qgis.PyQt.QtCore import QSettings, QObject, QCoreApplication, QTranslator, QLocale
 from qgis.PyQt.QtGui import QIcon
 from qgis.PyQt.QtWidgets import QAction
 from qgis.PyQt.QtWidgets import QDockWidget
@@ -38,7 +38,6 @@ from .ui.column_mapping_dialog import ColumnMappingDialog
 from .services import (
     QGISSettingsManager,
     QGISFileSystemService,
-    QGISTranslationService,
     ArcheoSyncConfigurationValidator,
     QGISLayerService,
     CSVImportService,
@@ -48,7 +47,7 @@ from .services import (
 )
 
 
-class ArcheoSyncPlugin:
+class ArcheoSyncPlugin(QObject):
     """
     ArcheoSync QGIS Plugin.
     
@@ -62,8 +61,26 @@ class ArcheoSyncPlugin:
         Args:
             iface: QGIS interface instance
         """
+        QObject.__init__(self)
         self._iface = iface
         self._plugin_dir = os.path.dirname(__file__)
+        
+        # --- TRANSLATION LOADING LOGIC ---
+        self._translator = None
+        locale = QSettings().value('locale/userLocale', QLocale().name())[:2]
+        qm_filename = f'ArcheoSyncPlugin_{locale}.qm'
+        locale_path = os.path.join(self._plugin_dir, 'i18n', qm_filename)
+        print(f"[DEBUG] Looking for translation file: {locale_path}")
+        if os.path.exists(locale_path):
+            self._translator = QTranslator()
+            if self._translator.load(locale_path):
+                QCoreApplication.installTranslator(self._translator)
+                print(f"[DEBUG] Loaded translation file: {locale_path}")
+            else:
+                print(f"[DEBUG] Failed to load translation file: {locale_path}")
+        else:
+            print(f"[DEBUG] Translation file does not exist: {locale_path}")
+        # --- END TRANSLATION LOADING LOGIC ---
         
         # Initialize services using dependency injection
         self._initialize_services()
@@ -76,12 +93,6 @@ class ArcheoSyncPlugin:
     
     def _initialize_services(self) -> None:
         """Initialize all required services."""
-        # Initialize translation service
-        self._translation_service = QGISTranslationService(
-            self._plugin_dir, 
-            'ArcheoSyncPlugin'
-        )
-        
         # Initialize settings manager
         self._settings_manager = QGISSettingsManager('ArcheoSync')
         
@@ -99,8 +110,7 @@ class ArcheoSyncPlugin:
             self._settings_manager,
             self._layer_service,
             self._file_system_service,
-            self._raster_processing_service,
-            self._translation_service
+            self._raster_processing_service
         )
         
         # Initialize CSV import service
@@ -110,8 +120,7 @@ class ArcheoSyncPlugin:
         self._field_project_import_service = FieldProjectImportService(
             self._settings_manager,
             self._layer_service,
-            self._file_system_service,
-            self._translation_service
+            self._file_system_service
         )
         
         # Initialize configuration validator
@@ -119,18 +128,6 @@ class ArcheoSyncPlugin:
             self._file_system_service,
             self._layer_service
         )
-    
-    def tr(self, message: str) -> str:
-        """
-        Get the translation for a string.
-        
-        Args:
-            message: String for translation
-            
-        Returns:
-            Translated version of message
-        """
-        return self._translation_service.translate(message)
     
     def add_action(
         self,
@@ -212,6 +209,11 @@ class ArcheoSyncPlugin:
         for action in self._actions:
             self._iface.removePluginMenu(self.tr(u'&ArcheoSync'), action)
             self._iface.removeToolBarIcon(action)
+        # --- TRANSLATION UNLOADING LOGIC ---
+        if self._translator:
+            QCoreApplication.removeTranslator(self._translator)
+            self._translator = None
+        # --- END TRANSLATION UNLOADING LOGIC ---
     
     def run(self) -> None:
         """Run method that performs all the real work."""
@@ -595,8 +597,7 @@ class ArcheoSyncPlugin:
             if summary_data.get('objects_count', 0) > 0:
                 detector = DuplicateObjectsDetectorService(
                     settings_manager=self._settings_manager,
-                    layer_service=self._layer_service,
-                    translation_service=self._translation_service
+                    layer_service=self._layer_service
                 )
                 duplicate_objects_warnings = detector.detect_duplicate_objects()
             
@@ -605,8 +606,7 @@ class ArcheoSyncPlugin:
             if summary_data.get('objects_count', 0) > 0:
                 skipped_detector = SkippedNumbersDetectorService(
                     settings_manager=self._settings_manager,
-                    layer_service=self._layer_service,
-                    translation_service=self._translation_service
+                    layer_service=self._layer_service
                 )
                 skipped_numbers_warnings = skipped_detector.detect_skipped_numbers()
             
@@ -619,8 +619,7 @@ class ArcheoSyncPlugin:
                 print(f"[DEBUG] Summary data: {summary_data}")
                 out_of_bounds_detector = OutOfBoundsDetectorService(
                     settings_manager=self._settings_manager,
-                    layer_service=self._layer_service,
-                    translation_service=self._translation_service
+                    layer_service=self._layer_service
                 )
                 out_of_bounds_warnings = out_of_bounds_detector.detect_out_of_bounds_features()
                 print(f"[DEBUG] Out-of-bounds detection completed, found {len(out_of_bounds_warnings)} warnings")
@@ -638,8 +637,7 @@ class ArcheoSyncPlugin:
                 print(f"[DEBUG] Running distance detection in main plugin")
                 distance_detector = DistanceDetectorService(
                     settings_manager=self._settings_manager,
-                    layer_service=self._layer_service,
-                    translation_service=self._translation_service
+                    layer_service=self._layer_service
                 )
                 distance_warnings = distance_detector.detect_distance_warnings()
                 print(f"[DEBUG] Distance detection completed, found {len(distance_warnings)} warnings")
@@ -666,8 +664,7 @@ class ArcheoSyncPlugin:
                 
                 missing_total_station_detector = MissingTotalStationDetectorService(
                     settings_manager=self._settings_manager,
-                    layer_service=self._layer_service,
-                    translation_service=self._translation_service
+                    layer_service=self._layer_service
                 )
                 missing_total_station_warnings = missing_total_station_detector.detect_missing_total_station_warnings()
                 print(f"[DEBUG] Missing total station detection completed, found {len(missing_total_station_warnings)} warnings")
@@ -698,8 +695,7 @@ class ArcheoSyncPlugin:
                 
                 duplicate_total_station_identifiers_detector = DuplicateTotalStationIdentifiersDetectorService(
                     settings_manager=self._settings_manager,
-                    layer_service=self._layer_service,
-                    translation_service=self._translation_service
+                    layer_service=self._layer_service
                 )
                 duplicate_total_station_identifiers_warnings = duplicate_total_station_identifiers_detector.detect_duplicate_identifiers_warnings()
                 print(f"[DEBUG] Duplicate total station identifiers detection completed, found {len(duplicate_total_station_identifiers_warnings)} warnings")
@@ -725,8 +721,7 @@ class ArcheoSyncPlugin:
                 
                 height_difference_detector = HeightDifferenceDetectorService(
                     settings_manager=self._settings_manager,
-                    layer_service=self._layer_service,
-                    translation_service=self._translation_service
+                    layer_service=self._layer_service
                 )
                 height_difference_warnings = height_difference_detector.detect_height_difference_warnings()
                 print(f"[DEBUG] Height difference detection completed, found {len(height_difference_warnings)} warnings")
@@ -772,7 +767,6 @@ class ArcheoSyncPlugin:
                 csv_import_service=self._csv_import_service,
                 field_project_import_service=self._field_project_import_service,
                 layer_service=self._layer_service,
-                translation_service=self._translation_service,
                 parent=self._iface.mainWindow()
             )
             
@@ -826,11 +820,6 @@ class ArcheoSyncPlugin:
     def settings_manager(self):
         """Get the settings manager instance."""
         return self._settings_manager
-    
-    @property
-    def translation_service(self):
-        """Get the translation service instance."""
-        return self._translation_service
     
     @property
     def layer_service(self):

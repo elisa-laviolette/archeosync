@@ -39,9 +39,10 @@ except ImportError:
     from core.data_structures import WarningData
 
 from qgis.core import QgsProject, QgsGeometry, QgsPointXY
+from qgis.PyQt.QtCore import QObject
 
 
-class OutOfBoundsDetectorService:
+class OutOfBoundsDetectorService(QObject):
     """
     Service for detecting features located outside their recording areas.
     
@@ -50,7 +51,8 @@ class OutOfBoundsDetectorService:
     positioned outside the expected boundaries by more than a specified distance.
     """
     
-    def __init__(self, settings_manager, layer_service, translation_service):
+    def __init__(self, settings_manager, layer_service):
+        super().__init__()
         """
         Initialize the service with required dependencies.
         
@@ -61,7 +63,6 @@ class OutOfBoundsDetectorService:
         """
         self._settings_manager = settings_manager
         self._layer_service = layer_service
-        self._translation_service = translation_service
         
         # Get configurable thresholds from settings with defaults
         self._max_distance_meters = self._settings_manager.get_value('bounds_max_distance', 0.2)
@@ -615,11 +616,7 @@ class OutOfBoundsDetectorService:
             print(f"Error getting feature identifier: {str(e)}")
             return f"{layer_type} {feature.id()}"
     
-    def _create_out_of_bounds_warning(self, 
-                                    recording_area_name: str, 
-                                    layer_type: str, 
-                                    feature_identifiers: List[str], 
-                                    max_distance: float) -> str:
+    def _create_out_of_bounds_warning(self, recording_area_name: str, layer_type: str, feature_identifiers: List[str], max_distance: float) -> str:
         """
         Create a warning message for out-of-bounds features.
         
@@ -637,16 +634,8 @@ class OutOfBoundsDetectorService:
                 feature_text = feature_identifiers[0]
             else:
                 feature_text = f"{len(feature_identifiers)} features"
-            
-            distance_cm = max_distance * 100  # Convert to centimeters
-            
-            return self._translation_service.translate(
-                "OutOfBoundsDetectorService",
-                f"{feature_text} in recording area '{recording_area_name}' is located "
-                f"{distance_cm:.1f} cm outside the recording area boundary "
-                f"(maximum allowed: {self._max_distance_meters * 100:.1f} cm)"
-            )
-            
+            distance_cm = max_distance * 100
+            return self.tr(f"{feature_text} in recording area '{recording_area_name}' is located {distance_cm:.1f} cm outside the recording area boundary (maximum allowed: {self._max_distance_meters * 100:.1f} cm)")
         except Exception as e:
             print(f"Error creating out-of-bounds warning: {str(e)}")
             return f"{feature_text} in recording area '{recording_area_name}' is located outside the recording area boundary" 

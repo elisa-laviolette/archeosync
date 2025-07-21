@@ -29,16 +29,17 @@ Usage:
 """
 
 from typing import List, Optional, Any, Union
+from qgis.PyQt.QtCore import QObject
 
 try:
-    from ..core.interfaces import ISettingsManager, ILayerService, ITranslationService
+    from ..core.interfaces import ISettingsManager, ILayerService
     from ..core.data_structures import WarningData
 except ImportError:
-    from core.interfaces import ISettingsManager, ILayerService, ITranslationService
+    from core.interfaces import ISettingsManager, ILayerService
     from core.data_structures import WarningData
 
 
-class DuplicateObjectsDetectorService:
+class DuplicateObjectsDetectorService(QObject):
     """
     Service for detecting duplicate objects with the same recording area and number.
     
@@ -48,10 +49,8 @@ class DuplicateObjectsDetectorService:
     - Between both layers
     """
     
-    def __init__(self, 
-                 settings_manager: ISettingsManager,
-                 layer_service: ILayerService,
-                 translation_service: Optional[ITranslationService] = None):
+    def __init__(self, settings_manager: ISettingsManager, layer_service: ILayerService):
+        super().__init__()
         """
         Initialize the duplicate objects detector service.
         
@@ -62,7 +61,6 @@ class DuplicateObjectsDetectorService:
         """
         self._settings_manager = settings_manager
         self._layer_service = layer_service
-        self._translation_service = translation_service
     
     def _find_layer_by_name(self, layer_name: str) -> Optional[Any]:
         """
@@ -381,12 +379,8 @@ class DuplicateObjectsDetectorService:
             The warning message
         """
         try:
-            # Try to translate the message
-            message = self._translation_service.translate(
-                f"Recording Area '{recording_area_name}' has {count} objects with number {number} in {layer_name}"
-            )
+            message = self.tr(f"Recording Area '{recording_area_name}' has {count} objects with number {number} in {layer_name}")
         except Exception:
-            # Fallback to English if translation fails
             message = f"Recording Area '{recording_area_name}' has {count} objects with number {number} in {layer_name}"
         
         return message 

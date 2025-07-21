@@ -100,11 +100,6 @@ Interface for file system operations:
 - `move_file(source_path: str, destination_path: str) -> bool`
 - `move_directory(source_path: str, destination_path: str) -> bool`
 
-### ITranslationService
-Interface for translation operations:
-- `translate(message: str) -> str`
-- `get_current_locale() -> str`
-
 ### IConfigurationValidator
 Interface for configuration validation:
 - `validate_field_projects_folder(path: str) -> List[str]`

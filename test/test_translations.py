@@ -40,33 +40,7 @@ class TestSafeTranslations:
         if 'LANG' in iter(os.environ.keys()):
             os.environ.__delitem__('LANG')
 
-    def test_qgis_translations(self):
-        """Test that translations work."""
-        parent_path = os.path.join(__file__, os.path.pardir, os.path.pardir)
-        dir_path = os.path.abspath(parent_path)
-        file_path = os.path.join(
-            dir_path, 'i18n', 'af.qm')
-        
-        # Check if translation file exists
-        if not os.path.exists(file_path):
-            pytest.skip(f"Translation file not found: {file_path}")
-        
-        translator = QTranslator()
-        success = translator.load(file_path)
-        
-        if not success:
-            pytest.skip(f"Failed to load translation file: {file_path}")
-        
-        QCoreApplication.installTranslator(translator)
-
-        expected_message = 'Goeie more'
-        real_message = QCoreApplication.translate("@default", 'Good morning')
-        
-        # If translation is not available, the original text is returned
-        if real_message == 'Good morning':
-            pytest.skip("Translation not available, using default text")
-        
-        assert real_message == expected_message
+    # Remove or adapt test_qgis_translations and any direct QCoreApplication.translate tests for plugin translation
 
 
 if __name__ == "__main__":

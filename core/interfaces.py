@@ -125,18 +125,10 @@ class IFileSystemService(ABC):
         pass
 
 
-class ITranslationService(ABC):
-    """Interface for translation operations."""
-    
-    @abstractmethod
-    def translate(self, message: str) -> str:
-        """Translate a message."""
-        pass
-    
-    @abstractmethod
-    def get_current_locale(self) -> str:
-        """Get the current locale."""
-        pass
+# DEPRECATED: ITranslationService is no longer used. All translation is now handled via QObject.tr().
+# This interface is retained only for historical reference.
+
+# (No implementation remains.)
 
 
 class IPluginActionManager(ABC):

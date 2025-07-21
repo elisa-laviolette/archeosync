@@ -18,7 +18,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from core.interfaces import (
     ISettingsManager,
     IFileSystemService,
-    ITranslationService,
     IPluginActionManager,
     IUserInterface,
     IProjectManager,
@@ -34,7 +33,6 @@ class TestCoreInterfaces(unittest.TestCase):
         interfaces = [
             ISettingsManager,
             IFileSystemService,
-            ITranslationService,
             IPluginActionManager,
             IUserInterface,
             IProjectManager,
@@ -57,10 +55,6 @@ class TestCoreInterfaces(unittest.TestCase):
         self.assertTrue(hasattr(IFileSystemService, 'select_directory'))
         self.assertTrue(hasattr(IFileSystemService, 'path_exists'))
         self.assertTrue(hasattr(IFileSystemService, 'create_directory'))
-        
-        # Test ITranslationService
-        self.assertTrue(hasattr(ITranslationService, 'translate'))
-        self.assertTrue(hasattr(ITranslationService, 'get_current_locale'))
         
         # Test IPluginActionManager
         self.assertTrue(hasattr(IPluginActionManager, 'add_action'))
@@ -89,7 +83,6 @@ class TestCoreInterfaces(unittest.TestCase):
         interfaces = [
             ISettingsManager,
             IFileSystemService,
-            ITranslationService,
             IPluginActionManager,
             IUserInterface,
             IProjectManager,
@@ -123,7 +116,7 @@ class TestInterfaceSegregation(unittest.TestCase):
             self.assertTrue(hasattr(ISettingsManager, method))
         
         # Should not contain unrelated methods
-        unrelated_methods = ['translate', 'select_directory', 'show_dialog']
+        unrelated_methods = ['select_directory', 'show_dialog']
         for method in unrelated_methods:
             self.assertFalse(hasattr(ISettingsManager, method))
     
@@ -136,22 +129,22 @@ class TestInterfaceSegregation(unittest.TestCase):
             self.assertTrue(hasattr(IFileSystemService, method))
         
         # Should not contain unrelated methods
-        unrelated_methods = ['translate', 'set_value', 'show_dialog']
+        unrelated_methods = ['set_value', 'show_dialog']
         for method in unrelated_methods:
             self.assertFalse(hasattr(IFileSystemService, method))
     
-    def test_translation_interface_is_focused(self):
-        """Test that ITranslationService interface is focused on translation only."""
-        # The interface should only contain translation-related methods
-        translation_methods = ['translate', 'get_current_locale']
+    def test_plugin_action_manager_interface_is_focused(self):
+        """Test that IPluginActionManager interface is focused on plugin actions only."""
+        # The interface should only contain plugin action-related methods
+        action_methods = ['add_action', 'remove_action']
         
-        for method in translation_methods:
-            self.assertTrue(hasattr(ITranslationService, method))
+        for method in action_methods:
+            self.assertTrue(hasattr(IPluginActionManager, method))
         
         # Should not contain unrelated methods
-        unrelated_methods = ['set_value', 'select_directory', 'show_dialog']
+        unrelated_methods = ['select_directory', 'show_dialog']
         for method in unrelated_methods:
-            self.assertFalse(hasattr(ITranslationService, method))
+            self.assertFalse(hasattr(IPluginActionManager, method))
 
 
 class TestInterfaceDocumentation(unittest.TestCase):
@@ -162,7 +155,6 @@ class TestInterfaceDocumentation(unittest.TestCase):
         interfaces = [
             ISettingsManager,
             IFileSystemService,
-            ITranslationService,
             IPluginActionManager,
             IUserInterface,
             IProjectManager,
@@ -181,7 +173,6 @@ class TestInterfaceDocumentation(unittest.TestCase):
             (ISettingsManager.set_value, 'set_value'),
             (ISettingsManager.get_value, 'get_value'),
             (IFileSystemService.select_directory, 'select_directory'),
-            (ITranslationService.translate, 'translate'),
         ]
         
         for method, method_name in test_cases:

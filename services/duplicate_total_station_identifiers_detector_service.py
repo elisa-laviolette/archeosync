@@ -32,16 +32,17 @@ Usage:
 """
 
 from typing import List, Optional, Any, Union, Dict, Tuple
+from qgis.PyQt.QtCore import QObject
 
 try:
-    from ..core.interfaces import ISettingsManager, ILayerService, ITranslationService
+    from ..core.interfaces import ISettingsManager, ILayerService
     from ..core.data_structures import WarningData
 except ImportError:
-    from core.interfaces import ISettingsManager, ILayerService, ITranslationService
+    from core.interfaces import ISettingsManager, ILayerService
     from core.data_structures import WarningData
 
 
-class DuplicateTotalStationIdentifiersDetectorService:
+class DuplicateTotalStationIdentifiersDetectorService(QObject):
     """
     Service for detecting duplicate identifiers in total station points.
     
@@ -51,10 +52,8 @@ class DuplicateTotalStationIdentifiersDetectorService:
     - Between both layers
     """
     
-    def __init__(self, 
-                 settings_manager: ISettingsManager,
-                 layer_service: ILayerService,
-                 translation_service: Optional[ITranslationService] = None):
+    def __init__(self, settings_manager: ISettingsManager, layer_service: ILayerService):
+        super().__init__()
         """
         Initialize the duplicate total station identifiers detector service.
         
@@ -65,7 +64,6 @@ class DuplicateTotalStationIdentifiersDetectorService:
         """
         self._settings_manager = settings_manager
         self._layer_service = layer_service
-        self._translation_service = translation_service
     
     def _find_layer_by_name(self, layer_name: str) -> Optional[Any]:
         """
@@ -489,12 +487,7 @@ class DuplicateTotalStationIdentifiersDetectorService:
         Returns:
             The warning message
         """
-        if self._translation_service:
-            return self._translation_service.translate(
-                f"Found {count} total station points with the same identifier '{identifier}' in layer '{layer_name}'"
-            )
-        else:
-            return f"Found {count} total station points with the same identifier '{identifier}' in layer '{layer_name}'"
+        return self.tr(f"Found {count} total station points with the same identifier '{identifier}' in layer '{layer_name}'")
     
     def _create_between_layers_duplicate_warning(self, identifier: Any) -> str:
         """
@@ -506,9 +499,4 @@ class DuplicateTotalStationIdentifiersDetectorService:
         Returns:
             The warning message
         """
-        if self._translation_service:
-            return self._translation_service.translate(
-                f"Found total station point with identifier '{identifier}' in both imported and definitive layers"
-            )
-        else:
-            return f"Found total station point with identifier '{identifier}' in both imported and definitive layers" 
+        return self.tr(f"Found total station point with identifier '{identifier}' in both imported and definitive layers") 

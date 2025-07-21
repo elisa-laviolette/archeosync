@@ -36,9 +36,10 @@ except ImportError:
     from core.data_structures import WarningData
 
 from qgis.core import QgsProject
+from qgis.PyQt.QtCore import QObject
 
 
-class SkippedNumbersDetectorService:
+class SkippedNumbersDetectorService(QObject):
     """
     Service for detecting skipped numbers in recording areas.
     
@@ -47,7 +48,8 @@ class SkippedNumbersDetectorService:
     skipped numbers to help users identify potential data entry issues.
     """
     
-    def __init__(self, settings_manager, layer_service, translation_service):
+    def __init__(self, settings_manager, layer_service):
+        super().__init__()
         """
         Initialize the service with required dependencies.
         
@@ -58,7 +60,6 @@ class SkippedNumbersDetectorService:
         """
         self._settings_manager = settings_manager
         self._layer_service = layer_service
-        self._translation_service = translation_service
     
     def detect_skipped_numbers(self) -> List[Union[str, WarningData]]:
         """
@@ -454,10 +455,7 @@ class SkippedNumbersDetectorService:
             print(f"Error finding layer by name: {e}")
             return None
     
-    def _create_skipped_numbers_warning(self, 
-                                       recording_area_name: str, 
-                                       gaps: List[int], 
-                                       layer_name: str) -> str:
+    def _create_skipped_numbers_warning(self, recording_area_name: str, gaps: List[int], layer_name: str) -> str:
         """
         Create a warning message for skipped numbers.
         
@@ -470,12 +468,7 @@ class SkippedNumbersDetectorService:
             The warning message
         """
         try:
-            # Try to translate the message
-            message = self._translation_service.translate(
-                f"Recording Area '{recording_area_name}' has skipped numbers: {gaps} in {layer_name}"
-            )
+            message = self.tr(f"Recording Area '{recording_area_name}' has skipped numbers: {gaps} in {layer_name}")
         except Exception:
-            # Fallback to English if translation fails
             message = f"Recording Area '{recording_area_name}' has skipped numbers: {gaps} in {layer_name}"
-        
         return message 

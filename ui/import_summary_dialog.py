@@ -43,10 +43,10 @@ from qgis.PyQt.QtWidgets import QMessageBox, QDockWidget
 from qgis.PyQt.QtCore import Qt
 
 try:
-    from ..core.interfaces import ISettingsManager, ILayerService, ITranslationService
+    from ..core.interfaces import ISettingsManager, ILayerService
     from ..core.data_structures import WarningData, ImportSummaryData
 except ImportError:
-    from core.interfaces import ISettingsManager, ILayerService, ITranslationService
+    from core.interfaces import ISettingsManager, ILayerService
     from core.data_structures import WarningData, ImportSummaryData
 
 # Import detection services at module level for testability

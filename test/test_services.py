@@ -26,7 +26,7 @@ try:
     from services.layer_service import QGISLayerService
     from services.translation_service import QGISTranslationService
     from services.configuration_validator import ArcheoSyncConfigurationValidator
-    from core.interfaces import ISettingsManager, IFileSystemService, ILayerService, ITranslationService, IConfigurationValidator
+    from core.interfaces import ISettingsManager, IFileSystemService, ILayerService, IConfigurationValidator
     QGIS_AVAILABLE = True
 except ImportError:
     QGIS_AVAILABLE = False
@@ -1223,89 +1223,6 @@ class TestQGISLayerService(unittest.TestCase):
             # Test with mixed content
             result = self.layer_service.calculate_next_level('A1', 'level_field', 'objects_layer_id')
             self.assertEqual(result, 'A2')  # Should increment to 'A2'
-
-
-class TestQGISTranslationService(unittest.TestCase):
-    """Test cases for QGISTranslationService."""
-    
-    def setUp(self):
-        """Set up test fixtures."""
-        self.plugin_dir = tempfile.mkdtemp()
-        self.translation_service = QGISTranslationService(self.plugin_dir, 'TestPlugin')
-    
-    def tearDown(self):
-        """Clean up after tests."""
-        import shutil
-        shutil.rmtree(self.plugin_dir, ignore_errors=True)
-    
-    def test_implements_interface(self):
-        """Test that QGISTranslationService implements ITranslationService."""
-        self.assertIsInstance(self.translation_service, ITranslationService)
-    
-    @patch('services.translation_service.QSettings')
-    @patch('services.translation_service.QTranslator')
-    @patch('services.translation_service.QCoreApplication')
-    def test_init_with_translation_file(self, mock_core_app, mock_translator_class, mock_settings_class):
-        """Test initialization with translation file."""
-        # Mock QSettings
-        mock_settings = Mock()
-        mock_settings.value.return_value = 'en'
-        mock_settings_class.return_value = mock_settings
-        
-        # Mock QTranslator
-        mock_translator = Mock()
-        mock_translator.load.return_value = True
-        mock_translator_class.return_value = mock_translator
-        
-        # Create translation file
-        i18n_dir = os.path.join(self.plugin_dir, 'i18n')
-        os.makedirs(i18n_dir)
-        translation_file = os.path.join(i18n_dir, 'TestPlugin_en.qm')
-        with open(translation_file, 'w') as f:
-            f.write('dummy content')
-        
-        service = QGISTranslationService(self.plugin_dir, 'TestPlugin')
-        
-        self.assertEqual(service.get_current_locale(), 'en')
-        self.assertTrue(service.is_translation_loaded())
-    
-    @patch('services.translation_service.QCoreApplication')
-    def test_translate(self, mock_core_app):
-        """Test translation functionality."""
-        mock_core_app.translate.return_value = 'Translated Message'
-        
-        result = self.translation_service.translate('Test Message')
-        
-        self.assertEqual(result, 'Translated Message')
-        # The service uses the plugin name passed to constructor, which is 'TestPlugin' in setUp
-        mock_core_app.translate.assert_called_with('TestPlugin', 'Test Message')
-    
-    def test_get_current_locale(self):
-        """Test getting current locale."""
-        locale = self.translation_service.get_current_locale()
-        self.assertIsInstance(locale, str)
-        self.assertGreater(len(locale), 0)
-    
-    def test_is_translation_loaded(self):
-        """Test translation loaded status."""
-        # Should be False when no translation file exists
-        self.assertFalse(self.translation_service.is_translation_loaded())
-    
-    def test_get_translation_file_path(self):
-        """Test getting translation file path."""
-        # Should return None when no translation file exists
-        self.assertIsNone(self.translation_service.get_translation_file_path())
-        
-        # Create translation file
-        i18n_dir = os.path.join(self.plugin_dir, 'i18n')
-        os.makedirs(i18n_dir)
-        # Use the plugin name from setUp ('TestPlugin')
-        translation_file = os.path.join(i18n_dir, 'TestPlugin_en.qm')
-        with open(translation_file, 'w') as f:
-            f.write('dummy content')
-        
-        path = self.translation_service.get_translation_file_path()
-        self.assertEqual(path, translation_file)
 
 
 class TestArcheoSyncConfigurationValidator(unittest.TestCase):

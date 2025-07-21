@@ -44,14 +44,15 @@ import re
 from typing import Optional, Any, Dict, List
 from qgis.core import QgsProject, QgsVectorLayer, QgsRasterLayer, QgsFeature, QgsGeometry, QgsWkbTypes, QgsVectorFileWriter, QgsCoordinateReferenceSystem, QgsBookmark, QgsReferencedRectangle
 from qgis.PyQt.QtWidgets import QMessageBox
+from qgis.PyQt.QtCore import QObject
 
 try:
-    from ..core.interfaces import ISettingsManager, ILayerService, IFileSystemService, IRasterProcessingService, IProjectCreationService, ITranslationService
+    from ..core.interfaces import ISettingsManager, ILayerService, IFileSystemService, IRasterProcessingService
 except ImportError:
-    from core.interfaces import ISettingsManager, ILayerService, IFileSystemService, IRasterProcessingService, IProjectCreationService, ITranslationService
+    from core.interfaces import ISettingsManager, ILayerService, IFileSystemService, IRasterProcessingService
 
 
-class QGISProjectCreationService(IProjectCreationService):
+class QGISProjectCreationService(QObject):
     """
     QGIS-specific implementation for creating field projects.
     
@@ -63,12 +64,8 @@ class QGISProjectCreationService(IProjectCreationService):
     5. Setting project variables for field preparation
     """
     
-    def __init__(self, 
-                 settings_manager: ISettingsManager, 
-                 layer_service: ILayerService, 
-                 file_system_service: IFileSystemService,
-                 raster_processing_service: IRasterProcessingService,
-                 translation_service: Optional[ITranslationService] = None):
+    def __init__(self, settings_manager: ISettingsManager, layer_service: ILayerService, file_system_service: IFileSystemService, raster_processing_service: IRasterProcessingService):
+        QObject.__init__(self)
         """
         Initialize the project creation service.
         
@@ -82,7 +79,6 @@ class QGISProjectCreationService(IProjectCreationService):
         self._layer_service = layer_service
         self._file_system_service = file_system_service
         self._raster_processing_service = raster_processing_service
-        self._translation_service = translation_service
     
     def create_field_project(self,
                            feature_data: Dict[str, Any],
@@ -190,8 +186,6 @@ class QGISProjectCreationService(IProjectCreationService):
             if small_finds_layer_id:
                 small_finds_layer_info = self._layer_service.get_layer_info(small_finds_layer_id)
                 default_name = "Small Finds"
-                if self._translation_service:
-                    default_name = self._translation_service.translate("Small Finds")
                 small_finds_layer_name = small_finds_layer_info['name'] if small_finds_layer_info else default_name
                 small_finds_gpkg_path = os.path.join(project_dir, f"{small_finds_layer_name}.gpkg")
                 success = self._create_empty_layer_copy(
