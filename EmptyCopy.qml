@@ -206,11 +206,13 @@
   <featureBlendMode>0</featureBlendMode>
   <layerOpacity>1</layerOpacity>
   <geometryOptions removeDuplicateNodes="0" geometryPrecision="0">
+  <geometryOptions removeDuplicateNodes="0" geometryPrecision="0">
     <activeChecks type="StringList">
-      <Option value="" type="QString"/>
+      <Option type="QString" value=""/>
     </activeChecks>
     <checkConfiguration/>
   </geometryOptions>
+  <legend showLabelLegend="0" type="default-vector"/>
   <legend showLabelLegend="0" type="default-vector"/>
   <referencedLayers/>
   <fieldConfiguration>
@@ -250,11 +252,12 @@
     <constraint constraints="0" notnull_strength="0" field="value" exp_strength="0" unique_strength="0"/>
   </constraints>
   <constraintExpressions>
-    <constraint field="name" exp="" desc=""/>
-    <constraint field="value" exp="" desc=""/>
+    <constraint field="name" desc="" exp=""/>
+    <constraint field="value" desc="" exp=""/>
   </constraintExpressions>
   <expressionfields/>
   <attributeactions/>
+  <attributetableconfig actionWidgetStyle="dropDown" sortExpression="" sortOrder="0">
   <attributetableconfig actionWidgetStyle="dropDown" sortExpression="" sortOrder="0">
     <columns/>
   </attributetableconfig>
