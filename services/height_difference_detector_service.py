@@ -52,19 +52,16 @@ class HeightDifferenceDetectorService:
     """
     
     def __init__(self, settings_manager: ISettingsManager, 
-                 layer_service: ILayerService,
-                 translation_service: ITranslationService):
+                 layer_service: ILayerService):
         """
         Initialize the height difference detector service.
         
         Args:
             settings_manager: Service for managing settings
             layer_service: Service for layer operations
-            translation_service: Service for translations
         """
         self._settings_manager = settings_manager
         self._layer_service = layer_service
-        self._translation_service = translation_service
         
         # Get configurable thresholds from settings with defaults
         self._max_distance_meters = self._settings_manager.get_value('height_max_distance', 1.0)
@@ -777,7 +774,7 @@ class HeightDifferenceDetectorService:
             feature2_identifiers: List of second feature identifiers
             max_distance: The maximum distance found
             max_height_difference: The maximum height difference found
-            
+        
         Returns:
             The warning message
         """
@@ -790,12 +787,11 @@ class HeightDifferenceDetectorService:
             distance_cm = max_distance * 100  # Convert to centimeters
             height_difference_cm = max_height_difference * 100  # Convert to centimeters
             
-            return self._translation_service.translate(
-                "HeightDifferenceDetectorService",
+            # Fallback: just return the message in English
+            return (
                 f"{feature_text} are separated by {distance_cm:.1f} cm but have a height difference of {height_difference_cm:.1f} cm "
                 f"(maximum allowed: {self._max_height_difference_meters * 100:.1f} cm)"
             )
-            
         except Exception as e:
             print(f"Error creating height difference warning: {str(e)}")
             distance_cm = max_distance * 100

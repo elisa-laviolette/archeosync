@@ -96,7 +96,6 @@ class ImportSummaryDockWidget(QDockWidget):
                  csv_import_service=None,
                  field_project_import_service=None,
                  layer_service=None,
-                 translation_service=None,
                  parent=None):
         """
         Initialize the import summary dock widget.
@@ -120,7 +119,7 @@ class ImportSummaryDockWidget(QDockWidget):
         self._csv_import_service = csv_import_service
         self._field_project_import_service = field_project_import_service
         self._layer_service = layer_service
-        self._translation_service = translation_service
+        self._parent = parent
         
         # Initialize UI
         self._setup_ui()
@@ -723,8 +722,7 @@ class ImportSummaryDockWidget(QDockWidget):
                 print(f"Debug: Running duplicate detection for {self._summary_data.objects_count} objects")
                 detector = DuplicateObjectsDetectorService(
                     settings_manager=self._settings_manager,
-                    layer_service=self._layer_service,
-                    translation_service=self._translation_service
+                    layer_service=self._layer_service
                 )
                 duplicate_objects_warnings = detector.detect_duplicate_objects()
                 print(f"Debug: Detected {len(duplicate_objects_warnings)} duplicate warnings")
@@ -737,8 +735,7 @@ class ImportSummaryDockWidget(QDockWidget):
                 print(f"Debug: Running skipped numbers detection for {self._summary_data.objects_count} objects")
                 skipped_detector = SkippedNumbersDetectorService(
                     settings_manager=self._settings_manager,
-                    layer_service=self._layer_service,
-                    translation_service=self._translation_service
+                    layer_service=self._layer_service
                 )
                 skipped_numbers_warnings = skipped_detector.detect_skipped_numbers()
                 print(f"Debug: Detected {len(skipped_numbers_warnings)} skipped warnings")
@@ -762,8 +759,7 @@ class ImportSummaryDockWidget(QDockWidget):
                 
                 out_of_bounds_detector = OutOfBoundsDetectorService(
                     settings_manager=self._settings_manager,
-                    layer_service=self._layer_service,
-                    translation_service=self._translation_service
+                    layer_service=self._layer_service
                 )
                 out_of_bounds_warnings = out_of_bounds_detector.detect_out_of_bounds_features()
                 print(f"[DEBUG] Detected {len(out_of_bounds_warnings)} out-of-bounds warnings")
@@ -790,8 +786,7 @@ class ImportSummaryDockWidget(QDockWidget):
                 
                 distance_detector = DistanceDetectorService(
                     settings_manager=self._settings_manager,
-                    layer_service=self._layer_service,
-                    translation_service=self._translation_service
+                    layer_service=self._layer_service
                 )
                 distance_warnings = distance_detector.detect_distance_warnings()
                 print(f"[DEBUG] Detected {len(distance_warnings)} distance warnings")
@@ -818,8 +813,7 @@ class ImportSummaryDockWidget(QDockWidget):
                 
                 missing_total_station_detector = MissingTotalStationDetectorService(
                     settings_manager=self._settings_manager,
-                    layer_service=self._layer_service,
-                    translation_service=self._translation_service
+                    layer_service=self._layer_service
                 )
                 missing_total_station_warnings = missing_total_station_detector.detect_missing_total_station_warnings()
                 print(f"[DEBUG] Detected {len(missing_total_station_warnings)} missing total station warnings")
@@ -845,8 +839,7 @@ class ImportSummaryDockWidget(QDockWidget):
                 
                 duplicate_total_station_identifiers_detector = DuplicateTotalStationIdentifiersDetectorService(
                     settings_manager=self._settings_manager,
-                    layer_service=self._layer_service,
-                    translation_service=self._translation_service
+                    layer_service=self._layer_service
                 )
                 duplicate_total_station_identifiers_warnings = duplicate_total_station_identifiers_detector.detect_duplicate_identifiers_warnings()
                 print(f"[DEBUG] Detected {len(duplicate_total_station_identifiers_warnings)} duplicate total station identifiers warnings")
@@ -872,8 +865,7 @@ class ImportSummaryDockWidget(QDockWidget):
                 
                 height_difference_detector = HeightDifferenceDetectorService(
                     settings_manager=self._settings_manager,
-                    layer_service=self._layer_service,
-                    translation_service=self._translation_service
+                    layer_service=self._layer_service
                 )
                 height_difference_warnings = height_difference_detector.detect_height_difference_warnings()
                 print(f"[DEBUG] Detected {len(height_difference_warnings)} height difference warnings")

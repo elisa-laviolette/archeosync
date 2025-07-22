@@ -50,18 +50,16 @@ class DistanceDetectorService:
     apart (> 5 cm) and not overlapping.
     """
     
-    def __init__(self, settings_manager, layer_service, translation_service):
+    def __init__(self, settings_manager, layer_service):
         """
         Initialize the service with required dependencies.
         
         Args:
             settings_manager: Service for managing settings
             layer_service: Service for layer operations
-            translation_service: Service for translations
         """
         self._settings_manager = settings_manager
         self._layer_service = layer_service
-        self._translation_service = translation_service
         
         # Get configurable thresholds from settings with defaults
         self._max_distance_meters = self._settings_manager.get_value('distance_max_distance', 0.05)
@@ -564,7 +562,7 @@ class DistanceDetectorService:
             point_identifiers: List of point identifiers
             object_identifiers: List of object identifiers
             max_distance: The maximum distance found
-            
+        
         Returns:
             The warning message
         """
@@ -576,8 +574,8 @@ class DistanceDetectorService:
             
             distance_cm = max_distance * 100  # Convert to centimeters
             
-            return self._translation_service.translate(
-                "DistanceDetectorService",
+            # Fallback: just return the message in English
+            return (
                 f"{feature_text} are separated by {distance_cm:.1f} cm "
                 f"(maximum allowed: {self._max_distance_meters * 100:.1f} cm)"
             )

@@ -49,18 +49,16 @@ class MissingTotalStationDetectorService:
     total station points.
     """
     
-    def __init__(self, settings_manager, layer_service, translation_service):
+    def __init__(self, settings_manager, layer_service):
         """
         Initialize the service with required dependencies.
         
         Args:
             settings_manager: Service for managing settings
             layer_service: Service for layer operations
-            translation_service: Service for translations
         """
         self._settings_manager = settings_manager
         self._layer_service = layer_service
-        self._translation_service = translation_service
     
     def detect_missing_total_station_warnings(self) -> List[Union[str, WarningData]]:
         """
@@ -497,7 +495,7 @@ class MissingTotalStationDetectorService:
         
         Args:
             object_identifiers: List of object identifiers
-            
+        
         Returns:
             The warning message
         """
@@ -507,11 +505,8 @@ class MissingTotalStationDetectorService:
             else:
                 feature_text = f"{len(object_identifiers)} objects"
             
-            return self._translation_service.translate(
-                "MissingTotalStationDetectorService",
-                f"{feature_text} have no matching total station points"
-            )
-            
+            # Fallback: just return the message in English
+            return f"{feature_text} have no matching total station points"
         except Exception as e:
             print(f"Error creating missing total station warning: {str(e)}")
             return f"{feature_text} have no matching total station points" 

@@ -60,7 +60,6 @@ class DuplicateTotalStationIdentifiersDetectorService(QObject):
         Args:
             settings_manager: Service for accessing settings
             layer_service: Service for accessing layers
-            translation_service: Service for translations (optional)
         """
         self._settings_manager = settings_manager
         self._layer_service = layer_service

@@ -56,7 +56,6 @@ class SkippedNumbersDetectorService(QObject):
         Args:
             settings_manager: Service for managing settings
             layer_service: Service for layer operations
-            translation_service: Service for translations
         """
         self._settings_manager = settings_manager
         self._layer_service = layer_service
