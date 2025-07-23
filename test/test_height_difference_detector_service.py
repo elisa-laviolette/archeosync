@@ -421,6 +421,42 @@ class TestHeightDifferenceDetectorService(unittest.TestCase):
             "2 point pairs are separated by 50.0 cm but have a height difference of 25.0 cm (maximum allowed: 20.0 cm)"
         )
 
+    def test_filter_expression_fallbacks_to_fid(self):
+        """Test that filter expression uses 'fid' if no identifier field exists in the layer."""
+        # Mock layer with no identifier fields
+        layer = Mock()
+        layer.name.return_value = "NoIdLayer"
+        # Only X, Y, Z fields
+        field1 = Mock(); field1.name.return_value = "X"; field1.typeName.return_value = "double"
+        field2 = Mock(); field2.name.return_value = "Y"; field2.typeName.return_value = "double"
+        field3 = Mock(); field3.name.return_value = "Z"; field3.typeName.return_value = "double"
+        fields_collection = Mock()
+        fields_collection.indexOf.side_effect = lambda name: {"X": 0, "Y": 1, "Z": 2}.get(name, -1)
+        fields_collection.__getitem__ = lambda idx: [field1, field2, field3][idx]
+        fields_collection.__iter__ = lambda self: iter([field1, field2, field3])
+        layer.fields.return_value = fields_collection
+        # Two features with different Z values
+        feature1 = Mock(); feature1.id.return_value = 1; feature1.fields.return_value = fields_collection
+        geom1 = Mock(); geom1.asPoint.return_value = QgsPointXY(0, 0); geom1.isEmpty.return_value = False
+        feature1.geometry.return_value = geom1; feature1.attribute.side_effect = lambda idx: 100.0 if idx == 2 else None
+        feature2 = Mock(); feature2.id.return_value = 2; feature2.fields.return_value = fields_collection
+        geom2 = Mock(); geom2.asPoint.return_value = QgsPointXY(0.5, 0); geom2.isEmpty.return_value = False
+        feature2.geometry.return_value = geom2; feature2.attribute.side_effect = lambda idx: 120.5 if idx == 2 else None
+        layer.getFeatures.return_value = [feature1, feature2]
+        self.settings_manager.get_value.side_effect = lambda key, default=None: 'test_layer_id'
+        self.layer_service.get_layer_by_id.return_value = layer
+        self.layer_service.get_layer_by_name.return_value = None
+        with patch('qgis.core.QgsDistanceArea') as mock_distance_area:
+            mock_calculator = Mock(); mock_calculator.measureLine.return_value = 0.5
+            mock_distance_area.return_value = mock_calculator
+            warnings = self.service.detect_height_difference_warnings()
+            self.assertGreater(len(warnings), 0)
+            # The filter_expression should use 'fid' and both feature IDs
+            filter_expr = warnings[0].filter_expression
+            self.assertTrue(filter_expr.startswith('"fid"'))
+            self.assertIn('1', filter_expr)
+            self.assertIn('2', filter_expr)
+
 
 if __name__ == '__main__':
     unittest.main() 

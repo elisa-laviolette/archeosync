@@ -251,7 +251,7 @@ class HeightDifferenceDetectorService:
                 
                 for distance_range, issues in by_distance_range.items():
                     # Create filter expressions for the layer using dynamic identifier field
-                    identifier_field = self._find_identifier_field(total_station_points_layer)
+                    identifier_field = self._find_relation_identifier_field(total_station_points_layer)
                     feature_identifiers = []
                     feature_ids = []
                     
@@ -259,7 +259,7 @@ class HeightDifferenceDetectorService:
                         feature1 = issue['feature1']
                         feature2 = issue['feature2']
                         
-                        if identifier_field:
+                        if identifier_field != 'fid':
                             # Use the dynamic identifier field
                             identifier_field_idx = feature1.fields().indexOf(identifier_field)
                             
@@ -279,7 +279,7 @@ class HeightDifferenceDetectorService:
                             feature_ids.extend([feature1.id(), feature2.id()])
                     
                     # Remove duplicates and create filter expression
-                    if feature_identifiers:
+                    if identifier_field != 'fid' and feature_identifiers:
                         unique_identifiers = list(set(feature_identifiers))
                         
                         if len(unique_identifiers) == 1:
@@ -325,93 +325,75 @@ class HeightDifferenceDetectorService:
     
     def _find_identifier_field(self, layer: Any) -> Optional[str]:
         """
-        Find the identifier field for the layer using the same logic as the duplicate detector.
-        
+        Find the identifier field for the layer using the same logic as the duplicate detector, but only if it exists in the layer.
         Args:
             layer: The layer to analyze
-            
         Returns:
             The identifier field name, or None if not found
         """
         try:
-            # First try to find a common identifier field
+            # First try to find a common identifier field that exists in the layer
             identifier_field = self._find_common_identifier_field(layer)
             if identifier_field:
                 return identifier_field
-            
-            # If not found, try to guess the identifier field
-            return self._guess_identifier_field(layer)
-            
+            # If not found, try to guess the identifier field that exists in the layer
+            identifier_field = self._guess_identifier_field(layer)
+            if identifier_field:
+                return identifier_field
+            # No valid identifier field found
+            return None
         except Exception as e:
             import traceback
             traceback.print_exc()
             return None
-    
+
     def _find_common_identifier_field(self, layer: Any) -> Optional[str]:
         """
-        Find a common identifier field by looking for common identifier field names.
-        
+        Find a common identifier field by looking for common identifier field names that exist in the layer.
         Args:
             layer: The layer to analyze
-            
         Returns:
             The identifier field name, or None if not found
         """
         try:
             # Common identifier field names
             common_fields = ["identifier", "identifiant", "id", "code", "name", "nom", "label"]
-            
             for field in layer.fields():
                 if field.name().lower() in common_fields:
                     return field.name()
-            
             return None
-            
         except Exception as e:
             import traceback
             traceback.print_exc()
             return None
-    
+
     def _guess_identifier_field(self, layer: Any) -> Optional[str]:
         """
-        Guess which field corresponds to the identifier by looking for "id" in field names
-        and only considering string fields.
-        
+        Guess which field corresponds to the identifier by looking for "id" in field names and only considering string fields that exist in the layer.
         Args:
             layer: The layer to analyze
-            
         Returns:
             The guessed identifier field name, or None if not found
         """
         try:
             # Look for fields containing "id" (case-insensitive) that are string fields
             candidate_fields = []
-            
             for field in layer.fields():
                 field_name = field.name().lower()
                 field_type = field.typeName().lower()
-                
-                # Check if field name contains "id" and is a string field
                 if "id" in field_name and field_type == "string":
                     candidate_fields.append(field.name())
-            
-            # If we found candidates, return the first one
             if candidate_fields:
                 return candidate_fields[0]
-            
             # If no candidates found, try to find any string field that might be an identifier
             for field in layer.fields():
                 field_name = field.name().lower()
                 field_type = field.typeName().lower()
-                
-                # Look for common identifier patterns in string fields
                 if (field_type == "string" and 
                     (field_name in ["identifier", "identifiant", "code", "name", "nom"] or
                      field_name.endswith("_id") or field_name.endswith("_code"))):
                     return field.name()
-            
             return None
-            
         except Exception as e:
             import traceback
             traceback.print_exc()
@@ -507,3 +489,69 @@ class HeightDifferenceDetectorService:
             distance_cm = max_distance * 100
             height_difference_cm = max_height_difference * 100
             return f"{feature_text} are separated by {distance_cm:.1f} cm but have a height difference of {height_difference_cm:.1f} cm (maximum allowed: {self._max_height_difference_meters * 100:.1f} cm)" 
+
+    def _find_relation_identifier_field(self, temp_points_layer: Any) -> str:
+        """
+        Find the field in the temporary total station points layer that matches the referencing field
+        in the relation between the definitive total station points layer and the definitive objects layer.
+        If no such relation or field exists, return 'fid'.
+        """
+        try:
+            # Get definitive layer IDs from settings
+            definitive_points_layer_id = self._settings_manager.get_value('total_station_points_layer')
+            definitive_objects_layer_id = self._settings_manager.get_value('objects_layer')
+            if not definitive_points_layer_id or not definitive_objects_layer_id:
+                print("[DEBUG][HeightDiff] No definitive layer IDs in settings, using 'fid'")
+                return 'fid'
+            definitive_points_layer = self._layer_service.get_layer_by_id(definitive_points_layer_id)
+            definitive_objects_layer = self._layer_service.get_layer_by_id(definitive_objects_layer_id)
+            if not definitive_points_layer or not definitive_objects_layer:
+                print("[DEBUG][HeightDiff] Could not get definitive layers, using 'fid'")
+                return 'fid'
+            # Find the relation between the definitive layers
+            relation = self._get_relation_between_layers(definitive_points_layer, definitive_objects_layer)
+            if not relation:
+                print("[DEBUG][HeightDiff] No relation found between definitive layers, using 'fid'")
+                return 'fid'
+            field_pairs = relation.fieldPairs()
+            if not field_pairs:
+                print("[DEBUG][HeightDiff] No field pairs in relation, using 'fid'")
+                return 'fid'
+            # Determine referencing field (in points layer)
+            if relation.referencingLayer() == definitive_points_layer:
+                referencing_field = list(field_pairs.keys())[0]
+            else:
+                referencing_field = list(field_pairs.values())[0]
+            print(f"[DEBUG][HeightDiff] Referencing field in definitive points layer: {referencing_field}")
+            # Find matching field in temp_points_layer (case-insensitive)
+            for field in temp_points_layer.fields():
+                if field.name().lower() == referencing_field.lower():
+                    print(f"[DEBUG][HeightDiff] Found matching field in temp layer: {field.name()}")
+                    return field.name()
+            print("[DEBUG][HeightDiff] No matching field in temp layer, using 'fid'")
+            return 'fid'
+        except Exception as e:
+            print(f"[DEBUG][HeightDiff] Exception in _find_relation_identifier_field: {e}")
+            import traceback; traceback.print_exc()
+            return 'fid'
+
+    def _get_relation_between_layers(self, layer1: Any, layer2: Any) -> Any:
+        """
+        Get the relation object between two layers, or None if not found.
+        """
+        try:
+            from qgis.core import QgsProject
+            project = QgsProject.instance()
+            relation_manager = project.relationManager()
+            for relation in relation_manager.relations().values():
+                referencing_layer = relation.referencingLayer()
+                referenced_layer = relation.referencedLayer()
+                if ((referencing_layer and referenced_layer) and
+                    ((referencing_layer.id() == layer1.id() and referenced_layer.id() == layer2.id()) or
+                     (referencing_layer.id() == layer2.id() and referenced_layer.id() == layer1.id()))):
+                    return relation
+            return None
+        except Exception as e:
+            print(f"[DEBUG][HeightDiff] Exception in _get_relation_between_layers: {e}")
+            import traceback; traceback.print_exc()
+            return None 
