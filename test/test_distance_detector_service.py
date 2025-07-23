@@ -312,6 +312,111 @@ class TestDistanceDetectorService(unittest.TestCase):
             
             self.assertIsNone(relation)
 
+    def test_case_insensitive_relation_matching(self):
+        """Test that relation values are matched case-insensitively."""
+        # Mock layers
+        points_layer = Mock()
+        objects_layer = Mock()
+        points_layer.name.return_value = "Imported_CSV_Points"
+        objects_layer.name.return_value = "Objects"
+        
+        # Mock fields
+        points_field = QgsField("identifier", QVariant.String)
+        objects_field = QgsField("identifier", QVariant.String)
+        points_layer.fields.return_value = QgsFields()
+        objects_layer.fields.return_value = QgsFields()
+        points_layer.fields().append(points_field)
+        objects_layer.fields().append(objects_field)
+        
+        # Create features with identifiers differing only by case
+        point_feature = QgsFeature(points_layer.fields())
+        point_feature.setGeometry(QgsGeometry.fromPointXY(QgsPointXY(0, 0)))
+        point_feature.setAttribute("identifier", "abc123")
+        
+        object_feature = QgsFeature(objects_layer.fields())
+        object_feature.setGeometry(QgsGeometry.fromPointXY(QgsPointXY(1, 0)))
+        object_feature.setAttribute("identifier", "ABC123")
+        
+        # Set up getFeatures to return the features
+        points_layer.getFeatures.return_value = [point_feature]
+        objects_layer.getFeatures.return_value = [object_feature]
+        
+        # Patch the layer_service to return our mocks
+        self.layer_service.get_layer_by_id.side_effect = lambda layer_id: points_layer if layer_id == 'test_layer_id' else objects_layer
+        self.layer_service.get_layer_by_name.side_effect = lambda name: points_layer if name == "Imported_CSV_Points" else objects_layer if name == "Objects" else None
+        
+        # Patch the relation finding to simulate a valid relation
+        with patch.object(self.service, '_get_relation_between_layers', return_value=Mock(fieldPairs=lambda: {"identifier": "identifier"}, referencingLayer=lambda: points_layer)):
+            warnings = self.service._detect_distance_issues(points_layer, objects_layer, 0, 0, True)
+        
+        # There should be a warning because the points are 1m apart (threshold is 0.05m)
+        self.assertTrue(any("abc123" in w.message.lower() or "ABC123" in w.message for w in warnings))
+
+    def test_temp_total_station_and_definitive_objects_layer(self):
+        """Test detection when only the temporary total station layer exists and objects layer is definitive."""
+        # Mock temporary total station layer (Imported_CSV_Points)
+        temp_points_layer = Mock()
+        temp_points_layer.name.return_value = "Imported_CSV_Points"
+        # Simulate fields: ['ptid']
+        temp_points_fields = Mock()
+        temp_points_fields.indexOf.side_effect = lambda name: 0 if name.lower() == 'ptid' else -1
+        temp_points_fields.__getitem__ = lambda idx: Mock(name='ptid')
+        temp_points_fields.__iter__ = lambda self=None: iter([Mock(name='ptid')])
+        temp_points_layer.fields.return_value = temp_points_fields
+
+        # Mock definitive objects layer
+        objects_layer = Mock()
+        objects_layer.name.return_value = "Objects"
+        objects_fields = Mock()
+        objects_fields.indexOf.side_effect = lambda name: 0 if name.lower() == 'ptid' else -1
+        objects_fields.__getitem__ = lambda idx: Mock(name='PtID')
+        objects_fields.__iter__ = lambda self=None: iter([Mock(name='PtID')])
+        objects_layer.fields.return_value = objects_fields
+
+        # Mock settings to return only the definitive objects layer id
+        self.settings_manager.get_value.side_effect = lambda key, default=None: {
+            'enable_distance_warnings': True,
+            'distance_max_distance': 0.05,
+            'total_station_points_layer': 'definitive_points_layer_id',
+            'objects_layer': 'definitive_objects_layer_id'
+        }.get(key, default)
+
+        # Layer service returns temp points layer for name, definitive objects for id
+        self.layer_service.get_layer_by_name.side_effect = lambda name: temp_points_layer if name == "Imported_CSV_Points" else None
+        self.layer_service.get_layer_by_id.side_effect = lambda layer_id: objects_layer if layer_id == 'definitive_objects_layer_id' else Mock(name='definitive_points_layer')
+
+        # Mock relation between definitive layers
+        mock_relation = Mock()
+        mock_relation.fieldPairs.return_value = {'PtID': 'PtID'}
+        mock_relation.referencingLayer.return_value = Mock(name='definitive_points_layer')
+        mock_relation.referencedLayer.return_value = objects_layer
+
+        # Patch QgsProject to return the relation
+        with patch('qgis.core.QgsProject') as mock_project:
+            mock_relation_manager = Mock()
+            mock_relation_manager.relations.return_value = {"rel": mock_relation}
+            mock_project.instance.return_value.relationManager.return_value = mock_relation_manager
+
+            # Create features: one point and one object with matching ptid, but far apart
+            point_feature = Mock()
+            point_feature.id.return_value = 1
+            point_feature.geometry.return_value = QgsGeometry.fromPointXY(QgsPointXY(0, 0))
+            point_feature.attribute.return_value = "I103_28"
+            
+            object_feature = Mock()
+            object_feature.id.return_value = 2
+            object_feature.geometry.return_value = QgsGeometry.fromPointXY(QgsPointXY(0, 0.07))  # 7cm away
+            object_feature.attribute.return_value = "I103_28"
+
+            temp_points_layer.getFeatures.return_value = [point_feature]
+            objects_layer.getFeatures.return_value = [object_feature]
+
+            warnings = self.service.detect_distance_warnings()
+
+            self.assertGreater(len(warnings), 0)
+            self.assertIsInstance(warnings[0], WarningData)
+            self.assertIn("I103_28", warnings[0].message)
+
 
 if __name__ == '__main__':
     unittest.main() 

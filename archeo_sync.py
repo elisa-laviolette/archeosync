@@ -630,9 +630,9 @@ class ArcheoSyncPlugin(QObject):
             else:
                 print(f"[DEBUG] Skipping out-of-bounds detection - no features imported")
             
-            # Detect distance warnings if both total station points and objects were imported
+            # Detect distance warnings if either total station points or objects were imported
             distance_warnings = []
-            if (summary_data.get('csv_points_count', 0) > 0 and 
+            if (summary_data.get('csv_points_count', 0) > 0 or 
                 summary_data.get('objects_count', 0) > 0):
                 print(f"[DEBUG] Running distance detection in main plugin")
                 distance_detector = DistanceDetectorService(
@@ -646,7 +646,7 @@ class ArcheoSyncPlugin(QObject):
                     if hasattr(warning, 'message'):
                         print(f"[DEBUG]   Message: {warning.message}")
             else:
-                print(f"[DEBUG] Skipping distance detection - missing total station points or objects")
+                print(f"[DEBUG] Skipping distance detection - no total station points or objects imported")
             
             # Run missing total station detection if both total station points and objects were imported
             missing_total_station_warnings = []

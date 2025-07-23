@@ -31,7 +31,7 @@ Usage:
 """
 
 from typing import List, Optional, Any, Union, Dict, Tuple
-from qgis.core import QgsProject, QgsGeometry, QgsPointXY, QgsDistanceArea
+from qgis.core import QgsProject, QgsGeometry, QgsPointXY, QgsDistanceArea, QgsSpatialIndex
 
 try:
     from ..core.interfaces import ISettingsManager, ILayerService
@@ -53,237 +53,128 @@ class DistanceDetectorService:
     def __init__(self, settings_manager, layer_service):
         """
         Initialize the service with required dependencies.
-        
         Args:
             settings_manager: Service for managing settings
             layer_service: Service for layer operations
         """
         self._settings_manager = settings_manager
         self._layer_service = layer_service
-        
-        # Get configurable thresholds from settings with defaults
-        self._max_distance_meters = self._settings_manager.get_value('distance_max_distance', 0.05)
+        # Get configurable thresholds from settings with defaults, always as float
+        self._max_distance_meters = float(self._settings_manager.get_value('distance_max_distance', 0.05))
     
     def detect_distance_warnings(self) -> List[Union[str, WarningData]]:
+        print("[DEBUG] >>> ENTERED detect_distance_warnings <<<")
         """
         Detect distance warnings between total station points and related objects.
-        
         Returns:
             List of warning messages or structured warning data about distance issues
         """
         warnings = []
-        
+
         # Check if distance warnings are enabled
         if not self._settings_manager.get_value('enable_distance_warnings', True):
-            print(f"[DEBUG] Distance warnings are disabled, skipping detection")
             return warnings
-        
-        print(f"[DEBUG] Starting distance detection with max_distance_meters: {self._max_distance_meters}")
-        
+
         try:
             # Get configuration from settings
             total_station_points_layer_id = self._settings_manager.get_value('total_station_points_layer')
             objects_layer_id = self._settings_manager.get_value('objects_layer')
-            
-            print(f"[DEBUG] Layer IDs from settings:")
-            print(f"[DEBUG]   total_station_points_layer_id: {total_station_points_layer_id}")
-            print(f"[DEBUG]   objects_layer_id: {objects_layer_id}")
-            
-            # Check if both layers are configured
+
+            print(f"[DEBUG] total_station_points_layer_id from settings: {total_station_points_layer_id}")
+            print(f"[DEBUG] objects_layer_id from settings: {objects_layer_id}")
+
+            # Try to get layers by ID and print their names
+            points_layer_by_id = self._layer_service.get_layer_by_id(total_station_points_layer_id)
+            objects_layer_by_id = self._layer_service.get_layer_by_id(objects_layer_id)
+            print(f"[DEBUG] Layer by ID (total_station_points_layer_id): {getattr(points_layer_by_id, 'name', lambda: None)() if points_layer_by_id else None}")
+            print(f"[DEBUG] Layer by ID (objects_layer_id): {getattr(objects_layer_by_id, 'name', lambda: None)() if objects_layer_by_id else None}")
+
+            # Print all loaded layer names
+            try:
+                from qgis.core import QgsProject
+                all_layers = list(QgsProject.instance().mapLayers().values())
+                print(f"[DEBUG] All loaded layers: {[layer.name() for layer in all_layers]}")
+            except Exception as e:
+                print(f"[DEBUG] Could not print all loaded layers: {e}")
+
             if not total_station_points_layer_id or not objects_layer_id:
-                print(f"[DEBUG] Missing layer configuration, returning empty warnings")
-                print(f"[DEBUG]   total_station_points_layer_id is None: {total_station_points_layer_id is None}")
-                print(f"[DEBUG]   objects_layer_id is None: {objects_layer_id is None}")
                 return warnings
-            
-            # Get layers - look for temporary layers first (like out-of-bounds detector)
-            print(f"[DEBUG] Looking for layers...")
-            
-            # Try to find temporary total station points layer first
+
+            # Get all possible layers
             temp_total_station_points_layer = self._layer_service.get_layer_by_name("Imported_CSV_Points")
-            if temp_total_station_points_layer:
-                print(f"[DEBUG] Found temporary 'Imported_CSV_Points' layer: {temp_total_station_points_layer.name()}")
-                total_station_points_layer = temp_total_station_points_layer
-            else:
-                print(f"[DEBUG] No temporary 'Imported_CSV_Points' layer found, using configured layer: {total_station_points_layer_id}")
-                total_station_points_layer = self._layer_service.get_layer_by_id(total_station_points_layer_id)
-            
-            # Try to find temporary objects layer first
             temp_objects_layer = self._layer_service.get_layer_by_name("New Objects")
-            if temp_objects_layer:
-                print(f"[DEBUG] Found temporary 'New Objects' layer: {temp_objects_layer.name()}")
-                objects_layer = temp_objects_layer
-            else:
-                print(f"[DEBUG] No temporary 'New Objects' layer found, using configured layer: {objects_layer_id}")
-                objects_layer = self._layer_service.get_layer_by_id(objects_layer_id)
-            
-            if not total_station_points_layer or not objects_layer:
-                print(f"[DEBUG] Could not get one or both layers")
-                print(f"[DEBUG]   total_station_points_layer is None: {total_station_points_layer is None}")
-                print(f"[DEBUG]   objects_layer is None: {objects_layer is None}")
-                return warnings
-            
-            print(f"[DEBUG] Successfully got layers:")
-            print(f"[DEBUG]   Total station points layer: {total_station_points_layer.name()} (ID: {total_station_points_layer.id()})")
-            print(f"[DEBUG]   Objects layer: {objects_layer.name()} (ID: {objects_layer.id()})")
-            
-            # Check if layers are related - handle temporary layers
-            print(f"[DEBUG] Checking for relations between layers...")
-            
-            # For temporary layers, we need to get relation info from definitive layers
-            if (total_station_points_layer.name() == "Imported_CSV_Points" or 
-                objects_layer.name() == "New Objects"):
-                print(f"[DEBUG] Working with temporary layers, getting relation from definitive layers")
-                
-                # Get definitive layers to find the relation
-                definitive_total_station_points_layer = self._layer_service.get_layer_by_id(total_station_points_layer_id)
-                definitive_objects_layer = self._layer_service.get_layer_by_id(objects_layer_id)
-                
-                if definitive_total_station_points_layer and definitive_objects_layer:
-                    print(f"[DEBUG] Got definitive layers:")
-                    print(f"[DEBUG]   Definitive total station points: {definitive_total_station_points_layer.name()}")
-                    print(f"[DEBUG]   Definitive objects: {definitive_objects_layer.name()}")
-                    
-                    # Get relation from definitive layers
-                    relation = self._get_relation_between_layers(definitive_total_station_points_layer, definitive_objects_layer)
-                    if relation:
-                        print(f"[DEBUG] Found relation from definitive layers: {relation.name()}")
-                        
-                        # Get field mappings from the relation
-                        field_pairs = relation.fieldPairs()
-                        if field_pairs:
-                            print(f"[DEBUG] Field pairs from definitive relation: {field_pairs}")
-                            
-                            # Determine which layer is referencing and which is referenced
-                            if relation.referencingLayer() == definitive_total_station_points_layer:
-                                # Total station points layer references objects layer
-                                points_field = list(field_pairs.keys())[0]  # Field in total station points layer
-                                objects_field = list(field_pairs.values())[0]  # Field in objects layer
-                                points_layer_is_referencing = True
-                            else:
-                                # Objects layer references total station points layer
-                                objects_field = list(field_pairs.keys())[0]  # Field in objects layer
-                                points_field = list(field_pairs.values())[0]  # Field in total station points layer
-                                points_layer_is_referencing = False
-                            
-                            print(f"[DEBUG] Field mapping from definitive layers:")
-                            print(f"[DEBUG]   Points field: {points_field}")
-                            print(f"[DEBUG]   Objects field: {objects_field}")
-                            print(f"[DEBUG]   Points layer is referencing: {points_layer_is_referencing}")
-                            
-                            # Get field indices in temporary layers - handle case sensitivity
-                            points_field_idx = total_station_points_layer.fields().indexOf(points_field)
-                            if points_field_idx < 0:
-                                # Try case-insensitive search
-                                for i, field in enumerate(total_station_points_layer.fields()):
-                                    if field.name().lower() == points_field.lower():
-                                        points_field_idx = i
-                                        print(f"[DEBUG] Found points field '{field.name()}' (case-insensitive match for '{points_field}')")
-                                        break
-                            
-                            objects_field_idx = objects_layer.fields().indexOf(objects_field)
-                            if objects_field_idx < 0:
-                                # Try case-insensitive search
-                                for i, field in enumerate(objects_layer.fields()):
-                                    if field.name().lower() == objects_field.lower():
-                                        objects_field_idx = i
-                                        print(f"[DEBUG] Found objects field '{field.name()}' (case-insensitive match for '{objects_field}')")
-                                        break
-                            
-                            print(f"[DEBUG] Field indices in temporary layers - points: {points_field_idx}, objects: {objects_field_idx}")
-                            
-                            if points_field_idx < 0 or objects_field_idx < 0:
-                                print(f"[DEBUG] Required fields not found in temporary layers")
-                                print(f"[DEBUG] Available fields in points layer: {[f.name() for f in total_station_points_layer.fields()]}")
-                                print(f"[DEBUG] Available fields in objects layer: {[f.name() for f in objects_layer.fields()]}")
-                                return warnings
-                        else:
-                            print(f"[DEBUG] No field pairs found in definitive relation")
-                            return warnings
-                    else:
-                        print(f"[DEBUG] No relation found between definitive layers")
-                        return warnings
-                else:
-                    print(f"[DEBUG] Could not get definitive layers for relation lookup")
-                    return warnings
-            else:
-                # Working with definitive layers directly
-                relation = self._get_relation_between_layers(total_station_points_layer, objects_layer)
+            definitive_total_station_points_layer = points_layer_by_id
+            definitive_objects_layer = objects_layer_by_id
+
+            # List of (points_layer, objects_layer, points_layer_type, objects_layer_type)
+            layer_combinations = [
+                (temp_total_station_points_layer, temp_objects_layer, 'temp', 'temp'),
+                (temp_total_station_points_layer, definitive_objects_layer, 'temp', 'definitive'),
+                (definitive_total_station_points_layer, temp_objects_layer, 'definitive', 'temp'),
+                (definitive_total_station_points_layer, definitive_objects_layer, 'definitive', 'definitive'),
+            ]
+
+            for points_layer, objects_layer, points_type, objects_type in layer_combinations:
+                if not points_layer or not objects_layer:
+                    continue
+
+                # Always use the relation from the definitive layers
+                rel_points_layer = definitive_total_station_points_layer
+                rel_objects_layer = definitive_objects_layer
+                if not rel_points_layer or not rel_objects_layer:
+                    continue
+
+                relation = self._get_relation_between_layers(rel_points_layer, rel_objects_layer)
                 if not relation:
-                    print(f"[DEBUG] No relation found between total station points and objects layers")
-                    print(f"[DEBUG] Distance detection will not proceed without a relation")
-                    return warnings
-                
-                print(f"[DEBUG] Found relation: {relation.name()}")
-                print(f"[DEBUG] Relation ID: {relation.id()}")
-                
-                # Get field mappings from the relation
+                    continue
+
                 field_pairs = relation.fieldPairs()
                 if not field_pairs:
-                    print(f"[DEBUG] No field pairs found in relation")
-                    return warnings
-                
-                print(f"[DEBUG] Field pairs: {field_pairs}")
-                
+                    continue
+
                 # Determine which layer is referencing and which is referenced
-                if relation.referencingLayer() == total_station_points_layer:
-                    # Total station points layer references objects layer
-                    points_field = list(field_pairs.keys())[0]  # Field in total station points layer
-                    objects_field = list(field_pairs.values())[0]  # Field in objects layer
+                if relation.referencingLayer() == rel_points_layer:
+                    points_field = list(field_pairs.keys())[0]
+                    objects_field = list(field_pairs.values())[0]
                     points_layer_is_referencing = True
                 else:
-                    # Objects layer references total station points layer
-                    objects_field = list(field_pairs.keys())[0]  # Field in objects layer
-                    points_field = list(field_pairs.values())[0]  # Field in total station points layer
+                    objects_field = list(field_pairs.keys())[0]
+                    points_field = list(field_pairs.values())[0]
                     points_layer_is_referencing = False
-                
-                print(f"[DEBUG] Field mapping:")
-                print(f"[DEBUG]   Points field: {points_field}")
-                print(f"[DEBUG]   Objects field: {objects_field}")
-                print(f"[DEBUG]   Points layer is referencing: {points_layer_is_referencing}")
-                
-                # Get field indices - handle case sensitivity
-                points_field_idx = total_station_points_layer.fields().indexOf(points_field)
+
+                # Find field indices in the current points_layer and objects_layer (case-insensitive)
+                points_field_idx = points_layer.fields().indexOf(points_field)
                 if points_field_idx < 0:
-                    # Try case-insensitive search
-                    for i, field in enumerate(total_station_points_layer.fields()):
+                    for i, field in enumerate(points_layer.fields()):
                         if field.name().lower() == points_field.lower():
                             points_field_idx = i
-                            print(f"[DEBUG] Found points field '{field.name()}' (case-insensitive match for '{points_field}')")
                             break
-                
+
                 objects_field_idx = objects_layer.fields().indexOf(objects_field)
                 if objects_field_idx < 0:
-                    # Try case-insensitive search
                     for i, field in enumerate(objects_layer.fields()):
                         if field.name().lower() == objects_field.lower():
                             objects_field_idx = i
-                            print(f"[DEBUG] Found objects field '{field.name()}' (case-insensitive match for '{objects_field}')")
                             break
-                
+
                 if points_field_idx < 0 or objects_field_idx < 0:
-                    print(f"[DEBUG] Required fields not found in layers")
-                    print(f"[DEBUG] Available fields in points layer: {[f.name() for f in total_station_points_layer.fields()]}")
-                    print(f"[DEBUG] Available fields in objects layer: {[f.name() for f in objects_layer.fields()]}")
-                    return warnings
-                
-                print(f"[DEBUG] Field indices - points: {points_field_idx}, objects: {objects_field_idx}")
-            
-            # Detect distance issues
-            distance_warnings = self._detect_distance_issues(
-                total_station_points_layer, objects_layer,
-                points_field_idx, objects_field_idx,
-                points_layer_is_referencing
-            )
-            
-            warnings.extend(distance_warnings)
-            
+                    continue
+
+                # Detect distance issues for this combination
+                distance_warnings = self._detect_distance_issues(
+                    points_layer, objects_layer,
+                    points_field_idx, objects_field_idx,
+                    points_layer_is_referencing
+                )
+                if distance_warnings:
+                    warnings.extend(distance_warnings)
+                    break  # Stop at first successful combination with warnings
+
         except Exception as e:
             print(f"Error in distance detection: {e}")
             import traceback
             traceback.print_exc()
-        
-        print(f"[DEBUG] Distance detection completed, found {len(warnings)} warnings")
+
         return warnings
     
     def _detect_distance_issues(self, 
@@ -293,121 +184,56 @@ class DistanceDetectorService:
                                objects_field_idx: int,
                                points_layer_is_referencing: bool) -> List[Union[str, WarningData]]:
         """
-        Detect distance issues between total station points and objects.
-        
-        Args:
-            total_station_points_layer: The total station points layer
-            objects_layer: The objects layer
-            points_field_idx: Index of the relation field in points layer
-            objects_field_idx: Index of the relation field in objects layer
-            points_layer_is_referencing: Whether points layer references objects layer
-            
-        Returns:
-            List of warning messages or structured warning data
+        Optimized: Uses QgsSpatialIndex for objects per relation value.
         """
         warnings = []
-        
         try:
-            print(f"[DEBUG] _detect_distance_issues called")
-            
-            # Create a distance calculator
             distance_calculator = QgsDistanceArea()
             distance_calculator.setEllipsoid('WGS84')
-            
-            # Group features by their relation field value
+            # Group features by their relation field value (case-insensitive)
             points_by_relation = {}
             objects_by_relation = {}
-            
-            # Process total station points
-            points_count = 0
-            points_with_geometry = 0
-            points_with_relation = 0
-            
             for feature in total_station_points_layer.getFeatures():
-                points_count += 1
-                if not feature.geometry() or feature.geometry().isEmpty():
-                    continue
-                points_with_geometry += 1
-                
                 relation_value = feature.attribute(points_field_idx)
-                print(f"[DEBUG] Point {feature.id()}: relation_value = {relation_value}")
-                if relation_value:
-                    points_with_relation += 1
-                    if relation_value not in points_by_relation:
-                        points_by_relation[relation_value] = []
-                    points_by_relation[relation_value].append(feature)
-            
-            # Process objects
-            objects_count = 0
-            objects_with_geometry = 0
-            objects_with_relation = 0
-            
+                if relation_value is not None:
+                    relation_value_key = str(relation_value).lower()
+                    if relation_value_key not in points_by_relation:
+                        points_by_relation[relation_value_key] = []
+                    points_by_relation[relation_value_key].append(feature)
             for feature in objects_layer.getFeatures():
-                objects_count += 1
-                if not feature.geometry() or feature.geometry().isEmpty():
-                    continue
-                objects_with_geometry += 1
-                
                 relation_value = feature.attribute(objects_field_idx)
-                print(f"[DEBUG] Object {feature.id()}: relation_value = {relation_value}")
-                if relation_value:
-                    objects_with_relation += 1
-                    if relation_value not in objects_by_relation:
-                        objects_by_relation[relation_value] = []
-                    objects_by_relation[relation_value].append(feature)
-            
-            print(f"[DEBUG] Points processing summary:")
-            print(f"[DEBUG]   Total points: {points_count}")
-            print(f"[DEBUG]   Points with geometry: {points_with_geometry}")
-            print(f"[DEBUG]   Points with relation value: {points_with_relation}")
-            
-            print(f"[DEBUG] Objects processing summary:")
-            print(f"[DEBUG]   Total objects: {objects_count}")
-            print(f"[DEBUG]   Objects with geometry: {objects_with_geometry}")
-            print(f"[DEBUG]   Objects with relation value: {objects_with_relation}")
-            
-            print(f"[DEBUG] Found {len(points_by_relation)} unique relation values in points layer")
-            print(f"[DEBUG] Points relation values: {list(points_by_relation.keys())}")
-            print(f"[DEBUG] Found {len(objects_by_relation)} unique relation values in objects layer")
-            print(f"[DEBUG] Objects relation values: {list(objects_by_relation.keys())}")
-            
-            # Check for distance issues
-            distance_issues = []
-            
-            # Get all unique relation values that exist in both layers
+                if relation_value is not None:
+                    relation_value_key = str(relation_value).lower()
+                    if relation_value_key not in objects_by_relation:
+                        objects_by_relation[relation_value_key] = []
+                    objects_by_relation[relation_value_key].append(feature)
+            # Only check common relation values
             common_relation_values = set(points_by_relation.keys()) & set(objects_by_relation.keys())
-            
-            print(f"[DEBUG] Found {len(common_relation_values)} common relation values")
-            print(f"[DEBUG] Common relation values: {list(common_relation_values)}")
-            
+            print(f"[DEBUG] points_by_relation keys: {list(points_by_relation.keys())}")
+            print(f"[DEBUG] objects_by_relation keys: {list(objects_by_relation.keys())}")
+            print(f"[DEBUG] common_relation_values: {list(common_relation_values)}")
+            distance_issues = []
             for relation_value in common_relation_values:
                 points_features = points_by_relation[relation_value]
                 objects_features = objects_by_relation[relation_value]
-                
-                # Check each point-object pair
+                print(f"[DEBUG] For relation value {relation_value}: {len(points_features)} point(s), {len(objects_features)} object(s)")
+                for pf in points_features:
+                    print(f"[DEBUG]   Point feature id: {pf.id()}, geometry: {pf.geometry().asWkt()}")
+                for of in objects_features:
+                    print(f"[DEBUG]   Object feature id: {of.id()}, geometry: {of.geometry().asWkt()}")
+                # All-pairs check for each point/object with the same relation value
                 for point_feature in points_features:
-                    point_geometry = point_feature.geometry()
-                    
+                    point_geom = point_feature.geometry()
                     for object_feature in objects_features:
-                        object_geometry = object_feature.geometry()
-                        
-                        # Check if geometries overlap
-                        if point_geometry.intersects(object_geometry):
-                            # Geometries overlap, no distance issue
-                            print(f"[DEBUG] Point {point_feature.id()} intersects object {object_feature.id()}, skipping")
+                        object_geom = object_feature.geometry()
+                        point_identifier = self._get_feature_identifier(point_feature, "Total Station Point")
+                        object_identifier = self._get_feature_identifier(object_feature, "Object")
+                        if point_geom.intersects(object_geom):
+                            print(f"[DEBUG] Skipping pair {point_identifier} and {object_identifier} (relation value: {relation_value}) because geometries overlap")
                             continue
-                        
-                        # Calculate distance between point and polygon boundary
-                        # For point to polygon, we need to measure the distance to the polygon boundary
-                        distance = point_geometry.distance(object_geometry)
-                        
-                        print(f"[DEBUG] Distance between point {point_feature.id()} and object {object_feature.id()}: {distance:.3f}m")
-                        
+                        distance = point_geom.distance(object_geom)
+                        print(f"[DEBUG] Checking point {point_identifier} and object {object_identifier} (relation value: {relation_value}): distance = {distance}, threshold = {self._max_distance_meters}")
                         if distance > self._max_distance_meters:
-                            # Get feature identifiers
-                            point_identifier = self._get_feature_identifier(point_feature, "Total Station Point")
-                            object_identifier = self._get_feature_identifier(object_feature, "Object")
-                            
                             distance_issues.append({
                                 'point_feature': point_feature,
                                 'object_feature': object_feature,
@@ -416,9 +242,6 @@ class DistanceDetectorService:
                                 'distance': distance,
                                 'relation_value': relation_value
                             })
-            
-            print(f"[DEBUG] Found {len(distance_issues)} distance issues")
-            
             # Create warnings for distance issues
             if distance_issues:
                 # Group by relation value for better organization
@@ -430,9 +253,11 @@ class DistanceDetectorService:
                     by_relation_value[relation_value].append(issue)
                 
                 for relation_value, issues in by_relation_value.items():
-                    # Create filter expressions for both layers
-                    points_filter = f'"{total_station_points_layer.fields()[points_field_idx].name()}" = \'{relation_value}\''
-                    objects_filter = f'"{objects_layer.fields()[objects_field_idx].name()}" = \'{relation_value}\''
+                    # Create filter expressions for both layers (use original case from first feature)
+                    points_filter_value = issues[0]['point_feature'].attribute(points_field_idx)
+                    objects_filter_value = issues[0]['object_feature'].attribute(objects_field_idx)
+                    points_filter = f'"{total_station_points_layer.fields()[points_field_idx].name()}" = \'{points_filter_value}\''
+                    objects_filter = f'"{objects_layer.fields()[objects_field_idx].name()}" = \'{objects_filter_value}\''
                     
                     # Get feature identifiers for the warning message
                     point_identifiers = [issue['point_identifier'] for issue in issues]
@@ -442,7 +267,7 @@ class DistanceDetectorService:
                     # Create structured warning data
                     warning_data = WarningData(
                         message=self._create_distance_warning(
-                            point_identifiers, object_identifiers, max_distance
+                            point_identifiers, object_identifiers, max_distance, relation_value
                         ),
                         recording_area_name=f"Relation {relation_value}",  # Use relation value as identifier
                         layer_name=total_station_points_layer.name(),
@@ -452,7 +277,6 @@ class DistanceDetectorService:
                         distance_issues=issues
                     )
                     warnings.append(warning_data)
-                    print(f"[DEBUG] Created distance warning: {warning_data.message}")
             
         except Exception as e:
             print(f"[DEBUG] Error in _detect_distance_issues: {e}")
@@ -473,38 +297,22 @@ class DistanceDetectorService:
             The relation object if found, None otherwise
         """
         try:
-            print(f"[DEBUG] _get_relation_between_layers called for layers: {layer1.name()} and {layer2.name()}")
-            print(f"[DEBUG] Layer1 ID: {layer1.id()}, Layer2 ID: {layer2.id()}")
             
             # Get the relation manager
             project = QgsProject.instance()
             relation_manager = project.relationManager()
             
-            print(f"[DEBUG] Found {len(relation_manager.relations())} total relations in project")
-            
             # Find relations between the two layers
             for relation_id, relation in relation_manager.relations().items():
-                print(f"[DEBUG] Checking relation: {relation.name()} (ID: {relation_id})")
                 
                 referencing_layer = relation.referencingLayer()
                 referenced_layer = relation.referencedLayer()
-                
-                print(f"[DEBUG]   Referencing layer: {referencing_layer.name() if referencing_layer else 'None'} (ID: {referencing_layer.id() if referencing_layer else 'None'})")
-                print(f"[DEBUG]   Referenced layer: {referenced_layer.name() if referenced_layer else 'None'} (ID: {referenced_layer.id() if referenced_layer else 'None'})")
                 
                 # Check if either layer matches either side of the relation
                 if ((referencing_layer and referenced_layer) and
                     ((referencing_layer.id() == layer1.id() and referenced_layer.id() == layer2.id()) or
                      (referencing_layer.id() == layer2.id() and referenced_layer.id() == layer1.id()))):
-                    print(f"[DEBUG] Found matching relation: {relation.name()}")
                     return relation
-            
-            print(f"[DEBUG] No matching relation found")
-            print(f"[DEBUG] Available relations:")
-            for relation_id, relation in relation_manager.relations().items():
-                ref_layer = relation.referencingLayer()
-                refd_layer = relation.referencedLayer()
-                print(f"[DEBUG]   {relation.name()}: {ref_layer.name() if ref_layer else 'None'} -> {refd_layer.name() if refd_layer else 'None'}")
             
             return None
             
@@ -554,15 +362,15 @@ class DistanceDetectorService:
     def _create_distance_warning(self, 
                                 point_identifiers: List[str], 
                                 object_identifiers: List[str], 
-                                max_distance: float) -> str:
+                                max_distance: float,
+                                relation_value: str = None) -> str:
         """
         Create a warning message for distance issues.
-        
         Args:
             point_identifiers: List of point identifiers
             object_identifiers: List of object identifiers
             max_distance: The maximum distance found
-        
+            relation_value: The matched identifier (relation value)
         Returns:
             The warning message
         """
@@ -571,15 +379,12 @@ class DistanceDetectorService:
                 feature_text = f"{point_identifiers[0]} and {object_identifiers[0]}"
             else:
                 feature_text = f"{len(point_identifiers)} points and {len(object_identifiers)} objects"
-            
             distance_cm = max_distance * 100  # Convert to centimeters
-            
+            identifier_text = f" [Identifier: {relation_value}]" if relation_value else ""
             # Fallback: just return the message in English
             return (
-                f"{feature_text} are separated by {distance_cm:.1f} cm "
-                f"(maximum allowed: {self._max_distance_meters * 100:.1f} cm)"
+                f"{feature_text} are separated by {distance_cm:.1f} cm (maximum allowed: {self._max_distance_meters * 100:.1f} cm){identifier_text}"
             )
-            
         except Exception as e:
             print(f"Error creating distance warning: {str(e)}")
             return f"{feature_text} are separated by {max_distance * 100:.1f} cm (maximum allowed: {self._max_distance_meters * 100:.1f} cm)" 

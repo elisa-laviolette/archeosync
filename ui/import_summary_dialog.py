@@ -110,6 +110,7 @@ class ImportSummaryDockWidget(QDockWidget):
             translation_service: Translation service for internationalization
             parent: Parent widget for the dock widget
         """
+        print(f"[DEBUG][UI] ImportSummaryDockWidget created with {len(getattr(summary_data, 'distance_warnings', []))} distance warnings")
         super().__init__(parent)
         
         # Store injected dependencies
@@ -155,6 +156,7 @@ class ImportSummaryDockWidget(QDockWidget):
     
     def _create_summary_content(self, parent_layout: QtWidgets.QVBoxLayout) -> None:
         """Create the summary content section."""
+        print("[DEBUG][UI] Creating summary content")
         # Create scroll area for content
         scroll_area = QtWidgets.QScrollArea()
         scroll_area.setWidgetResizable(True)
@@ -184,6 +186,33 @@ class ImportSummaryDockWidget(QDockWidget):
         if self._summary_data.small_finds_count > 0:
             small_finds_group = self._create_small_finds_section()
             content_layout.addWidget(small_finds_group)
+
+        # Distance warnings section
+        if hasattr(self._summary_data, 'distance_warnings') and self._summary_data.distance_warnings:
+            print(f"[DEBUG][UI] Displaying {len(self._summary_data.distance_warnings)} distance warnings")
+            warnings_layout = QtWidgets.QVBoxLayout()
+            warnings_label = QtWidgets.QLabel(self.tr("Distance Warnings:"))
+            warnings_label.setStyleSheet("font-weight: bold; color: #DC143C;")
+            warnings_layout.addWidget(warnings_label)
+            for i, warning in enumerate(self._summary_data.distance_warnings):
+                warning_item_layout = QtWidgets.QHBoxLayout()
+                if hasattr(warning, 'message'):
+                    warning_text = warning.message
+                else:
+                    warning_text = str(warning)
+                warning_item = QtWidgets.QLabel(f"• {warning_text}")
+                warning_item.setStyleSheet("color: #DC143C; margin-left: 10px;")
+                warning_item.setWordWrap(True)
+                warning_item_layout.addWidget(warning_item)
+                if hasattr(warning, 'message') and self._iface:
+                    button = QtWidgets.QPushButton(self.tr("Select and Show Entities"))
+                    button.setStyleSheet("background-color: #DC143C; color: white; border: none; padding: 5px; border-radius: 3px;")
+                    button.clicked.connect(lambda checked, w=warning: self._open_both_filtered_attribute_tables(w))
+                    warning_item_layout.addWidget(button)
+                warning_item_layout.addStretch()
+                warnings_layout.addLayout(warning_item_layout)
+            content_layout.addLayout(warnings_layout)
+            print("[DEBUG][UI] Added distance warnings layout to content_layout")
         
         # Add stretch to push content to top
         content_layout.addStretch()
@@ -275,7 +304,7 @@ class ImportSummaryDockWidget(QDockWidget):
                     warning_text = str(warning)
                 
                 warning_item = QtWidgets.QLabel(f"• {warning_text}")
-                warning_item.setStyleSheet("color: #FF4500; margin-left: 10px;")
+                warning_item.setStyleSheet("color: #FF8C00; margin-left: 10px;")
                 warning_item.setWordWrap(True)
                 warning_item_layout.addWidget(warning_item)
                 
@@ -291,6 +320,39 @@ class ImportSummaryDockWidget(QDockWidget):
                         button = QtWidgets.QPushButton(self.tr("Select and Show Entities"))
                         button.setStyleSheet("background-color: #4CAF50; color: white; border: none; padding: 5px; border-radius: 3px;")
                         button.clicked.connect(lambda checked, w=warning: self._open_filtered_attribute_table(w))
+                    warning_item_layout.addWidget(button)
+                
+                warning_item_layout.addStretch()
+                warnings_layout.addLayout(warning_item_layout)
+            
+            layout.addLayout(warnings_layout)
+        
+        # Missing total station warnings
+        if hasattr(self._summary_data, 'missing_total_station_warnings') and self._summary_data.missing_total_station_warnings:
+            warnings_layout = QtWidgets.QVBoxLayout()
+            warnings_label = QtWidgets.QLabel(self.tr("Missing Total Station Warnings:"))
+            warnings_label.setStyleSheet("font-weight: bold; color: #8B0000;")
+            warnings_layout.addWidget(warnings_label)
+            
+            for i, warning in enumerate(self._summary_data.missing_total_station_warnings):
+                warning_item_layout = QtWidgets.QHBoxLayout()
+                
+                # Warning text - check if it has the expected attributes
+                if hasattr(warning, 'message'):
+                    warning_text = warning.message
+                else:
+                    warning_text = str(warning)
+                
+                warning_item = QtWidgets.QLabel(f"• {warning_text}")
+                warning_item.setStyleSheet("color: #8B0000; margin-left: 10px;")
+                warning_item.setWordWrap(True)
+                warning_item_layout.addWidget(warning_item)
+                
+                # Add button if we have structured data and QGIS interface
+                if hasattr(warning, 'message') and self._iface:
+                    button = QtWidgets.QPushButton(self.tr("Select and Show Entities"))
+                    button.setStyleSheet("background-color: #8B0000; color: white; border: none; padding: 5px; border-radius: 3px;")
+                    button.clicked.connect(lambda checked, w=warning: self._open_both_filtered_attribute_tables(w))
                     warning_item_layout.addWidget(button)
                 
                 warning_item_layout.addStretch()
@@ -427,104 +489,6 @@ class ImportSummaryDockWidget(QDockWidget):
                         button = QtWidgets.QPushButton(self.tr("Select and Show Entities"))
                         button.setStyleSheet("background-color: #4CAF50; color: white; border: none; padding: 5px; border-radius: 3px;")
                         button.clicked.connect(lambda checked, w=warning: self._open_filtered_attribute_table(w))
-                    warning_item_layout.addWidget(button)
-                
-                warning_item_layout.addStretch()
-                warnings_layout.addLayout(warning_item_layout)
-            
-            layout.addLayout(warnings_layout)
-        # Out-of-bounds warnings
-        if hasattr(self._summary_data, 'out_of_bounds_warnings') and self._summary_data.out_of_bounds_warnings:
-            warnings_layout = QtWidgets.QVBoxLayout()
-            warnings_label = QtWidgets.QLabel(self.tr("Out-of-Bounds Warnings:"))
-            warnings_label.setStyleSheet("font-weight: bold; color: #DC143C;")
-            warnings_layout.addWidget(warnings_label)
-            
-            for i, warning in enumerate(self._summary_data.out_of_bounds_warnings):
-                warning_item_layout = QtWidgets.QHBoxLayout()
-                
-                # Warning text - check if it has the expected attributes
-                if hasattr(warning, 'message'):
-                    warning_text = warning.message
-                else:
-                    warning_text = str(warning)
-                
-                warning_item = QtWidgets.QLabel(f"• {warning_text}")
-                warning_item.setStyleSheet("color: #DC143C; margin-left: 10px;")
-                warning_item.setWordWrap(True)
-                warning_item_layout.addWidget(warning_item)
-                
-                # Add button if we have structured data and QGIS interface
-                if hasattr(warning, 'message') and self._iface:
-                    button = QtWidgets.QPushButton(self.tr("Select and Show Entities"))
-                    button.setStyleSheet("background-color: #DC143C; color: white; border: none; padding: 5px; border-radius: 3px;")
-                    button.clicked.connect(lambda checked, w=warning: self._open_filtered_attribute_table(w))
-                    warning_item_layout.addWidget(button)
-                
-                warning_item_layout.addStretch()
-                warnings_layout.addLayout(warning_item_layout)
-            
-            layout.addLayout(warnings_layout)
-        
-        # Distance warnings
-        if hasattr(self._summary_data, 'distance_warnings') and self._summary_data.distance_warnings:
-            warnings_layout = QtWidgets.QVBoxLayout()
-            warnings_label = QtWidgets.QLabel(self.tr("Distance Warnings:"))
-            warnings_label.setStyleSheet("font-weight: bold; color: #DC143C;")
-            warnings_layout.addWidget(warnings_label)
-            
-            for i, warning in enumerate(self._summary_data.distance_warnings):
-                warning_item_layout = QtWidgets.QHBoxLayout()
-                
-                # Warning text - check if it has the expected attributes
-                if hasattr(warning, 'message'):
-                    warning_text = warning.message
-                else:
-                    warning_text = str(warning)
-                
-                warning_item = QtWidgets.QLabel(f"• {warning_text}")
-                warning_item.setStyleSheet("color: #DC143C; margin-left: 10px;")
-                warning_item.setWordWrap(True)
-                warning_item_layout.addWidget(warning_item)
-                
-                # Add button if we have structured data and QGIS interface
-                if hasattr(warning, 'message') and self._iface:
-                    button = QtWidgets.QPushButton(self.tr("Select and Show Entities"))
-                    button.setStyleSheet("background-color: #DC143C; color: white; border: none; padding: 5px; border-radius: 3px;")
-                    button.clicked.connect(lambda checked, w=warning: self._open_both_filtered_attribute_tables(w))
-                    warning_item_layout.addWidget(button)
-                
-                warning_item_layout.addStretch()
-                warnings_layout.addLayout(warning_item_layout)
-            
-            layout.addLayout(warnings_layout)
-        
-        # Missing total station warnings
-        if hasattr(self._summary_data, 'missing_total_station_warnings') and self._summary_data.missing_total_station_warnings:
-            warnings_layout = QtWidgets.QVBoxLayout()
-            warnings_label = QtWidgets.QLabel(self.tr("Missing Total Station Warnings:"))
-            warnings_label.setStyleSheet("font-weight: bold; color: #8B0000;")
-            warnings_layout.addWidget(warnings_label)
-            
-            for i, warning in enumerate(self._summary_data.missing_total_station_warnings):
-                warning_item_layout = QtWidgets.QHBoxLayout()
-                
-                # Warning text - check if it has the expected attributes
-                if hasattr(warning, 'message'):
-                    warning_text = warning.message
-                else:
-                    warning_text = str(warning)
-                
-                warning_item = QtWidgets.QLabel(f"• {warning_text}")
-                warning_item.setStyleSheet("color: #8B0000; margin-left: 10px;")
-                warning_item.setWordWrap(True)
-                warning_item_layout.addWidget(warning_item)
-                
-                # Add button if we have structured data and QGIS interface
-                if hasattr(warning, 'message') and self._iface:
-                    button = QtWidgets.QPushButton(self.tr("Select and Show Entities"))
-                    button.setStyleSheet("background-color: #8B0000; color: white; border: none; padding: 5px; border-radius: 3px;")
-                    button.clicked.connect(lambda checked, w=warning: self._open_both_filtered_attribute_tables(w))
                     warning_item_layout.addWidget(button)
                 
                 warning_item_layout.addStretch()
@@ -770,9 +734,9 @@ class ImportSummaryDockWidget(QDockWidget):
             else:
                 print(f"[DEBUG] Skipping out-of-bounds detection - no features imported")
             
-            # Re-run distance detection if both total station points and objects were imported
+            # Re-run distance detection if either total station points or objects were imported
             distance_warnings = []
-            if (self._summary_data.csv_points_count > 0 and 
+            if (self._summary_data.csv_points_count > 0 or 
                 self._summary_data.objects_count > 0):
                 print(f"[DEBUG] Running distance detection")
                 try:
@@ -795,7 +759,7 @@ class ImportSummaryDockWidget(QDockWidget):
                     if hasattr(warning, 'message'):
                         print(f"[DEBUG]   Message: {warning.message}")
             else:
-                print(f"[DEBUG] Skipping distance detection - missing total station points or objects")
+                print(f"[DEBUG] Skipping distance detection - no total station points or objects")
             
             # Re-run missing total station detection if both total station points and objects were imported
             missing_total_station_warnings = []
@@ -980,6 +944,33 @@ class ImportSummaryDockWidget(QDockWidget):
         if self._summary_data.small_finds_count > 0:
             small_finds_group = self._create_small_finds_section()
             content_layout.addWidget(small_finds_group)
+
+        # Distance warnings section
+        if hasattr(self._summary_data, 'distance_warnings') and self._summary_data.distance_warnings:
+            print(f"[DEBUG][UI] Displaying {len(self._summary_data.distance_warnings)} distance warnings")
+            warnings_layout = QtWidgets.QVBoxLayout()
+            warnings_label = QtWidgets.QLabel(self.tr("Distance Warnings:"))
+            warnings_label.setStyleSheet("font-weight: bold; color: #DC143C;")
+            warnings_layout.addWidget(warnings_label)
+            for i, warning in enumerate(self._summary_data.distance_warnings):
+                warning_item_layout = QtWidgets.QHBoxLayout()
+                if hasattr(warning, 'message'):
+                    warning_text = warning.message
+                else:
+                    warning_text = str(warning)
+                warning_item = QtWidgets.QLabel(f"• {warning_text}")
+                warning_item.setStyleSheet("color: #DC143C; margin-left: 10px;")
+                warning_item.setWordWrap(True)
+                warning_item_layout.addWidget(warning_item)
+                if hasattr(warning, 'message') and self._iface:
+                    button = QtWidgets.QPushButton(self.tr("Select and Show Entities"))
+                    button.setStyleSheet("background-color: #DC143C; color: white; border: none; padding: 5px; border-radius: 3px;")
+                    button.clicked.connect(lambda checked, w=warning: self._open_both_filtered_attribute_tables(w))
+                    warning_item_layout.addWidget(button)
+                warning_item_layout.addStretch()
+                warnings_layout.addLayout(warning_item_layout)
+            content_layout.addLayout(warnings_layout)
+            print("[DEBUG][UI] Added distance warnings layout to content_layout")
         
         content_layout.addStretch()
         scroll_area.setWidget(content_widget)
