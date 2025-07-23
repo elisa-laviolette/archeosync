@@ -63,7 +63,6 @@ class DistanceDetectorService:
         self._max_distance_meters = float(self._settings_manager.get_value('distance_max_distance', 0.05))
     
     def detect_distance_warnings(self) -> List[Union[str, WarningData]]:
-        print("[DEBUG] >>> ENTERED detect_distance_warnings <<<")
         """
         Detect distance warnings between total station points and related objects.
         Returns:
@@ -80,31 +79,14 @@ class DistanceDetectorService:
             total_station_points_layer_id = self._settings_manager.get_value('total_station_points_layer')
             objects_layer_id = self._settings_manager.get_value('objects_layer')
 
-            print(f"[DEBUG] total_station_points_layer_id from settings: {total_station_points_layer_id}")
-            print(f"[DEBUG] objects_layer_id from settings: {objects_layer_id}")
-
-            # Try to get layers by ID and print their names
-            points_layer_by_id = self._layer_service.get_layer_by_id(total_station_points_layer_id)
-            objects_layer_by_id = self._layer_service.get_layer_by_id(objects_layer_id)
-            print(f"[DEBUG] Layer by ID (total_station_points_layer_id): {getattr(points_layer_by_id, 'name', lambda: None)() if points_layer_by_id else None}")
-            print(f"[DEBUG] Layer by ID (objects_layer_id): {getattr(objects_layer_by_id, 'name', lambda: None)() if objects_layer_by_id else None}")
-
-            # Print all loaded layer names
-            try:
-                from qgis.core import QgsProject
-                all_layers = list(QgsProject.instance().mapLayers().values())
-                print(f"[DEBUG] All loaded layers: {[layer.name() for layer in all_layers]}")
-            except Exception as e:
-                print(f"[DEBUG] Could not print all loaded layers: {e}")
-
             if not total_station_points_layer_id or not objects_layer_id:
                 return warnings
 
             # Get all possible layers
             temp_total_station_points_layer = self._layer_service.get_layer_by_name("Imported_CSV_Points")
             temp_objects_layer = self._layer_service.get_layer_by_name("New Objects")
-            definitive_total_station_points_layer = points_layer_by_id
-            definitive_objects_layer = objects_layer_by_id
+            definitive_total_station_points_layer = self._layer_service.get_layer_by_id(total_station_points_layer_id)
+            definitive_objects_layer = self._layer_service.get_layer_by_id(objects_layer_id)
 
             # List of (points_layer, objects_layer, points_layer_type, objects_layer_type)
             layer_combinations = [
@@ -209,34 +191,23 @@ class DistanceDetectorService:
                     objects_by_relation[relation_value_key].append(feature)
             # Only check common relation values
             common_relation_values = set(points_by_relation.keys()) & set(objects_by_relation.keys())
-            print(f"[DEBUG] points_by_relation keys: {list(points_by_relation.keys())}")
-            print(f"[DEBUG] objects_by_relation keys: {list(objects_by_relation.keys())}")
-            print(f"[DEBUG] common_relation_values: {list(common_relation_values)}")
             distance_issues = []
             for relation_value in common_relation_values:
                 points_features = points_by_relation[relation_value]
                 objects_features = objects_by_relation[relation_value]
-                print(f"[DEBUG] For relation value {relation_value}: {len(points_features)} point(s), {len(objects_features)} object(s)")
                 for pf in points_features:
-                    print(f"[DEBUG]   Point feature id: {pf.id()}, geometry: {pf.geometry().asWkt()}")
-                for of in objects_features:
-                    print(f"[DEBUG]   Object feature id: {of.id()}, geometry: {of.geometry().asWkt()}")
-                # All-pairs check for each point/object with the same relation value
-                for point_feature in points_features:
-                    point_geom = point_feature.geometry()
-                    for object_feature in objects_features:
-                        object_geom = object_feature.geometry()
-                        point_identifier = self._get_feature_identifier(point_feature, "Total Station Point")
-                        object_identifier = self._get_feature_identifier(object_feature, "Object")
+                    for of in objects_features:
+                        point_geom = pf.geometry()
+                        object_geom = of.geometry()
+                        point_identifier = self._get_feature_identifier(pf, "Total Station Point")
+                        object_identifier = self._get_feature_identifier(of, "Object")
                         if point_geom.intersects(object_geom):
-                            print(f"[DEBUG] Skipping pair {point_identifier} and {object_identifier} (relation value: {relation_value}) because geometries overlap")
                             continue
                         distance = point_geom.distance(object_geom)
-                        print(f"[DEBUG] Checking point {point_identifier} and object {object_identifier} (relation value: {relation_value}): distance = {distance}, threshold = {self._max_distance_meters}")
                         if distance > self._max_distance_meters:
                             distance_issues.append({
-                                'point_feature': point_feature,
-                                'object_feature': object_feature,
+                                'point_feature': pf,
+                                'object_feature': of,
                                 'point_identifier': point_identifier,
                                 'object_identifier': object_identifier,
                                 'distance': distance,

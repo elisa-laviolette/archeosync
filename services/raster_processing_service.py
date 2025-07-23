@@ -113,10 +113,10 @@ class QGISRasterProcessingService(IRasterProcessingService):
             else:
                 buffered_geometry = feature_geometry
             
-            print(f"[DEBUG] Using direct GDAL command approach for raster clipping")
-            print(f"[DEBUG] Raster source: {raster_source}")
-            print(f"[DEBUG] Raster CRS: {raster_layer.crs().description()}")
-            print(f"[DEBUG] Output path: {output_path}")
+            print(f"Using direct GDAL command approach for raster clipping")
+            print(f"Raster source: {raster_source}")
+            print(f"Raster CRS: {raster_layer.crs().description()}")
+            print(f"Output path: {output_path}")
             
             # Use direct GDAL command approach (similar to working manual command)
             return self._clip_raster_with_gdal_command(raster_layer, buffered_geometry, output_path)
@@ -214,82 +214,82 @@ class QGISRasterProcessingService(IRasterProcessingService):
             should be cleaned up after use.
         """
         try:
-            print(f"[DEBUG] Starting _create_temp_shapefile with geometry type: {type(geometry)}")
-            print(f"[DEBUG] offset_meters type: {type(offset_meters)}, value: {offset_meters}")
+            print(f"Starting _create_temp_shapefile with geometry type: {type(geometry)}")
+            print(f"offset_meters type: {type(offset_meters)}, value: {offset_meters}")
             
             # Ensure offset_meters is a float
             try:
                 offset_meters = float(offset_meters)
-                print(f"[DEBUG] Converted offset_meters to float: {offset_meters}")
+                print(f"Converted offset_meters to float: {offset_meters}")
             except (ValueError, TypeError) as e:
-                print(f"[DEBUG] Error converting offset_meters to float: {e}, using 0.0")
+                print(f"Error converting offset_meters to float: {e}, using 0.0")
                 offset_meters = 0.0
             
             # Create buffered geometry if offset is specified
             if offset_meters > 0:
                 buffered_geometry = geometry.buffer(offset_meters, 5)  # 5 segments for smooth buffer
-                print(f"[DEBUG] Created buffered geometry: {type(buffered_geometry)}")
+                print(f"Created buffered geometry: {type(buffered_geometry)}")
             else:
                 buffered_geometry = geometry
-                print(f"[DEBUG] Using original geometry: {type(buffered_geometry)}")
+                print(f"Using original geometry: {type(buffered_geometry)}")
             
-            print(f"[DEBUG] Checking if geometry is multipart...")
+            print(f"Checking if geometry is multipart...")
             # Ensure the polygon is explicitly closed
             if buffered_geometry.isMultipart():
-                print(f"[DEBUG] Processing multipart geometry...")
+                print(f"Processing multipart geometry...")
                 try:
                     polygons = buffered_geometry.asMultiPolygon()
-                    print(f"[DEBUG] Got multipolygon data: {type(polygons)}, length: {len(polygons) if hasattr(polygons, '__len__') else 'no len'}")
+                    print(f"Got multipolygon data: {type(polygons)}, length: {len(polygons) if hasattr(polygons, '__len__') else 'no len'}")
                     
                     for i, poly in enumerate(polygons):
-                        print(f"[DEBUG] Processing polygon {i}: {type(poly)}")
+                        print(f"Processing polygon {i}: {type(poly)}")
                         # Safety check: ensure poly is a list/tuple and has content
                         if isinstance(poly, (list, tuple)) and len(poly) > 0:
-                            print(f"[DEBUG] Polygon {i} has {len(poly)} rings")
+                            print(f"Polygon {i} has {len(poly)} rings")
                             # Check if the first ring has enough points
                             if len(poly[0]) >= 2:
-                                print(f"[DEBUG] Polygon {i} ring 0 has {len(poly[0])} points")
+                                print(f"Polygon {i} ring 0 has {len(poly[0])} points")
                                 # Compare coordinates properly by converting to strings or using QgsPointXY methods
                                 first_point = poly[0][0]
                                 last_point = poly[0][-1]
-                                print(f"[DEBUG] Polygon {i} - first_point type: {type(first_point)}, last_point type: {type(last_point)}")
+                                print(f"Polygon {i} - first_point type: {type(first_point)}, last_point type: {type(last_point)}")
                                 if hasattr(first_point, 'x') and hasattr(last_point, 'x'):
                                     if (first_point.x() != last_point.x() or first_point.y() != last_point.y()):
                                         poly[0].append(first_point)
                                         polygons[i] = poly
-                                        print(f"[DEBUG] Polygon {i} - closed the ring")
+                                        print(f"Polygon {i} - closed the ring")
                             else:
-                                print(f"[DEBUG] Polygon {i} ring 0 has insufficient points: {len(poly[0])}")
+                                print(f"Polygon {i} ring 0 has insufficient points: {len(poly[0])}")
                         else:
-                            print(f"[DEBUG] Polygon {i} is not a valid list/tuple or is empty")
+                            print(f"Polygon {i} is not a valid list/tuple or is empty")
                     
                     closed_geometry = QgsGeometry.fromMultiPolygonXY(polygons)
-                    print(f"[DEBUG] Created multipolygon geometry successfully")
+                    print(f"Created multipolygon geometry successfully")
                 except Exception as e:
-                    print(f"[DEBUG] Error processing multipart geometry: {str(e)}")
+                    print(f"Error processing multipart geometry: {str(e)}")
                     raise
             else:
-                print(f"[DEBUG] Processing single polygon...")
+                print(f"Processing single polygon...")
                 try:
                     poly = buffered_geometry.asPolygon()
-                    print(f"[DEBUG] Got polygon data: {type(poly)}, length: {len(poly) if hasattr(poly, '__len__') else 'no len'}")
+                    print(f"Got polygon data: {type(poly)}, length: {len(poly) if hasattr(poly, '__len__') else 'no len'}")
                     
                     if isinstance(poly, (list, tuple)) and len(poly) > 0 and len(poly[0]) >= 2:
-                        print(f"[DEBUG] Single polygon has {len(poly)} rings, first ring has {len(poly[0])} points")
+                        print(f"Single polygon has {len(poly)} rings, first ring has {len(poly[0])} points")
                         first_point = poly[0][0]
                         last_point = poly[0][-1]
-                        print(f"[DEBUG] Single polygon - first_point type: {type(first_point)}, last_point type: {type(last_point)}")
+                        print(f"Single polygon - first_point type: {type(first_point)}, last_point type: {type(last_point)}")
                         if hasattr(first_point, 'x') and hasattr(last_point, 'x'):
                             if (first_point.x() != last_point.x() or first_point.y() != last_point.y()):
                                 poly[0].append(first_point)
-                                print(f"[DEBUG] Single polygon - closed the ring")
+                                print(f"Single polygon - closed the ring")
                     else:
-                        print(f"[DEBUG] Single polygon is not valid or has insufficient points")
+                        print(f"Single polygon is not valid or has insufficient points")
                     
                     closed_geometry = QgsGeometry.fromPolygonXY(poly)
-                    print(f"[DEBUG] Created single polygon geometry successfully")
+                    print(f"Created single polygon geometry successfully")
                 except Exception as e:
-                    print(f"[DEBUG] Error processing single polygon: {str(e)}")
+                    print(f"Error processing single polygon: {str(e)}")
                     raise
             
             # Create temporary shapefile using QGIS native methods
@@ -351,25 +351,25 @@ class QGISRasterProcessingService(IRasterProcessingService):
         """
         try:
             import processing
-            print(f"[DEBUG] Starting QGIS processing.cliprasterbymasklayer")
-            print(f"[DEBUG] Raster layer: {raster_layer.name()}, source: {raster_layer.source()}")
-            print(f"[DEBUG] Raster CRS: {raster_layer.crs().description()}")
-            print(f"[DEBUG] Raster extent: {raster_layer.extent().toString()}")
-            print(f"[DEBUG] Mask layer: {mask_layer.name()}, feature count: {mask_layer.featureCount()}")
-            print(f"[DEBUG] Mask CRS: {mask_layer.crs().description()}")
-            print(f"[DEBUG] Mask extent: {mask_layer.extent().toString()}")
+            print(f"Starting QGIS processing.cliprasterbymasklayer")
+            print(f"Raster layer: {raster_layer.name()}, source: {raster_layer.source()}")
+            print(f"Raster CRS: {raster_layer.crs().description()}")
+            print(f"Raster extent: {raster_layer.extent().toString()}")
+            print(f"Mask layer: {mask_layer.name()}, feature count: {mask_layer.featureCount()}")
+            print(f"Mask CRS: {mask_layer.crs().description()}")
+            print(f"Mask extent: {mask_layer.extent().toString()}")
             
             # Get the first feature from mask layer and show its geometry details
             mask_features = list(mask_layer.getFeatures())
             if mask_features:
                 feature = mask_features[0]
                 geom = feature.geometry()
-                print(f"[DEBUG] Mask geometry type: {geom.type()}")
-                print(f"[DEBUG] Mask geometry WKT: {geom.asWkt()[:200]}...")  # First 200 chars
-                print(f"[DEBUG] Mask geometry area: {geom.area()}")
-                print(f"[DEBUG] Mask geometry bounds: {geom.boundingBox().toString()}")
+                print(f"Mask geometry type: {geom.type()}")
+                print(f"Mask geometry WKT: {geom.asWkt()[:200]}...")  # First 200 chars
+                print(f"Mask geometry area: {geom.area()}")
+                print(f"Mask geometry bounds: {geom.boundingBox().toString()}")
             
-            print(f"[DEBUG] Output path: {output_path}")
+            print(f"Output path: {output_path}")
             
             # Try with additional parameters that might help
             params = {
@@ -391,58 +391,58 @@ class QGISRasterProcessingService(IRasterProcessingService):
                 'EXTRA': ''
             }
             
-            print(f"[DEBUG] Processing parameters: {params}")
+            print(f"Processing parameters: {params}")
             result = processing.run('gdal:cliprasterbymasklayer', params)
-            print(f"[DEBUG] Processing result: {result}")
+            print(f"Processing result: {result}")
             
             if result and 'OUTPUT' in result:
                 output_file = result['OUTPUT']
-                print(f"[DEBUG] Processing returned output: {output_file}")
+                print(f"Processing returned output: {output_file}")
                 
                 # Check if file exists and has content
                 import os
-                print(f"[DEBUG] Checking if output file exists: {os.path.exists(output_file)}")
+                print(f"Checking if output file exists: {os.path.exists(output_file)}")
                 if os.path.exists(output_file):
                     file_size = os.path.getsize(output_file)
-                    print(f"[DEBUG] Output file exists, size: {file_size} bytes")
+                    print(f"Output file exists, size: {file_size} bytes")
                     
                     # Try to load the output as a layer to check if it's valid
                     test_layer = QgsRasterLayer(output_file, "test_clipped")
                     if test_layer.isValid():
-                        print(f"[DEBUG] Output layer is valid, extent: {test_layer.extent().toString()}")
-                        print(f"[DEBUG] Output layer band count: {test_layer.bandCount()}")
+                        print(f"Output layer is valid, extent: {test_layer.extent().toString()}")
+                        print(f"Output layer band count: {test_layer.bandCount()}")
                         if test_layer.bandCount() > 0:
                             try:
                                 stats = test_layer.dataProvider().bandStatistics(1)
-                                print(f"[DEBUG] Output layer band 1 stats: min={stats.minimumValue}, max={stats.maximumValue}, mean={stats.mean}, stdDev={stats.stdDev}")
+                                print(f"Output layer band 1 stats: min={stats.minimumValue}, max={stats.maximumValue}, mean={stats.mean}, stdDev={stats.stdDev}")
                                 if stats.minimumValue == stats.maximumValue:
-                                    print(f"[DEBUG] WARNING: All pixel values are the same ({stats.minimumValue}) - likely black or white")
+                                    print(f"WARNING: All pixel values are the same ({stats.minimumValue}) - likely black or white")
                                 elif stats.minimumValue == 0 and stats.maximumValue == 0:
-                                    print(f"[DEBUG] WARNING: All pixel values are 0 - completely black")
+                                    print(f"WARNING: All pixel values are 0 - completely black")
                                 else:
-                                    print(f"[DEBUG] Output appears to have valid data range")
+                                    print(f"Output appears to have valid data range")
                             except Exception as stats_error:
-                                print(f"[DEBUG] Could not get band statistics: {stats_error}")
+                                print(f"Could not get band statistics: {stats_error}")
                     else:
-                        print(f"[DEBUG] Output layer is NOT valid: {test_layer.error().summary()}")
+                        print(f"Output layer is NOT valid: {test_layer.error().summary()}")
                     
                     if file_size > 1000:  # More than 1KB
-                        print(f"[DEBUG] QGIS processing.cliprasterbymasklayer succeeded: {output_file}")
+                        print(f"QGIS processing.cliprasterbymasklayer succeeded: {output_file}")
                         return True
                     else:
-                        print(f"[DEBUG] QGIS processing.cliprasterbymasklayer produced small file: {output_file}")
+                        print(f"QGIS processing.cliprasterbymasklayer produced small file: {output_file}")
                         return False
                 else:
-                    print(f"[DEBUG] QGIS processing.cliprasterbymasklayer did not create output file")
-                    print(f"[DEBUG] Expected file path: {output_file}")
-                    print(f"[DEBUG] Directory exists: {os.path.exists(os.path.dirname(output_file))}")
+                    print(f"QGIS processing.cliprasterbymasklayer did not create output file")
+                    print(f"Expected file path: {output_file}")
+                    print(f"Directory exists: {os.path.exists(os.path.dirname(output_file))}")
                     return False
             else:
-                print(f"[DEBUG] QGIS processing.cliprasterbymasklayer did not produce output: {result}")
+                print(f"QGIS processing.cliprasterbymasklayer did not produce output: {result}")
                 return False
                 
         except Exception as e:
-            print(f"[DEBUG] QGIS processing.cliprasterbymasklayer failed: {str(e)}")
+            print(f"QGIS processing.cliprasterbymasklayer failed: {str(e)}")
             return False
 
     def _clip_raster_with_warp(self, raster_layer, mask_layer, output_path):
@@ -452,7 +452,7 @@ class QGISRasterProcessingService(IRasterProcessingService):
         """
         try:
             import processing
-            print(f"[DEBUG] Trying alternative clipping with gdal:warpreproject")
+            print(f"Trying alternative clipping with gdal:warpreproject")
             
             # Create a temporary mask file
             import tempfile
@@ -466,7 +466,7 @@ class QGISRasterProcessingService(IRasterProcessingService):
             )
             
             if error[0] != QgsVectorFileWriter.NoError:
-                print(f"[DEBUG] Failed to save temporary mask: {error}")
+                print(f"Failed to save temporary mask: {error}")
                 os.unlink(temp_mask_path)
                 return False
             
@@ -487,9 +487,9 @@ class QGISRasterProcessingService(IRasterProcessingService):
                 'OUTPUT': output_path
             }
             
-            print(f"[DEBUG] Warp parameters: {params}")
+            print(f"Warp parameters: {params}")
             result = processing.run('gdal:warpreproject', params)
-            print(f"[DEBUG] Warp result: {result}")
+            print(f"Warp result: {result}")
             
             # Clean up temporary file
             try:
@@ -500,43 +500,43 @@ class QGISRasterProcessingService(IRasterProcessingService):
             if result and 'OUTPUT' in result:
                 output_file = result['OUTPUT']
                 if os.path.exists(output_file) and os.path.getsize(output_file) > 1000:
-                    print(f"[DEBUG] Alternative warping succeeded: {output_file}")
+                    print(f"Alternative warping succeeded: {output_file}")
                     
                     # Add detailed output validation
-                    print(f"[DEBUG] Validating warped output file...")
+                    print(f"Validating warped output file...")
                     test_layer = QgsRasterLayer(output_file, "test_warped")
                     if test_layer.isValid():
-                        print(f"[DEBUG] Warped output layer is valid, extent: {test_layer.extent().toString()}")
-                        print(f"[DEBUG] Warped output layer band count: {test_layer.bandCount()}")
+                        print(f"Warped output layer is valid, extent: {test_layer.extent().toString()}")
+                        print(f"Warped output layer band count: {test_layer.bandCount()}")
                         if test_layer.bandCount() > 0:
                             try:
                                 stats = test_layer.dataProvider().bandStatistics(1)
-                                print(f"[DEBUG] Warped output band 1 stats: min={stats.minimumValue}, max={stats.maximumValue}, mean={stats.mean}, stdDev={stats.stdDev}")
+                                print(f"Warped output band 1 stats: min={stats.minimumValue}, max={stats.maximumValue}, mean={stats.mean}, stdDev={stats.stdDev}")
                                 if stats.minimumValue == stats.maximumValue:
-                                    print(f"[DEBUG] WARNING: All pixel values are the same ({stats.minimumValue}) - likely black or white")
+                                    print(f"WARNING: All pixel values are the same ({stats.minimumValue}) - likely black or white")
                                 elif stats.minimumValue == 0 and stats.maximumValue == 0:
-                                    print(f"[DEBUG] WARNING: All pixel values are 0 - completely black")
-                                    print(f"[DEBUG] Warping produced black output - trying next method")
+                                    print(f"WARNING: All pixel values are 0 - completely black")
+                                    print(f"Warping produced black output - trying next method")
                                     return False
                                 else:
-                                    print(f"[DEBUG] Warped output appears to have valid data range")
+                                    print(f"Warped output appears to have valid data range")
                             except Exception as stats_error:
-                                print(f"[DEBUG] Could not get warped output band statistics: {stats_error}")
+                                print(f"Could not get warped output band statistics: {stats_error}")
                     else:
-                        print(f"[DEBUG] Warped output layer is NOT valid: {test_layer.error().summary()}")
+                        print(f"Warped output layer is NOT valid: {test_layer.error().summary()}")
                     
                     return True
                 else:
-                    print(f"[DEBUG] Warped output file is too small or doesn't exist: {output_file}")
+                    print(f"Warped output file is too small or doesn't exist: {output_file}")
                     if os.path.exists(output_file):
-                        print(f"[DEBUG] Warped output file size: {os.path.getsize(output_file)} bytes")
+                        print(f"Warped output file size: {os.path.getsize(output_file)} bytes")
                     return False
             else:
-                print(f"[DEBUG] Warp processing did not produce valid output: {result}")
+                print(f"Warp processing did not produce valid output: {result}")
                 return False
             
         except Exception as e:
-            print(f"[DEBUG] Alternative warping failed: {str(e)}")
+            print(f"Alternative warping failed: {str(e)}")
             return False
 
     def _clip_raster_with_extent(self, raster_layer, mask_layer, output_path):
@@ -546,11 +546,11 @@ class QGISRasterProcessingService(IRasterProcessingService):
         """
         try:
             import processing
-            print(f"[DEBUG] Trying alternative clipping with gdal:cliprasterbyextent")
+            print(f"Trying alternative clipping with gdal:cliprasterbyextent")
             
             # Get the extent from the mask layer
             mask_extent = mask_layer.extent()
-            print(f"[DEBUG] Using mask extent for clipping: {mask_extent.toString()}")
+            print(f"Using mask extent for clipping: {mask_extent.toString()}")
             
             # Try clipping by extent
             params = {
@@ -562,48 +562,48 @@ class QGISRasterProcessingService(IRasterProcessingService):
                 'OUTPUT': output_path
             }
             
-            print(f"[DEBUG] Extent clipping parameters: {params}")
+            print(f"Extent clipping parameters: {params}")
             result = processing.run('gdal:cliprasterbyextent', params)
-            print(f"[DEBUG] Extent clipping result: {result}")
+            print(f"Extent clipping result: {result}")
             
             if result and 'OUTPUT' in result:
                 output_file = result['OUTPUT']
                 if os.path.exists(output_file) and os.path.getsize(output_file) > 1000:
-                    print(f"[DEBUG] Extent clipping succeeded: {output_file}")
+                    print(f"Extent clipping succeeded: {output_file}")
                     
                     # Add detailed output validation
-                    print(f"[DEBUG] Validating extent-clipped output file...")
+                    print(f"Validating extent-clipped output file...")
                     test_layer = QgsRasterLayer(output_file, "test_extent_clipped")
                     if test_layer.isValid():
-                        print(f"[DEBUG] Extent-clipped output layer is valid, extent: {test_layer.extent().toString()}")
-                        print(f"[DEBUG] Extent-clipped output layer band count: {test_layer.bandCount()}")
+                        print(f"Extent-clipped output layer is valid, extent: {test_layer.extent().toString()}")
+                        print(f"Extent-clipped output layer band count: {test_layer.bandCount()}")
                         if test_layer.bandCount() > 0:
                             try:
                                 stats = test_layer.dataProvider().bandStatistics(1)
-                                print(f"[DEBUG] Extent-clipped output band 1 stats: min={stats.minimumValue}, max={stats.maximumValue}, mean={stats.mean}, stdDev={stats.stdDev}")
+                                print(f"Extent-clipped output band 1 stats: min={stats.minimumValue}, max={stats.maximumValue}, mean={stats.mean}, stdDev={stats.stdDev}")
                                 if stats.minimumValue == stats.maximumValue:
-                                    print(f"[DEBUG] WARNING: All pixel values are the same ({stats.minimumValue}) - likely black or white")
+                                    print(f"WARNING: All pixel values are the same ({stats.minimumValue}) - likely black or white")
                                 elif stats.minimumValue == 0 and stats.maximumValue == 0:
-                                    print(f"[DEBUG] WARNING: All pixel values are 0 - completely black")
+                                    print(f"WARNING: All pixel values are 0 - completely black")
                                 else:
-                                    print(f"[DEBUG] Extent-clipped output appears to have valid data range")
+                                    print(f"Extent-clipped output appears to have valid data range")
                             except Exception as stats_error:
-                                print(f"[DEBUG] Could not get extent-clipped output band statistics: {stats_error}")
+                                print(f"Could not get extent-clipped output band statistics: {stats_error}")
                     else:
-                        print(f"[DEBUG] Extent-clipped output layer is NOT valid: {test_layer.error().summary()}")
+                        print(f"Extent-clipped output layer is NOT valid: {test_layer.error().summary()}")
                     
                     return True
                 else:
-                    print(f"[DEBUG] Extent-clipped output file is too small or doesn't exist: {output_file}")
+                    print(f"Extent-clipped output file is too small or doesn't exist: {output_file}")
                     if os.path.exists(output_file):
-                        print(f"[DEBUG] Extent-clipped output file size: {os.path.getsize(output_file)} bytes")
+                        print(f"Extent-clipped output file size: {os.path.getsize(output_file)} bytes")
                     return False
             else:
-                print(f"[DEBUG] Extent clipping did not produce valid output: {result}")
+                print(f"Extent clipping did not produce valid output: {result}")
                 return False
                 
         except Exception as e:
-            print(f"[DEBUG] Extent clipping failed: {str(e)}")
+            print(f"Extent clipping failed: {str(e)}")
             return False
 
     def _get_crs_string(self, crs):
@@ -646,36 +646,36 @@ class QGISRasterProcessingService(IRasterProcessingService):
             str: Path to clipped raster if successful, None otherwise
         """
         try:
-            print(f"[DEBUG] Starting direct GDAL command clipping")
-            print(f"[DEBUG] Raster source: {raster_layer.source()}")
-            print(f"[DEBUG] Raster CRS: {raster_layer.crs().description()}")
-            print(f"[DEBUG] Output path: {output_path}")
+            print(f"Starting direct GDAL command clipping")
+            print(f"Raster source: {raster_layer.source()}")
+            print(f"Raster CRS: {raster_layer.crs().description()}")
+            print(f"Output path: {output_path}")
             
             # Get raster CRS WKT (same as working command)
             raster_crs_wkt = raster_layer.crs().toWkt()
-            print(f"[DEBUG] Raster CRS WKT (full): {raster_crs_wkt}")
+            print(f"Raster CRS WKT (full): {raster_crs_wkt}")
             
             # Create temporary shapefile from geometry
             temp_shapefile = self._create_temp_shapefile_from_geometry(geometry, raster_layer.crs())
             if not temp_shapefile:
-                print(f"[DEBUG] Failed to create temporary shapefile")
+                print(f"Failed to create temporary shapefile")
                 return None
             prj_path = f"{temp_shapefile}.prj"
             shp_path = f"{temp_shapefile}.shp"
-            print(f"[DEBUG] Temp shapefile: {shp_path}")
-            print(f"[DEBUG] Temp .prj file: {prj_path}")
-            print(f"[DEBUG] .shp exists: {os.path.exists(shp_path)}")
-            print(f"[DEBUG] .prj exists: {os.path.exists(prj_path)}")
+            print(f"Temp shapefile: {shp_path}")
+            print(f"Temp .prj file: {prj_path}")
+            print(f".shp exists: {os.path.exists(shp_path)}")
+            print(f".prj exists: {os.path.exists(prj_path)}")
             if os.path.exists(prj_path):
                 with open(prj_path, 'r') as f:
                     prj_contents = f.read()
-                print(f"[DEBUG] .prj file contents:\n{prj_contents}")
+                print(f".prj file contents:\n{prj_contents}")
             
             try:
                 # Get gdalwarp path
                 gdalwarp_path = self._get_gdal_tool_path('gdalwarp')
                 if not gdalwarp_path:
-                    print(f"[DEBUG] gdalwarp not found")
+                    print(f"gdalwarp not found")
                     return None
                 
                 # Build command similar to working manual command
@@ -693,13 +693,13 @@ class QGISRasterProcessingService(IRasterProcessingService):
                     output_path
                 ]
                 
-                print(f"[DEBUG] GDAL command: {' '.join(cmd)}")
-                print(f"[DEBUG] (copy-paste this command to test manually)")
+                print(f"GDAL command: {' '.join(cmd)}")
+                print(f"(copy-paste this command to test manually)")
                 
                 # Also print a shell-ready version with proper quoting
                 shell_cmd = f'gdalwarp -overwrite -s_srs "{raster_crs_wkt}" -t_srs "{raster_crs_wkt}" -of GTiff -cutline "{temp_shapefile}.shp" -crop_to_cutline -dstalpha "{raster_layer.source()}" "{output_path}"'
-                print(f"[DEBUG] Shell-ready command (copy-paste this):")
-                print(f"[DEBUG] {shell_cmd}")
+                print(f"Shell-ready command (copy-paste this):")
+                print(f"{shell_cmd}")
                 
                 # Execute command
                 result = subprocess.run(
@@ -710,52 +710,52 @@ class QGISRasterProcessingService(IRasterProcessingService):
                     timeout=300  # 5 minute timeout
                 )
                 
-                print(f"[DEBUG] GDAL command return code: {result.returncode}")
-                print(f"[DEBUG] GDAL stdout (full):\n{result.stdout}")
-                print(f"[DEBUG] GDAL stderr (full):\n{result.stderr}")
+                print(f"GDAL command return code: {result.returncode}")
+                print(f"GDAL stdout (full):\n{result.stdout}")
+                print(f"GDAL stderr (full):\n{result.stderr}")
                 
                 if result.returncode != 0:
-                    print(f"[DEBUG] GDAL command failed with return code {result.returncode}")
+                    print(f"GDAL command failed with return code {result.returncode}")
                     return None
                 
                 # Check if output file was created and has content
                 if os.path.exists(output_path):
                     file_size = os.path.getsize(output_path)
-                    print(f"[DEBUG] Output file created, size: {file_size} bytes")
+                    print(f"Output file created, size: {file_size} bytes")
                     
                     if file_size > 1000:  # More than 1KB
                         # Validate the output
                         test_layer = QgsRasterLayer(output_path, "test_gdal_clipped")
                         if test_layer.isValid():
-                            print(f"[DEBUG] GDAL-clipped output is valid, extent: {test_layer.extent().toString()}")
-                            print(f"[DEBUG] GDAL-clipped output band count: {test_layer.bandCount()}")
+                            print(f"GDAL-clipped output is valid, extent: {test_layer.extent().toString()}")
+                            print(f"GDAL-clipped output band count: {test_layer.bandCount()}")
                             
                             if test_layer.bandCount() > 0:
                                 try:
                                     stats = test_layer.dataProvider().bandStatistics(1)
-                                    print(f"[DEBUG] GDAL-clipped output band 1 stats: min={stats.minimumValue}, max={stats.maximumValue}, mean={stats.mean}, stdDev={stats.stdDev}")
+                                    print(f"GDAL-clipped output band 1 stats: min={stats.minimumValue}, max={stats.maximumValue}, mean={stats.mean}, stdDev={stats.stdDev}")
                                     if stats.minimumValue == stats.maximumValue:
-                                        print(f"[DEBUG] WARNING: All pixel values are the same ({stats.minimumValue})")
+                                        print(f"WARNING: All pixel values are the same ({stats.minimumValue})")
                                     elif stats.minimumValue == 0 and stats.maximumValue == 0:
-                                        print(f"[DEBUG] WARNING: All pixel values are 0 - completely black")
+                                        print(f"WARNING: All pixel values are 0 - completely black")
                                         return None
                                     else:
-                                        print(f"[DEBUG] GDAL-clipped output has valid data range")
+                                        print(f"GDAL-clipped output has valid data range")
                                         return output_path
                                 except Exception as stats_error:
-                                    print(f"[DEBUG] Could not get GDAL-clipped output band statistics: {stats_error}")
+                                    print(f"Could not get GDAL-clipped output band statistics: {stats_error}")
                                     return output_path
                             else:
-                                print(f"[DEBUG] GDAL-clipped output has no bands")
+                                print(f"GDAL-clipped output has no bands")
                                 return None
                         else:
-                            print(f"[DEBUG] GDAL-clipped output is NOT valid: {test_layer.error().summary()}")
+                            print(f"GDAL-clipped output is NOT valid: {test_layer.error().summary()}")
                             return None
                     else:
-                        print(f"[DEBUG] Output file is too small: {file_size} bytes")
+                        print(f"Output file is too small: {file_size} bytes")
                         return None
                 else:
-                    print(f"[DEBUG] Output file was not created")
+                    print(f"Output file was not created")
                     return None
                     
             finally:
@@ -763,10 +763,10 @@ class QGISRasterProcessingService(IRasterProcessingService):
                 self._cleanup_temp_shapefile(temp_shapefile)
                 
         except subprocess.TimeoutExpired:
-            print(f"[DEBUG] GDAL command timed out")
+            print(f"GDAL command timed out")
             return None
         except Exception as e:
-            print(f"[DEBUG] Error in direct GDAL command clipping: {str(e)}")
+            print(f"Error in direct GDAL command clipping: {str(e)}")
             return None
 
     def _create_temp_shapefile_from_geometry(self, geometry, crs):
@@ -786,7 +786,7 @@ class QGISRasterProcessingService(IRasterProcessingService):
             os.close(temp_fd)
             temp_path = temp_path[:-4]  # Remove .shp extension
             
-            print(f"[DEBUG] Creating temporary shapefile: {temp_path}")
+            print(f"Creating temporary shapefile: {temp_path}")
             
             # Create fields
             from PyQt5.QtCore import QVariant
@@ -813,7 +813,7 @@ class QGISRasterProcessingService(IRasterProcessingService):
             )
             
             if error[0] != QgsVectorFileWriter.NoError:
-                print(f"[DEBUG] Failed to save shapefile: {error}")
+                print(f"Failed to save shapefile: {error}")
                 return None
             
             # Overwrite the .prj file with the exact WKT from the raster to ensure CRS match
@@ -821,15 +821,15 @@ class QGISRasterProcessingService(IRasterProcessingService):
             try:
                 with open(prj_path, 'w') as f:
                     f.write(crs.toWkt())
-                print(f"[DEBUG] Overwrote .prj file with exact raster WKT")
+                print(f"Overwrote .prj file with exact raster WKT")
             except Exception as e:
-                print(f"[DEBUG] Warning: Could not overwrite .prj file: {e}")
+                print(f"Warning: Could not overwrite .prj file: {e}")
             
-            print(f"[DEBUG] Successfully created temporary shapefile: {temp_path}.shp")
+            print(f"Successfully created temporary shapefile: {temp_path}.shp")
             return temp_path
             
         except Exception as e:
-            print(f"[DEBUG] Error creating temporary shapefile: {str(e)}")
+            print(f"Error creating temporary shapefile: {str(e)}")
             return None
     
     def _execute_gdalwarp(self, 

@@ -70,16 +70,14 @@ class ArcheoSyncPlugin(QObject):
         locale = QSettings().value('locale/userLocale', QLocale().name())[:2]
         qm_filename = f'ArcheoSyncPlugin_{locale}.qm'
         locale_path = os.path.join(self._plugin_dir, 'i18n', qm_filename)
-        print(f"[DEBUG] Looking for translation file: {locale_path}")
         if os.path.exists(locale_path):
             self._translator = QTranslator()
             if self._translator.load(locale_path):
                 QCoreApplication.installTranslator(self._translator)
-                print(f"[DEBUG] Loaded translation file: {locale_path}")
             else:
-                print(f"[DEBUG] Failed to load translation file: {locale_path}")
+                print(f"Failed to load translation file: {locale_path}")
         else:
-            print(f"[DEBUG] Translation file does not exist: {locale_path}")
+            print(f"Translation file does not exist: {locale_path}")
         # --- END TRANSLATION LOADING LOGIC ---
         
         # Initialize services using dependency injection
@@ -331,7 +329,6 @@ class ArcheoSyncPlugin(QObject):
                             result = expr.evaluate(context)
                             if result and str(result) != 'NULL' and str(result).strip():
                                 display_name = str(result).strip()
-                                print(f"Using display expression for feature {feature_id}: '{display_name}'")
                     except Exception as e:
                         print(f"Display expression evaluation failed for feature {feature_id}: {str(e)}")
                         # Fall back to common name fields
@@ -342,7 +339,6 @@ class ArcheoSyncPlugin(QObject):
                                 value = attributes[field_idx]
                                 if value and str(value) != 'NULL':
                                     display_name = str(value)
-                                    print(f"Using common name field '{field_name}' for feature {feature_id}: '{display_name}'")
                                     break
                 
                 feature_data.append({
@@ -615,44 +611,42 @@ class ArcheoSyncPlugin(QObject):
             if (summary_data.get('objects_count', 0) > 0 or 
                 summary_data.get('features_count', 0) > 0 or 
                 summary_data.get('small_finds_count', 0) > 0):
-                print(f"[DEBUG] Running out-of-bounds detection in main plugin")
-                print(f"[DEBUG] Summary data: {summary_data}")
+                print(f"Running out-of-bounds detection in main plugin")
+                print(f"Summary data: {summary_data}")
                 out_of_bounds_detector = OutOfBoundsDetectorService(
                     settings_manager=self._settings_manager,
                     layer_service=self._layer_service
                 )
                 out_of_bounds_warnings = out_of_bounds_detector.detect_out_of_bounds_features()
-                print(f"[DEBUG] Out-of-bounds detection completed, found {len(out_of_bounds_warnings)} warnings")
                 for i, warning in enumerate(out_of_bounds_warnings):
-                    print(f"[DEBUG] Out-of-bounds warning {i+1}: {warning}")
+                    print(f"Out-of-bounds warning {i+1}: {warning}")
                     if hasattr(warning, 'message'):
-                        print(f"[DEBUG]   Message: {warning.message}")
+                        print(f"   Message: {warning.message}")
             else:
-                print(f"[DEBUG] Skipping out-of-bounds detection - no features imported")
+                print(f"Skipping out-of-bounds detection - no features imported")
             
             # Detect distance warnings if either total station points or objects were imported
             distance_warnings = []
             if (summary_data.get('csv_points_count', 0) > 0 or 
                 summary_data.get('objects_count', 0) > 0):
-                print(f"[DEBUG] Running distance detection in main plugin")
+                print(f"Running distance detection in main plugin")
                 distance_detector = DistanceDetectorService(
                     settings_manager=self._settings_manager,
                     layer_service=self._layer_service
                 )
                 distance_warnings = distance_detector.detect_distance_warnings()
-                print(f"[DEBUG] Distance detection completed, found {len(distance_warnings)} warnings")
                 for i, warning in enumerate(distance_warnings):
-                    print(f"[DEBUG] Distance warning {i+1}: {warning}")
+                    print(f"Distance warning {i+1}: {warning}")
                     if hasattr(warning, 'message'):
-                        print(f"[DEBUG]   Message: {warning.message}")
+                        print(f"   Message: {warning.message}")
             else:
-                print(f"[DEBUG] Skipping distance detection - no total station points or objects imported")
+                print(f"Skipping distance detection - no total station points or objects imported")
             
             # Run missing total station detection if both total station points and objects were imported
             missing_total_station_warnings = []
             if (summary_data.get('csv_points_count', 0) > 0 and 
                 summary_data.get('objects_count', 0) > 0):
-                print(f"[DEBUG] Running missing total station detection in main plugin")
+                print(f"Running missing total station detection in main plugin")
                 try:
                     from services.missing_total_station_detector_service import MissingTotalStationDetectorService
                 except ImportError:
@@ -667,18 +661,17 @@ class ArcheoSyncPlugin(QObject):
                     layer_service=self._layer_service
                 )
                 missing_total_station_warnings = missing_total_station_detector.detect_missing_total_station_warnings()
-                print(f"[DEBUG] Missing total station detection completed, found {len(missing_total_station_warnings)} warnings")
                 for i, warning in enumerate(missing_total_station_warnings):
-                    print(f"[DEBUG] Missing total station warning {i+1}: {warning}")
+                    print(f"Missing total station warning {i+1}: {warning}")
                     if hasattr(warning, 'message'):
-                        print(f"[DEBUG]   Message: {warning.message}")
+                        print(f"   Message: {warning.message}")
             else:
-                print(f"[DEBUG] Skipping missing total station detection - missing total station points or objects")
+                print(f"Skipping missing total station detection - missing total station points or objects")
             
             # Run duplicate total station identifiers detection if total station points were imported
             duplicate_total_station_identifiers_warnings = []
             if summary_data.get('csv_points_count', 0) > 0:
-                print(f"[DEBUG] Running duplicate total station identifiers detection in main plugin")
+                print(f"Running duplicate total station identifiers detection in main plugin")
                 try:
                     # Force reload of the module
                     import sys
@@ -698,18 +691,17 @@ class ArcheoSyncPlugin(QObject):
                     layer_service=self._layer_service
                 )
                 duplicate_total_station_identifiers_warnings = duplicate_total_station_identifiers_detector.detect_duplicate_identifiers_warnings()
-                print(f"[DEBUG] Duplicate total station identifiers detection completed, found {len(duplicate_total_station_identifiers_warnings)} warnings")
                 for i, warning in enumerate(duplicate_total_station_identifiers_warnings):
-                    print(f"[DEBUG] Duplicate total station identifiers warning {i+1}: {warning}")
+                    print(f"Duplicate total station identifiers warning {i+1}: {warning}")
                     if hasattr(warning, 'message'):
-                        print(f"[DEBUG]   Message: {warning.message}")
+                        print(f"   Message: {warning.message}")
             else:
-                print(f"[DEBUG] Skipping duplicate total station identifiers detection - no total station points imported")
+                print(f"Skipping duplicate total station identifiers detection - no total station points imported")
             
             # Run height difference detection if total station points were imported
             height_difference_warnings = []
             if summary_data.get('csv_points_count', 0) > 0:
-                print(f"[DEBUG] Running height difference detection in main plugin")
+                print(f"Running height difference detection in main plugin")
                 try:
                     from services.height_difference_detector_service import HeightDifferenceDetectorService
                 except ImportError:
@@ -724,13 +716,12 @@ class ArcheoSyncPlugin(QObject):
                     layer_service=self._layer_service
                 )
                 height_difference_warnings = height_difference_detector.detect_height_difference_warnings()
-                print(f"[DEBUG] Height difference detection completed, found {len(height_difference_warnings)} warnings")
                 for i, warning in enumerate(height_difference_warnings):
-                    print(f"[DEBUG] Height difference warning {i+1}: {warning}")
+                    print(f"Height difference warning {i+1}: {warning}")
                     if hasattr(warning, 'message'):
-                        print(f"[DEBUG]   Message: {warning.message}")
+                        print(f"   Message: {warning.message}")
             else:
-                print(f"[DEBUG] Skipping height difference detection - no total station points imported")
+                print(f"Skipping height difference detection - no total station points imported")
             
             # Create summary data
             summary = ImportSummaryData(
@@ -753,11 +744,11 @@ class ArcheoSyncPlugin(QObject):
             summary.duplicate_total_station_identifiers_warnings = duplicate_total_station_identifiers_warnings
             summary.height_difference_warnings = height_difference_warnings
             
-            print(f"[DEBUG] Summary data warnings - duplicates: {len(duplicate_objects_warnings)}, skipped: {len(skipped_numbers_warnings)}, out-of-bounds: {len(out_of_bounds_warnings)}")
-            print(f"[DEBUG] Summary object attributes: {dir(summary)}")
-            print(f"[DEBUG] Summary out_of_bounds_warnings attribute: {hasattr(summary, 'out_of_bounds_warnings')}")
+            print(f"Summary data warnings - duplicates: {len(duplicate_objects_warnings)}, skipped: {len(skipped_numbers_warnings)}, out-of-bounds: {len(out_of_bounds_warnings)}")
+            print(f"Summary object attributes: {dir(summary)}")
+            print(f"Summary out_of_bounds_warnings attribute: {hasattr(summary, 'out_of_bounds_warnings')}")
             if hasattr(summary, 'out_of_bounds_warnings'):
-                print(f"[DEBUG] Summary out_of_bounds_warnings value: {summary.out_of_bounds_warnings}")
+                print(f"Summary out_of_bounds_warnings value: {summary.out_of_bounds_warnings}")
             
             # Create and show the dock widget
             dock_widget = ImportSummaryDockWidget(
