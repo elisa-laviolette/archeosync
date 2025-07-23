@@ -833,36 +833,42 @@ class FieldProjectImportService(QObject):
             List of features with duplicates removed
         """
         if not existing_layer or not features:
+            print(f"[DEBUG] No existing layer or no features to filter for {layer_type}")
             return features
         
         # Get all existing features for comparison
         existing_features = list(existing_layer.getFeatures())
+        print(f"[DEBUG] Filtering duplicates for {layer_type}: {len(features)} features to check against {len(existing_features)} existing features")
         
         # Create a set of existing feature signatures for fast lookup
         existing_signatures = set()
-        for existing_feature in existing_features:
-            signature = self._create_feature_signature(existing_feature)
+        for i, existing_feature in enumerate(existing_features):
+            signature = self._create_feature_signature(existing_feature, existing_layer)
+            print(f"[DEBUG] Existing feature {i} signature: {signature}")
             existing_signatures.add(signature)
         
         # Filter out duplicates
         filtered_features = []
         duplicates_count = 0
-        
-        for feature in features:
-            signature = self._create_feature_signature(feature)
+        for i, feature in enumerate(features):
+            signature = self._create_feature_signature(feature, existing_layer)
+            print(f"[DEBUG] Import feature {i} signature: {signature}")
             if signature not in existing_signatures:
                 filtered_features.append(feature)
+                print(f"[DEBUG] Feature {i} is unique and will be imported.")
             else:
                 duplicates_count += 1
-        
+                print(f"[DEBUG] Feature {i} is a duplicate and will be ignored.")
+        print(f"[DEBUG] {duplicates_count} duplicates found and ignored for {layer_type}")
         return filtered_features
     
-    def _create_feature_signature(self, feature: Any) -> str:
+    def _create_feature_signature(self, feature: Any, layer: Any) -> str:
         """
         Create a unique signature for a feature based on its attributes and geometry.
         
         Args:
             feature: QGIS feature to create signature for
+            layer: QGIS layer to use for virtual field detection
             
         Returns:
             String signature representing the feature
@@ -873,24 +879,25 @@ class FieldProjectImportService(QObject):
             field_name = field.name()
             # Skip the fid field as it's layer-specific and not part of the data
             if field_name.lower() == 'fid':
+                print(f"[DEBUG] Skipping fid field: {field_name}")
                 continue
             # Skip virtual/computed fields that might be NULL in exports
-            if self._is_virtual_field(feature, field_name):
+            if self._is_virtual_field(layer, field_name):
+                print(f"[DEBUG] Skipping virtual field: {field_name}")
                 continue
             value = feature[field_name]
             # Convert value to string, handling None values
             if value is None:
-                # Skip NULL values to avoid signature mismatches due to computed fields
-                # that might be NULL in new data but populated in existing data
+                print(f"[DEBUG] Skipping NULL value for field: {field_name}")
                 continue
             else:
                 attr_str = f"{field_name}:{str(value)}"
                 attributes.append(attr_str)
-        
+                print(f"[DEBUG] Attribute for signature: {attr_str}")
         # Sort attributes for consistent signature
         attributes.sort()
         attr_signature = "|".join(attributes)
-        
+        print(f"[DEBUG] Attribute signature: {attr_signature}")
         # Create signature from geometry (normalized to handle Polygon vs MultiPolygon)
         geometry = feature.geometry()
         if geometry and not geometry.isEmpty():
@@ -904,77 +911,78 @@ class FieldProjectImportService(QObject):
                     geom_signature = geometry.asWkt()
             else:
                 geom_signature = geometry.asWkt()
+            print(f"[DEBUG] Geometry signature: {geom_signature}")
         else:
-            geom_signature = "NO_GEOMETRY"
-        
-        # Combine attributes and geometry signatures
-        return f"{attr_signature}|GEOM:{geom_signature}"
+            geom_signature = "NO_GEOM"
+            print(f"[DEBUG] No geometry for feature")
+        signature = f"{attr_signature}||{geom_signature}"
+        print(f"[DEBUG] Final feature signature: {signature}")
+        return signature
     
-    def _is_virtual_field(self, feature: Any, field_name: str) -> bool:
+    def _is_virtual_field(self, layer: Any, field_name: str) -> bool:
         """
-        Check if a field is a virtual/computed field that might be NULL in exports.
-        
+        Check if a field is a virtual/computed field using the QGIS API and by parsing the QML style file for expression fields.
         Args:
-            feature: QGIS feature to check
+            layer: QGIS layer to check
             field_name: Name of the field to check
-            
         Returns:
             True if the field appears to be virtual/computed
         """
         try:
             # Get the field index
-            field_idx = feature.fields().indexOf(field_name)
+            field_idx = layer.fields().indexOf(field_name)
             if field_idx < 0:
+                print(f"[DEBUG] Field {field_name} not found in layer fields.")
                 return False
-            
-            # Get the field definition
-            field_def = feature.fields().at(field_idx)
-            
-            # Check if it's a virtual field (computed field)
+            # Check QML style file for expression fields (most reliable for your use case)
+            if hasattr(layer, 'styleURI'):
+                qml_path = layer.styleURI()
+                print(f"[DEBUG] QML path for layer: {qml_path}")
+                if qml_path and qml_path.endswith('.qml'):
+                    virtual_fields = self._parse_qml_expression_fields(qml_path)
+                    if field_name in virtual_fields:
+                        print(f"[DEBUG] Field {field_name} detected as virtual via QML expressionfields.")
+                        return True
+            # Also check QGIS API (for completeness)
+            from qgis.core import QgsFields
+            origin = layer.fields().fieldOrigin(field_idx)
+            if origin == QgsFields.OriginExpression:
+                print(f"[DEBUG] Field {field_name} detected as virtual via QgsFields.OriginExpression.")
+                return True
+            # Fallback to previous checks if needed
+            field_def = layer.fields().at(field_idx)
             if hasattr(field_def, 'isVirtual') and field_def.isVirtual():
+                print(f"[DEBUG] Field {field_name} detected as virtual via isVirtual().")
                 return True
-            
-            # Check if it's a computed field (QVariant.Invalid type)
-            if hasattr(field_def, 'type') and field_def.type() == 100:  # QVariant.Invalid
-                return True
-            
-            # Check if the field has an expression (computed field)
             if hasattr(field_def, 'expression') and field_def.expression():
+                print(f"[DEBUG] Field {field_name} detected as virtual via expression().")
                 return True
-            
-            # Check if the field has a default value expression
-            if hasattr(field_def, 'defaultValueDefinition') and field_def.defaultValueDefinition():
-                default_def = field_def.defaultValueDefinition()
-                if hasattr(default_def, 'expression') and default_def.expression():
-                    return True
-            
-            # Check if the field has a comment indicating it's computed
-            if hasattr(field_def, 'comment') and field_def.comment():
-                comment = field_def.comment().lower()
-                if any(keyword in comment for keyword in ['computed', 'virtual', 'expression', 'calculated']):
-                    return True
-            
-            # Check if the field has an alias that suggests it's computed
-            if hasattr(field_def, 'alias') and field_def.alias():
-                alias = field_def.alias().lower()
-                if any(keyword in alias for keyword in ['computed', 'virtual', 'expression', 'calculated']):
-                    return True
-            
-            # Check for known virtual field names that are commonly expression fields
-            # These fields are typically computed from other fields and shouldn't be used for duplicate detection
-            known_virtual_fields = [
-                'metre', 'meter', 'metre_carre', 'square_meter', 'area', 'perimeter',
-                'length', 'width', 'height', 'volume', 'distance', 'bearing',
-                'x_coord', 'y_coord', 'z_coord', 'latitude', 'longitude',
-                'easting', 'northing', 'elevation', 'depth'
-            ]
-            if field_name.lower() in known_virtual_fields:
-                return True
-            
+            print(f"[DEBUG] Field {field_name} is not virtual.")
             return False
-        except Exception:
-            # If we can't determine, assume it's not virtual
+        except Exception as e:
+            print(f"[DEBUG] Exception in _is_virtual_field for {field_name}: {str(e)}")
             return False
+
+    def _parse_qml_expression_fields(self, qml_path):
+        """Parse QML file to extract expression fields."""
+        import xml.etree.ElementTree as ET
+        try:
+            tree = ET.parse(qml_path)
+            root = tree.getroot()
+            # Find expressionfields section
+            expressionfields = root.find('.//expressionfields')
+            if expressionfields is None:
+                return {}
+            virtual_fields = {}
+            for field in expressionfields.findall('field'):
+                name = field.get('name')
+                expression = field.get('expression')
+                if name and expression:
+                    virtual_fields[name] = expression
+            return virtual_fields
+        except Exception as e:
+            print(f"[DEBUG] Error parsing QML file {qml_path}: {str(e)}")
+            return {}
 
     def _load_layer(self, file_path: str, layer_name: str) -> Optional[QgsVectorLayer]:
         """
