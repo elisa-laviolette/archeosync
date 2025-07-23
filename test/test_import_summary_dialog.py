@@ -618,6 +618,43 @@ class TestImportSummaryDialog(unittest.TestCase):
             mock_archive.assert_called_once()
             mock_delete_later.assert_called_once()
 
+    def test_case_insensitive_field_matching_csv_points(self):
+        """Test that total station points are copied correctly when field names differ only by case."""
+        from qgis.core import QgsFields, QgsField, QgsFeature
+        from PyQt5.QtCore import QVariant
+        # Create a mock temporary CSV layer with field 'pointid' (lowercase)
+        temp_fields = QgsFields()
+        temp_fields.append(QgsField('pointid', QVariant.String))
+        temp_feature = QgsFeature(temp_fields)
+        temp_feature.setAttribute('pointid', 'TS001')
+        temp_layer = Mock()
+        temp_layer.name.return_value = "Imported_CSV_Points"
+        temp_layer.getFeatures.return_value = [temp_feature]
+        temp_layer.fields.return_value = temp_fields
+        # Create a mock definitive layer with field 'PointID' (different case)
+        def_fields = QgsFields()
+        def_fields.append(QgsField('PointID', QVariant.String))
+        def_layer = Mock()
+        def_layer.name.return_value = "Total Station Points"
+        def_layer.id.return_value = "definitive_layer_id"
+        def_layer.isEditable.return_value = False
+        def_layer.startEditing = Mock()
+        def_layer.addFeature = Mock(return_value=True)
+        def_layer.removeSelection = Mock()
+        def_layer.select = Mock()
+        def_layer.fields.return_value = def_fields
+        # Patch QgsFeature to allow construction with target fields
+        import ui.import_summary_dialog as isd
+        orig_qgsfeature = isd.QgsFeature
+        isd.QgsFeature = lambda fields: QgsFeature(fields)
+        try:
+            # Call the feature creation logic directly
+            new_feature = self.dialog._create_feature_with_target_structure(temp_feature, def_layer)
+        finally:
+            isd.QgsFeature = orig_qgsfeature
+        # Check that the new feature has the correct value for the definitive field
+        assert new_feature['PointID'] == 'TS001'
+
 
 if __name__ == '__main__':
     unittest.main() 

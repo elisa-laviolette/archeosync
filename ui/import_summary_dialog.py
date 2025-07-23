@@ -1229,19 +1229,19 @@ class ImportSummaryDockWidget(QDockWidget):
             if source_feature.geometry() and not source_feature.geometry().isEmpty():
                 new_feature.setGeometry(source_feature.geometry())
             
-            # Copy attributes by field name, excluding FID fields
+            # Copy attributes by field name, excluding FID fields (case-insensitive matching)
+            # Build a mapping from lower-case source field names to their indices
+            source_fields = source_feature.fields()
+            source_field_name_to_index = {source_fields.at(i).name().lower(): i for i in range(source_fields.count())}
             for field in target_layer.fields():
                 field_name = field.name()
-                
                 # Skip FID-related fields to avoid conflicts
                 if field_name.lower() in ['fid', 'id', 'gid', 'objectid', 'featureid']:
                     continue
-                
-                source_field_idx = source_feature.fields().indexOf(field_name)
-                
+                source_field_idx = source_field_name_to_index.get(field_name.lower(), -1)
                 if source_field_idx >= 0:
                     # Field exists in source, copy the value
-                    source_value = source_feature[field_name]
+                    source_value = source_feature[source_field_idx]
                     # Handle NULL values properly
                     if source_value is None or str(source_value).lower() == 'null':
                         new_feature[field_name] = None

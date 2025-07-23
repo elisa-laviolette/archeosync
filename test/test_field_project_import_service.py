@@ -1086,3 +1086,46 @@ class TestFieldProjectImportService:
             # Simulate the field type conversion logic
             uri_type = qgis_type.lower()
             assert uri_type == expected_uri_type, f"Field type '{qgis_type}' should map to '{expected_uri_type}', got '{uri_type}'" 
+
+    def test_case_insensitive_field_matching(self):
+        """Test that features are copied correctly when field names differ only by case."""
+        from services.field_project_import_service import FieldProjectImportService
+        from unittest.mock import Mock
+        from qgis.core import QgsFields, QgsField, QgsFeature, QgsVectorLayer
+        from PyQt5.QtCore import QVariant
+
+        # Create a mock settings and layer service
+        mock_settings_manager = Mock()
+        mock_layer_service = Mock()
+        mock_file_system_service = Mock()
+        service = FieldProjectImportService(mock_settings_manager, mock_layer_service, mock_file_system_service)
+
+        # Create a target layer with field 'Name'
+        target_fields = QgsFields()
+        target_fields.append(QgsField('Name', QVariant.String))
+        target_layer = Mock()
+        target_layer.fields.return_value = target_fields
+        target_layer.startEditing = Mock()
+        target_layer.addFeature = Mock(return_value=True)
+        target_layer.commitChanges = Mock()
+
+        # Create a source feature with field 'name' (lowercase)
+        source_fields = QgsFields()
+        source_fields.append(QgsField('name', QVariant.String))
+        source_feature = QgsFeature(source_fields)
+        source_feature.setAttribute('name', 'TestValue')
+
+        # Patch QgsFeature to allow construction with target fields
+        import services.field_project_import_service as fpif
+        orig_qgsfeature = fpif.QgsFeature
+        fpif.QgsFeature = lambda fields: QgsFeature(fields)
+        try:
+            # Call the method under test
+            result_layer = service._create_merged_layer('TestLayer', [source_feature])
+        finally:
+            fpif.QgsFeature = orig_qgsfeature
+
+        # Check that addFeature was called with a feature having the correct value
+        args, kwargs = target_layer.addFeature.call_args
+        new_feature = args[0]
+        assert new_feature['Name'] == 'TestValue' 

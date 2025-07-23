@@ -620,12 +620,15 @@ class FieldProjectImportService(QObject):
                     # Feature has no geometry, which is fine for layers with geometry (will be NULL)
                     pass
                 
-                # Copy attributes by field name
+                # Copy attributes by field name (case-insensitive matching)
+                # Build a mapping from lower-case source field names to their indices
+                source_fields = feature.fields()
+                source_field_name_to_index = {source_fields.at(i).name().lower(): i for i in range(source_fields.count())}
                 for i, field in enumerate(layer.fields()):
                     field_name = field.name()
-                    source_field_idx = feature.fields().indexOf(field_name)
+                    source_field_idx = source_field_name_to_index.get(field_name.lower(), -1)
                     if source_field_idx >= 0:
-                        new_feature[field_name] = feature[field_name]
+                        new_feature[field_name] = feature[source_field_idx]
                     else:
                         # Field doesn't exist in source, set to NULL
                         new_feature[field_name] = None
