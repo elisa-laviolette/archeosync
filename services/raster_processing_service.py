@@ -89,6 +89,12 @@ class QGISRasterProcessingService(IRasterProcessingService):
         Uses direct GDAL command approach that matches the working manual command.
         """
         try:
+            # Validate and convert offset_meters
+            try:
+                offset_meters = float(offset_meters)
+            except (ValueError, TypeError):
+                print(f"Error: offset_meters ('{offset_meters}') is not a valid number. Defaulting to 0.0.")
+                offset_meters = 0.0
             # Get the raster layer
             raster_layer = QgsProject.instance().mapLayer(raster_layer_id)
             if not raster_layer or not isinstance(raster_layer, QgsRasterLayer):
@@ -106,18 +112,15 @@ class QGISRasterProcessingService(IRasterProcessingService):
             # Create output path if not provided
             if not output_path:
                 output_path = self._create_temp_output_path(raster_source)
-            
             # Buffer geometry if needed
             if offset_meters > 0:
                 buffered_geometry = feature_geometry.buffer(offset_meters, 5)
             else:
                 buffered_geometry = feature_geometry
-            
             print(f"Using direct GDAL command approach for raster clipping")
             print(f"Raster source: {raster_source}")
             print(f"Raster CRS: {raster_layer.crs().description()}")
             print(f"Output path: {output_path}")
-            
             # Use direct GDAL command approach (similar to working manual command)
             return self._clip_raster_with_gdal_command(raster_layer, buffered_geometry, output_path)
         except Exception as e:
@@ -781,6 +784,10 @@ class QGISRasterProcessingService(IRasterProcessingService):
             str: Path to temporary shapefile (without .shp extension) or None if failed
         """
         try:
+            # Defensive: geometry should be a QgsGeometry, but check anyway
+            if geometry is None or not hasattr(geometry, 'isNull') or geometry.isNull():
+                print(f"Error: Provided geometry is invalid or null: {geometry}")
+                return None
             # Create temporary file path
             temp_fd, temp_path = tempfile.mkstemp(suffix='.shp', prefix='temp_clip_')
             os.close(temp_fd)
