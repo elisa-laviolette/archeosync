@@ -93,7 +93,7 @@ class DistanceDetectorService:
                 (temp_total_station_points_layer, temp_objects_layer, 'temp', 'temp'),
                 (temp_total_station_points_layer, definitive_objects_layer, 'temp', 'definitive'),
                 (definitive_total_station_points_layer, temp_objects_layer, 'definitive', 'temp'),
-                (definitive_total_station_points_layer, definitive_objects_layer, 'definitive', 'definitive'),
+                # (definitive_total_station_points_layer, definitive_objects_layer, 'definitive', 'definitive'),  # Do NOT check definitive-definitive
             ]
 
             for points_layer, objects_layer, points_type, objects_type in layer_combinations:
