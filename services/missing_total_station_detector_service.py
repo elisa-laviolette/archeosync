@@ -282,6 +282,52 @@ class MissingTotalStationDetectorService:
         print(f"[DEBUG] Missing total station detection completed, found {len(warnings)} warnings")
         return warnings
     
+    def _get_recording_area_name(self, recording_areas_layer: Any, recording_area_id: Any) -> str:
+        """
+        Get the name of a recording area by its ID, using the display expression if available.
+        Args:
+            recording_areas_layer: The recording areas layer
+            recording_area_id: The ID of the recording area
+        Returns:
+            The name of the recording area, or the ID as string if name not found
+        """
+        try:
+            # Find the feature with the given ID or field value
+            target_feature = None
+            for feature in recording_areas_layer.getFeatures():
+                if feature.id() == recording_area_id or any(feature[field_idx] == recording_area_id for field_idx in range(feature.fields().count())):
+                    target_feature = feature
+                    break
+            if target_feature:
+                # Try display expression first
+                display_expression = recording_areas_layer.displayExpression()
+                if display_expression:
+                    try:
+                        from qgis.core import QgsExpression, QgsExpressionContext, QgsExpressionContextUtils
+                        context = QgsExpressionContext()
+                        context.appendScope(QgsExpressionContextUtils.layerScope(recording_areas_layer))
+                        context.setFeature(target_feature)
+                        expression = QgsExpression(display_expression)
+                        result = expression.evaluate(context)
+                        if result and str(result) != 'NULL':
+                            return str(result)
+                    except Exception as e:
+                        print(f"Error evaluating display expression: {e}")
+                # Fallback: Try to get a name field if available
+                name_fields = ['name', 'title', 'label', 'description', 'comment']
+                for field_name in name_fields:
+                    field_idx = recording_areas_layer.fields().indexOf(field_name)
+                    if field_idx >= 0:
+                        name_value = target_feature[field_idx]
+                        if name_value and str(name_value) != 'NULL':
+                            return str(name_value)
+                # Final fallback to ID
+                return str(target_feature.id())
+            return str(recording_area_id)
+        except Exception as e:
+            print(f"Error getting recording area name: {e}")
+            return str(recording_area_id)
+    
     def _detect_missing_total_station_issues(self, 
                                            total_station_points_layer: Any,
                                            objects_layer: Any,
@@ -292,118 +338,140 @@ class MissingTotalStationDetectorService:
         Detect objects that don't have matching total station points.
         
         Args:
-            total_station_points_layer: The total station points layer
-            objects_layer: The objects layer
+            total_station_points_layer: The total station points layer (temporary if present)
+            objects_layer: The objects layer (should be temporary)
             points_field_idx: Index of the relation field in points layer
             objects_field_idx: Index of the relation field in objects layer
             points_layer_is_referencing: Whether points layer references objects layer
-            
         Returns:
             List of warning messages or structured warning data
         """
         warnings = []
-        
         try:
-            
-            # Group features by their relation field value
+            # Fetch the recording areas layer from settings
+            recording_areas_layer_id = self._settings_manager.get_value('recording_areas_layer')
+            recording_areas_layer = self._layer_service.get_layer_by_id(recording_areas_layer_id) if recording_areas_layer_id else None
+            # Also fetch the definitive points layer for union
+            definitive_points_layer_id = self._settings_manager.get_value('total_station_points_layer')
+            definitive_points_layer = self._layer_service.get_layer_by_id(definitive_points_layer_id) if definitive_points_layer_id else None
+            # Build points_by_relation from both temporary and definitive points layers
             points_by_relation = {}
+            def add_points_from_layer(layer, field_idx):
+                if not layer or field_idx is None:
+                    return
+                for feature in layer.getFeatures():
+                    relation_value = feature.attribute(field_idx)
+                    if relation_value is not None and relation_value != '':
+                        norm_value = str(relation_value).strip().lower()
+                        if norm_value not in points_by_relation:
+                            points_by_relation[norm_value] = []
+                        points_by_relation[norm_value].append(feature)
+            # Add from temporary points layer
+            add_points_from_layer(total_station_points_layer, points_field_idx)
+            # If definitive points layer is different, add from it as well
+            if definitive_points_layer and definitive_points_layer != total_station_points_layer:
+                # Find the correct field index in the definitive layer (by name, case-insensitive)
+                temp_field_name = total_station_points_layer.fields()[points_field_idx].name()
+                def_field_idx = definitive_points_layer.fields().indexOf(temp_field_name)
+                if def_field_idx < 0:
+                    # Try case-insensitive
+                    for i, field in enumerate(definitive_points_layer.fields()):
+                        if field.name().lower() == temp_field_name.lower():
+                            def_field_idx = i
+                            break
+                add_points_from_layer(definitive_points_layer, def_field_idx)
+            # Process objects (only from the temporary objects layer)
             objects_by_relation = {}
-            
-            # Process total station points
-            points_count = 0
-            points_with_relation = 0
-            
-            for feature in total_station_points_layer.getFeatures():
-                points_count += 1
-                
-                relation_value = feature.attribute(points_field_idx)
-                if relation_value:
-                    points_with_relation += 1
-                    if relation_value not in points_by_relation:
-                        points_by_relation[relation_value] = []
-                    points_by_relation[relation_value].append(feature)
-            
-            # Process objects
             objects_count = 0
             objects_with_relation = 0
-            
             for feature in objects_layer.getFeatures():
                 objects_count += 1
-                
                 relation_value = feature.attribute(objects_field_idx)
-                if relation_value:
+                if relation_value is not None and relation_value != '':
                     objects_with_relation += 1
-                    if relation_value not in objects_by_relation:
-                        objects_by_relation[relation_value] = []
-                    objects_by_relation[relation_value].append(feature)
-            
-            print(f"[DEBUG] Points processing summary:")
-            print(f"[DEBUG]   Total points: {points_count}")
-            print(f"[DEBUG]   Points with relation value: {points_with_relation}")
-            
-            print(f"[DEBUG] Objects processing summary:")
-            print(f"[DEBUG]   Total objects: {objects_count}")
-            print(f"[DEBUG]   Objects with relation value: {objects_with_relation}")
-            
-            print(f"[DEBUG] Found {len(points_by_relation)} unique relation values in points layer")
-            print(f"[DEBUG] Points relation values: {list(points_by_relation.keys())}")
-            print(f"[DEBUG] Found {len(objects_by_relation)} unique relation values in objects layer")
+                    norm_value = str(relation_value).strip().lower()
+                    if norm_value not in objects_by_relation:
+                        objects_by_relation[norm_value] = []
+                    objects_by_relation[norm_value].append(feature)
+            print(f"[DEBUG] Points relation values (union): {list(points_by_relation.keys())}")
             print(f"[DEBUG] Objects relation values: {list(objects_by_relation.keys())}")
-            
             # Find objects that don't have matching total station points
             missing_total_station_issues = []
-            
-            # Get objects that have relation values but no corresponding points
-            for relation_value, objects_features in objects_by_relation.items():
-                if relation_value not in points_by_relation:
-                    # Objects have this relation value but no points do
+            for norm_value, objects_features in objects_by_relation.items():
+                if norm_value not in points_by_relation:
                     for object_feature in objects_features:
                         object_identifier = self._get_feature_identifier(object_feature, "Object")
-                        
                         missing_total_station_issues.append({
                             'object_feature': object_feature,
                             'object_identifier': object_identifier,
-                            'relation_value': relation_value
+                            'relation_value': object_feature.attribute(objects_field_idx)
                         })
-            
             print(f"[DEBUG] Found {len(missing_total_station_issues)} missing total station issues")
-            
             # Create warnings for missing total station issues
             if missing_total_station_issues:
-                # Group by relation value for better organization
-                by_relation_value = {}
+                by_recording_area = {}
                 for issue in missing_total_station_issues:
-                    relation_value = issue['relation_value']
-                    if relation_value not in by_relation_value:
-                        by_relation_value[relation_value] = []
-                    by_relation_value[relation_value].append(issue)
-                
-                for relation_value, issues in by_relation_value.items():
-                    # Create filter expressions for both layers
+                    object_feature = issue['object_feature']
+                    # Get the recording area value from the object feature
+                    recording_area_value = None
+                    if recording_areas_layer:
+                        # Try to get the relation field from the definitive object layer and recording area layer
+                        objects_layer_id = self._settings_manager.get_value('objects_layer')
+                        definitive_objects_layer = self._layer_service.get_layer_by_id(objects_layer_id) if objects_layer_id else None
+                        if definitive_objects_layer and recording_areas_layer:
+                            # Find the relation
+                            from qgis.core import QgsProject
+                            project = QgsProject.instance()
+                            relation_manager = project.relationManager()
+                            for relation in relation_manager.relations().values():
+                                if (relation.referencingLayer() == definitive_objects_layer and 
+                                    relation.referencedLayer() == recording_areas_layer):
+                                    field_pairs = relation.fieldPairs()
+                                    if field_pairs:
+                                        recording_area_field = list(field_pairs.keys())[0]
+                                        recording_area_value = object_feature.attribute(recording_area_field)
+                                        print(f"[DEBUG] Using relation field '{recording_area_field}' with value '{recording_area_value}' for object {object_feature.id()}")
+                                        break
+                    # Fallback: try common field names if not found
+                    if recording_area_value is None:
+                        for fallback_field in ['recording_area', 'recording_area_id', 'area_id', 'area']:
+                            idx = object_feature.fields().indexOf(fallback_field)
+                            if idx >= 0:
+                                recording_area_value = object_feature.attribute(idx)
+                                if recording_area_value:
+                                    print(f"[DEBUG] Using fallback field '{fallback_field}' with value '{recording_area_value}' for object {object_feature.id()}")
+                                    break
+                    # Get the human-readable name
+                    if recording_area_value is not None and recording_areas_layer:
+                        recording_area_name = self._get_recording_area_name(recording_areas_layer, recording_area_value)
+                        print(f"[DEBUG] Found recording area name '{recording_area_name}' for value '{recording_area_value}' (object {object_feature.id()})")
+                    else:
+                        recording_area_name = str(recording_area_value) if recording_area_value is not None else "Unknown"
+                        print(f"[DEBUG] Could not find recording area name for value '{recording_area_value}' (object {object_feature.id()})")
+                    if recording_area_name not in by_recording_area:
+                        by_recording_area[recording_area_name] = []
+                    by_recording_area[recording_area_name].append(issue)
+                for recording_area_name, issues in by_recording_area.items():
+                    # Use the first relation value for filter expressions
+                    relation_value = issues[0]['relation_value']
                     points_filter = f'"{total_station_points_layer.fields()[points_field_idx].name()}" = \'{relation_value}\''
                     objects_filter = f'"{objects_layer.fields()[objects_field_idx].name()}" = \'{relation_value}\''
-                    
-                    # Get feature identifiers for the warning message
                     object_identifiers = [issue['object_identifier'] for issue in issues]
-                    
-                    # Create structured warning data
                     warning_data = WarningData(
                         message=self._create_missing_total_station_warning(object_identifiers),
-                        recording_area_name=f"Relation {relation_value}",  # Use relation value as identifier
+                        recording_area_name=recording_area_name,
                         layer_name=objects_layer.name(),
                         filter_expression=objects_filter,
                         second_layer_name=total_station_points_layer.name(),
                         second_filter_expression=points_filter,
                         missing_total_station_issues=issues
                     )
-                    
+                    print(f"[DEBUG] Created warning for recording_area_name='{recording_area_name}' with {len(issues)} issues.")
                     warnings.append(warning_data)
-            
         except Exception as e:
             print(f"Error detecting missing total station issues: {str(e)}")
             import traceback
             traceback.print_exc()
-        
         return warnings
     
     def _get_relation_between_layers(self, layer1: Any, layer2: Any) -> Optional[Any]:
