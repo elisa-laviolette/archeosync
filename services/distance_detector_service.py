@@ -100,29 +100,29 @@ class DistanceDetectorService:
                 if not points_layer or not objects_layer:
                     continue
 
-                # Always use the relation from the definitive layers
-                rel_points_layer = definitive_total_station_points_layer
-                rel_objects_layer = definitive_objects_layer
-                if not rel_points_layer or not rel_objects_layer:
-                    continue
-
-                relation = self._get_relation_between_layers(rel_points_layer, rel_objects_layer)
+                # Always get the relation from the definitive layers
+                relation = self._get_relation_between_layers(definitive_total_station_points_layer, definitive_objects_layer)
                 if not relation:
                     continue
-
                 field_pairs = relation.fieldPairs()
                 if not field_pairs:
                     continue
 
-                # Determine which layer is referencing and which is referenced
-                if relation.referencingLayer() == rel_points_layer:
-                    points_field = list(field_pairs.keys())[0]
-                    objects_field = list(field_pairs.values())[0]
+                # Determine which layer is referencing and which is referenced in the definitive relation
+                if relation.referencingLayer() == definitive_total_station_points_layer:
+                    def_points_field = list(field_pairs.keys())[0]
+                    def_objects_field = list(field_pairs.values())[0]
                     points_layer_is_referencing = True
                 else:
-                    objects_field = list(field_pairs.keys())[0]
-                    points_field = list(field_pairs.values())[0]
+                    def_objects_field = list(field_pairs.keys())[0]
+                    def_points_field = list(field_pairs.values())[0]
                     points_layer_is_referencing = False
+
+                # For each current layer, find the field whose name matches the definitive field (case-insensitive)
+                points_field = self._find_matching_field(points_layer, def_points_field)
+                objects_field = self._find_matching_field(objects_layer, def_objects_field)
+                if points_field is None or objects_field is None:
+                    continue
 
                 # Find field indices in the current points_layer and objects_layer (case-insensitive)
                 points_field_idx = points_layer.fields().indexOf(points_field)
@@ -150,7 +150,7 @@ class DistanceDetectorService:
                 )
                 if distance_warnings:
                     warnings.extend(distance_warnings)
-                    break  # Stop at first successful combination with warnings
+                    # Do not break; collect all warnings from all combinations
 
         except Exception as e:
             print(f"Error in distance detection: {e}")
@@ -359,3 +359,30 @@ class DistanceDetectorService:
         except Exception as e:
             print(f"Error creating distance warning: {str(e)}")
             return f"{feature_text} are separated by {max_distance * 100:.1f} cm (maximum allowed: {self._max_distance_meters * 100:.1f} cm)" 
+
+    def _find_identifier_field(self, layer, is_point_layer: bool) -> Optional[str]:
+        """
+        Try to find a likely identifier field for points or objects.
+        """
+        # For points, try common names
+        if is_point_layer:
+            candidates = ["ptid", "PtID", "point_id", "station_id", "point_number", "id", "fid", "Label_court"]
+        else:
+            candidates = ["Label_court", "label_court", "object_number", "number", "object_id", "id", "fid"]
+        field_names = [f.name().lower() for f in layer.fields()]
+        for candidate in candidates:
+            if candidate.lower() in field_names:
+                # Return the actual field name (case-sensitive)
+                for f in layer.fields():
+                    if f.name().lower() == candidate.lower():
+                        return f.name()
+        return None 
+
+    def _find_matching_field(self, layer, target_field_name: str) -> Optional[str]:
+        """
+        Find a field in the given layer whose name matches target_field_name (case-insensitive).
+        """
+        for f in layer.fields():
+            if f.name().lower() == target_field_name.lower():
+                return f.name()
+        return None 
