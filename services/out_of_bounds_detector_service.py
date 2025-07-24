@@ -64,7 +64,7 @@ class OutOfBoundsDetectorService(QObject):
         self._layer_service = layer_service
         
         # Get configurable thresholds from settings with defaults
-        self._max_distance_meters = self._settings_manager.get_value('bounds_max_distance', 0.2)
+        self._max_distance_meters = float(self._settings_manager.get_value('bounds_max_distance', 0.2))
     
     def detect_out_of_bounds_features(self) -> List[Union[str, WarningData]]:
         """

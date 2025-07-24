@@ -1094,3 +1094,70 @@ class QGISLayerService(ILayerService):
         except Exception as e:
             print(f"Error removing layer {layer_id}: {str(e)}")
             return False 
+
+    def copy_virtual_fields(self, source_layer, target_layer):
+        """
+        Copy all virtual fields (expression fields) from source_layer to target_layer.
+        If a field exists in target_layer, it will be overwritten as a virtual field with the same expression.
+        """
+        from PyQt5.QtCore import QVariant
+        import os
+        import tempfile
+        
+        print(f"[DEBUG] Copying virtual fields from {source_layer.name()} to {target_layer.name()}")
+        
+        # Use the proven approach: export source layer style and parse it
+        try:
+            # Create temporary file for style export
+            with tempfile.NamedTemporaryFile(suffix='.qml', delete=False) as temp_file:
+                temp_qml_path = temp_file.name
+            
+            try:
+                # Export source layer style to temporary QML file
+                export_result = source_layer.saveNamedStyle(temp_qml_path)
+                if export_result[0]:
+                    print(f"[DEBUG] Successfully exported style to temporary file: {temp_qml_path}")
+                    
+                    # Parse QML file to find expression fields
+                    virtual_fields = self._parse_qml_expression_fields(temp_qml_path)
+                    print(f"[DEBUG] Found {len(virtual_fields)} virtual fields in exported style")
+                    
+                    if virtual_fields:
+                        # Add virtual fields to the target layer
+                        provider = target_layer.dataProvider()
+                        for field_name, expression in virtual_fields.items():
+                            print(f"[DEBUG] Adding virtual field: {field_name} = {expression}")
+                            
+                            # Check if the field already exists as a regular field
+                            existing_field_idx = target_layer.fields().indexOf(field_name)
+                            if existing_field_idx >= 0:
+                                # Remove the regular field and add it as virtual
+                                print(f"[DEBUG] Removing existing field '{field_name}' to replace with virtual field")
+                                provider.deleteAttributes([existing_field_idx])
+                                target_layer.updateFields()
+                            
+                            # Add the virtual field
+                            virtual_field = QgsField(field_name, QVariant.String, "string")
+                            virtual_field.setAlias(field_name)
+                            # Set the expression for the virtual field
+                            target_layer.addExpressionField(expression, virtual_field)
+                            print(f"[DEBUG] Successfully added virtual field: {field_name}")
+                        
+                        target_layer.triggerRepaint()
+                        print(f"[DEBUG] Finished copying {len(virtual_fields)} virtual fields")
+                    else:
+                        print(f"[DEBUG] No virtual fields found in exported style")
+                else:
+                    print(f"[DEBUG] Failed to export style from source layer: {export_result[1]}")
+                    
+            finally:
+                # Clean up temporary file
+                try:
+                    os.unlink(temp_qml_path)
+                except:
+                    pass
+                    
+        except Exception as e:
+            print(f"[DEBUG] Exception during virtual field copying: {e}")
+            import traceback
+            print(f"[DEBUG] Traceback: {traceback.format_exc()}") 

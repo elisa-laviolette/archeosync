@@ -414,7 +414,6 @@ class FieldProjectImportService(QObject):
                     if len(geometry_types) <= 3:
                         geom_type = feature.geometry().type()
                         is_multipart = feature.geometry().isMultipart()
-                        print(f"Feature geometry: type={geom_type}, multipart={is_multipart}")
                 
                 # Collect all unique fields and their types
                 for field in feature.fields():
@@ -844,7 +843,6 @@ class FieldProjectImportService(QObject):
         existing_signatures = set()
         for i, existing_feature in enumerate(existing_features):
             signature = self._create_feature_signature(existing_feature, existing_layer)
-            print(f"[DEBUG] Existing feature {i} signature: {signature}")
             existing_signatures.add(signature)
         
         # Filter out duplicates
@@ -852,13 +850,10 @@ class FieldProjectImportService(QObject):
         duplicates_count = 0
         for i, feature in enumerate(features):
             signature = self._create_feature_signature(feature, existing_layer)
-            print(f"[DEBUG] Import feature {i} signature: {signature}")
             if signature not in existing_signatures:
                 filtered_features.append(feature)
-                print(f"[DEBUG] Feature {i} is unique and will be imported.")
             else:
                 duplicates_count += 1
-                print(f"[DEBUG] Feature {i} is a duplicate and will be ignored.")
         print(f"[DEBUG] {duplicates_count} duplicates found and ignored for {layer_type}")
         return filtered_features
     
@@ -879,25 +874,20 @@ class FieldProjectImportService(QObject):
             field_name = field.name()
             # Skip the fid field as it's layer-specific and not part of the data
             if field_name.lower() == 'fid':
-                print(f"[DEBUG] Skipping fid field: {field_name}")
                 continue
             # Skip virtual/computed fields that might be NULL in exports
             if self._is_virtual_field(layer, field_name):
-                print(f"[DEBUG] Skipping virtual field: {field_name}")
                 continue
             value = feature[field_name]
             # Convert value to string, handling None values
             if value is None:
-                print(f"[DEBUG] Skipping NULL value for field: {field_name}")
                 continue
             else:
                 attr_str = f"{field_name}:{str(value)}"
                 attributes.append(attr_str)
-                print(f"[DEBUG] Attribute for signature: {attr_str}")
         # Sort attributes for consistent signature
         attributes.sort()
         attr_signature = "|".join(attributes)
-        print(f"[DEBUG] Attribute signature: {attr_signature}")
         # Create signature from geometry (normalized to handle Polygon vs MultiPolygon)
         geometry = feature.geometry()
         if geometry and not geometry.isEmpty():
@@ -911,12 +901,9 @@ class FieldProjectImportService(QObject):
                     geom_signature = geometry.asWkt()
             else:
                 geom_signature = geometry.asWkt()
-            print(f"[DEBUG] Geometry signature: {geom_signature}")
         else:
             geom_signature = "NO_GEOM"
-            print(f"[DEBUG] No geometry for feature")
         signature = f"{attr_signature}||{geom_signature}"
-        print(f"[DEBUG] Final feature signature: {signature}")
         return signature
     
     def _is_virtual_field(self, layer: Any, field_name: str) -> bool:
@@ -932,32 +919,25 @@ class FieldProjectImportService(QObject):
             # Get the field index
             field_idx = layer.fields().indexOf(field_name)
             if field_idx < 0:
-                print(f"[DEBUG] Field {field_name} not found in layer fields.")
                 return False
             # Check QML style file for expression fields (most reliable for your use case)
             if hasattr(layer, 'styleURI'):
                 qml_path = layer.styleURI()
-                print(f"[DEBUG] QML path for layer: {qml_path}")
                 if qml_path and qml_path.endswith('.qml'):
                     virtual_fields = self._parse_qml_expression_fields(qml_path)
                     if field_name in virtual_fields:
-                        print(f"[DEBUG] Field {field_name} detected as virtual via QML expressionfields.")
                         return True
             # Also check QGIS API (for completeness)
             from qgis.core import QgsFields
             origin = layer.fields().fieldOrigin(field_idx)
             if origin == QgsFields.OriginExpression:
-                print(f"[DEBUG] Field {field_name} detected as virtual via QgsFields.OriginExpression.")
                 return True
             # Fallback to previous checks if needed
             field_def = layer.fields().at(field_idx)
             if hasattr(field_def, 'isVirtual') and field_def.isVirtual():
-                print(f"[DEBUG] Field {field_name} detected as virtual via isVirtual().")
                 return True
             if hasattr(field_def, 'expression') and field_def.expression():
-                print(f"[DEBUG] Field {field_name} detected as virtual via expression().")
                 return True
-            print(f"[DEBUG] Field {field_name} is not virtual.")
             return False
         except Exception as e:
             print(f"[DEBUG] Exception in _is_virtual_field for {field_name}: {str(e)}")
@@ -981,7 +961,6 @@ class FieldProjectImportService(QObject):
                     virtual_fields[name] = expression
             return virtual_fields
         except Exception as e:
-            print(f"[DEBUG] Error parsing QML file {qml_path}: {str(e)}")
             return {}
 
     def _load_layer(self, file_path: str, layer_name: str) -> Optional[QgsVectorLayer]:

@@ -432,19 +432,16 @@ class ArcheoSyncPlugin(QObject):
     
     def run_import_data(self) -> None:
         """Run the import data dialog."""
-        print("Debug: run_import_data called")
         
         # Check if an import summary dock widget already exists
         existing_dock_widget = self._find_existing_import_summary_dock_widget()
         
         if existing_dock_widget:
-            print("Debug: Found existing dock widget, showing it")
             # If a dock widget exists, show it and bring it to front
             existing_dock_widget.show()
             existing_dock_widget.raise_()
             existing_dock_widget.activateWindow()
         else:
-            print("Debug: No existing dock widget found, creating new dialog")
             # If no dock widget exists, create and show the import data dialog
             dialog = ImportDataDialog(
                 settings_manager=self._settings_manager,
@@ -587,6 +584,41 @@ class ArcheoSyncPlugin(QObject):
             from .services.out_of_bounds_detector_service import OutOfBoundsDetectorService
             from .services.distance_detector_service import DistanceDetectorService
             from qgis.PyQt.QtCore import Qt
+            
+            # --- Ensure virtual fields are copied from definitive to temporary layers before running detectors ---
+            # Objects
+            temp_objects_layer = self._layer_service.get_layer_by_name("New Objects")
+            definitive_objects_layer = None
+            objects_layer_id = self._settings_manager.get_value('objects_layer')
+            if objects_layer_id:
+                definitive_objects_layer = self._layer_service.get_layer_by_id(objects_layer_id)
+            if temp_objects_layer and definitive_objects_layer:
+                self._layer_service.copy_virtual_fields(definitive_objects_layer, temp_objects_layer)
+            # Features
+            temp_features_layer = self._layer_service.get_layer_by_name("New Features")
+            definitive_features_layer = None
+            features_layer_id = self._settings_manager.get_value('features_layer')
+            if features_layer_id:
+                definitive_features_layer = self._layer_service.get_layer_by_id(features_layer_id)
+            if temp_features_layer and definitive_features_layer:
+                self._layer_service.copy_virtual_fields(definitive_features_layer, temp_features_layer)
+            # Small Finds
+            temp_small_finds_layer = self._layer_service.get_layer_by_name("New Small Finds")
+            definitive_small_finds_layer = None
+            small_finds_layer_id = self._settings_manager.get_value('small_finds_layer')
+            if small_finds_layer_id:
+                definitive_small_finds_layer = self._layer_service.get_layer_by_id(small_finds_layer_id)
+            if temp_small_finds_layer and definitive_small_finds_layer:
+                self._layer_service.copy_virtual_fields(definitive_small_finds_layer, temp_small_finds_layer)
+            # Total Station Points
+            temp_points_layer = self._layer_service.get_layer_by_name("Imported_CSV_Points")
+            definitive_points_layer = None
+            points_layer_id = self._settings_manager.get_value('total_station_points_layer')
+            if points_layer_id:
+                definitive_points_layer = self._layer_service.get_layer_by_id(points_layer_id)
+            if temp_points_layer and definitive_points_layer:
+                self._layer_service.copy_virtual_fields(definitive_points_layer, temp_points_layer)
+            # --- End virtual field copying ---
             
             # Detect duplicate objects if objects were imported
             duplicate_objects_warnings = []
@@ -785,22 +817,17 @@ class ArcheoSyncPlugin(QObject):
             
             # Look for dock widgets that are instances of ImportSummaryDockWidget
             dock_widgets = main_window.findChildren(QDockWidget)
-            print(f"Debug: Found {len(dock_widgets)} dock widgets")
             
             for child in dock_widgets:
                 # Check if this is an ImportSummaryDockWidget by checking the class name
                 if hasattr(child, '__class__') and 'ImportSummaryDockWidget' in child.__class__.__name__:
-                    print(f"Debug: Found ImportSummaryDockWidget by class name: {child.__class__.__name__}")
                     return child
                 
                 # Also check the window title as a fallback (both translated and untranslated)
                 title = child.windowTitle()
-                print(f"Debug: Dock widget title: '{title}'")
                 if title in ["Import Summary", self.tr("Import Summary")]:
-                    print(f"Debug: Found ImportSummaryDockWidget by title: '{title}'")
                     return child
             
-            print("Debug: No ImportSummaryDockWidget found")
             return None
             
         except Exception as e:

@@ -304,7 +304,6 @@ class MissingTotalStationDetectorService:
         warnings = []
         
         try:
-            print(f"[DEBUG] _detect_missing_total_station_issues called")
             
             # Group features by their relation field value
             points_by_relation = {}
@@ -318,7 +317,6 @@ class MissingTotalStationDetectorService:
                 points_count += 1
                 
                 relation_value = feature.attribute(points_field_idx)
-                print(f"[DEBUG] Point {feature.id()}: relation_value = {relation_value}")
                 if relation_value:
                     points_with_relation += 1
                     if relation_value not in points_by_relation:
@@ -333,7 +331,6 @@ class MissingTotalStationDetectorService:
                 objects_count += 1
                 
                 relation_value = feature.attribute(objects_field_idx)
-                print(f"[DEBUG] Object {feature.id()}: relation_value = {relation_value}")
                 if relation_value:
                     objects_with_relation += 1
                     if relation_value not in objects_by_relation:
