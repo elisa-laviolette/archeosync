@@ -786,14 +786,33 @@ class QGISLayerService(ILayerService):
         """
         source_fields = source_layer.fields()
         target_fields = target_layer.fields()
+        
+        # Create a mapping of field names to their configurations
+        field_configs = {}
         for i in range(source_fields.count()):
-            # Copy editor widget setup
-            source_editor_widget = source_layer.editorWidgetSetup(i)
-            if source_editor_widget and getattr(source_editor_widget, 'type', lambda: None)():
-                target_layer.setEditorWidgetSetup(i, source_editor_widget)
-            # Copy default value definition
-            source_default = source_layer.defaultValueDefinition(i)
-            target_layer.setDefaultValueDefinition(i, source_default)
+            field_name = source_fields[i].name()
+            field_configs[field_name] = {
+                'editor_widget': source_layer.editorWidgetSetup(i),
+                'default_value': source_layer.defaultValueDefinition(i),
+                'constraints': source_layer.constraints(i) if hasattr(source_layer, 'constraints') else None
+            }
+        
+        # Apply configurations to target layer by field name
+        for field_name, config in field_configs.items():
+            target_field_idx = target_fields.indexOf(field_name)
+            
+            if target_field_idx >= 0:
+                # Copy editor widget setup
+                if config['editor_widget'] and hasattr(config['editor_widget'], 'type'):
+                    target_layer.setEditorWidgetSetup(target_field_idx, config['editor_widget'])
+                
+                # Copy default value definition
+                if config['default_value'] and config['default_value'].isValid():
+                    target_layer.setDefaultValueDefinition(target_field_idx, config['default_value'])
+                
+                # Copy field constraints if available
+                if config['constraints'] and hasattr(target_layer, 'setConstraints'):
+                    target_layer.setConstraints(target_field_idx, config['constraints'])
 
     def _copy_layer_properties(self, source_layer: QgsVectorLayer, target_layer: QgsVectorLayer) -> None:
         """
@@ -804,13 +823,142 @@ class QGISLayerService(ILayerService):
         try:
             # Copy form configuration
             if hasattr(source_layer, 'editFormConfig'):
-                target_layer.setEditFormConfig(source_layer.editFormConfig())
+                source_form_config = source_layer.editFormConfig()
+                target_layer.setEditFormConfig(source_form_config)
+            
             # Copy field configuration including editor widgets and default values
             self._copy_field_configurations(source_layer, target_layer)
-            # Note: Field aliases are handled during field creation in create_empty_layer_copy
-            # and through QML style copying which preserves all field properties
+            
+            # Copy field aliases
+            self._copy_field_aliases(source_layer, target_layer)
+            
+            # Copy other layer properties
+            self._copy_advanced_layer_properties(source_layer, target_layer)
+            
         except Exception as e:
             print(f"Error copying layer properties: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def _copy_field_aliases(self, source_layer: QgsVectorLayer, target_layer: QgsVectorLayer) -> None:
+        """Copy field aliases from source to target layer."""
+        try:
+            source_fields = source_layer.fields()
+            target_fields = target_layer.fields()
+            
+            for i in range(source_fields.count()):
+                source_field = source_fields[i]
+                source_alias = source_field.alias()
+                
+                if source_alias:
+                    target_field_idx = target_fields.indexOf(source_field.name())
+                    
+                    if target_field_idx >= 0:
+                        target_field = target_fields[target_field_idx]
+                        target_field.setAlias(source_alias)
+        except Exception as e:
+            print(f"Error copying field aliases: {e}")
+    
+    def _copy_advanced_layer_properties(self, source_layer: QgsVectorLayer, target_layer: QgsVectorLayer) -> None:
+        """Copy advanced layer properties like constraints, split policies, etc."""
+        try:
+            # Copy field constraints
+            if hasattr(source_layer, 'constraints') and hasattr(target_layer, 'setConstraints'):
+                source_fields = source_layer.fields()
+                target_fields = target_layer.fields()
+                
+                for i in range(source_fields.count()):
+                    source_field = source_fields[i]
+                    target_field_idx = target_fields.indexOf(source_field.name())
+                    
+                    if target_field_idx >= 0:
+                        source_constraints = source_layer.constraints(i)
+                        if source_constraints:
+                            target_layer.setConstraints(target_field_idx, source_constraints)
+            
+            # Copy split policies
+            if hasattr(source_layer, 'splitPolicy') and hasattr(target_layer, 'setSplitPolicy'):
+                source_fields = source_layer.fields()
+                target_fields = target_layer.fields()
+                
+                for i in range(source_fields.count()):
+                    source_field = source_fields[i]
+                    target_field_idx = target_fields.indexOf(source_field.name())
+                    
+                    if target_field_idx >= 0:
+                        source_split_policy = source_layer.splitPolicy(i)
+                        target_layer.setSplitPolicy(target_field_idx, source_split_policy)
+            
+            # Copy duplicate policies
+            if hasattr(source_layer, 'duplicatePolicy') and hasattr(target_layer, 'setDuplicatePolicy'):
+                source_fields = source_layer.fields()
+                target_fields = target_layer.fields()
+                
+                for i in range(source_fields.count()):
+                    source_field = source_fields[i]
+                    target_field_idx = target_fields.indexOf(source_field.name())
+                    
+                    if target_field_idx >= 0:
+                        source_duplicate_policy = source_layer.duplicatePolicy(i)
+                        target_layer.setDuplicatePolicy(target_field_idx, source_duplicate_policy)
+                        
+        except Exception as e:
+            print(f"Error copying advanced layer properties: {e}")
+    
+    def _fix_valuerelation_layer_references(self, target_layer: QgsVectorLayer, project: 'QgsProject') -> None:
+        """
+        Fix ValueRelation widget configurations to use correct layer IDs in the field project.
+        """
+        try:
+            target_fields = target_layer.fields()
+            
+            for i in range(target_fields.count()):
+                field_name = target_fields[i].name()
+                editor_widget = target_layer.editorWidgetSetup(i)
+                
+                if editor_widget and editor_widget.type() == 'ValueRelation':
+                    config_dict = editor_widget.config()
+                    old_layer_id = config_dict.get('Layer')
+                    
+                    if old_layer_id:
+                        # Try to find the layer by name in the project
+                        found_layer = None
+                        for layer in project.mapLayers().values():
+                            if layer.name() == 'Matériaux' and old_layer_id != layer.id():
+                                found_layer = layer
+                                break
+                        
+                        if found_layer:
+                            # Update the configuration with the new layer ID
+                            config_dict['Layer'] = found_layer.id()
+                            from qgis.core import QgsEditorWidgetSetup
+                            new_widget_setup = QgsEditorWidgetSetup('ValueRelation', config_dict)
+                            target_layer.setEditorWidgetSetup(i, new_widget_setup)
+            
+        except Exception as e:
+            print(f"Error fixing ValueRelation layer references: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def _override_qml_field_configurations_with_current(self, source_layer: QgsVectorLayer, target_layer: QgsVectorLayer) -> None:
+        """
+        Override field configurations loaded from QML with the current layer's field configurations.
+        This ensures that we get the latest field settings, not the outdated ones stored in QML files.
+        """
+        try:
+            # Copy current field configurations from source layer
+            self._copy_field_configurations(source_layer, target_layer)
+            
+            # Copy field aliases
+            self._copy_field_aliases(source_layer, target_layer)
+            
+            # Copy advanced layer properties
+            self._copy_advanced_layer_properties(source_layer, target_layer)
+            
+        except Exception as e:
+            print(f"Error overriding QML field configurations: {e}")
+            import traceback
+            traceback.print_exc()
     
     def _copy_renderer_fallback(self, source_layer: QgsVectorLayer, target_layer: QgsVectorLayer) -> None:
         """
@@ -837,19 +985,83 @@ class QGISLayerService(ILayerService):
             True if QML style copying was successful, False otherwise
         """
         try:
-            # Method 1: Try to copy the actual QML file content
+            # Method 1: Always use QGIS's built-in style copying (most reliable)
+            # This ensures we get the current style, not just what's in the styleURI
+            print(f"[DEBUG] Using QGIS built-in style copying for {source_layer.name()}")
+            import tempfile
+            
+            # Create temporary file for style export
+            with tempfile.NamedTemporaryFile(suffix='.qml', delete=False) as temp_file:
+                temp_qml_path = temp_file.name
+            
+            try:
+                # Export source layer style to temporary QML file
+                # This always exports the current style, regardless of styleURI
+                export_result = source_layer.saveNamedStyle(temp_qml_path)
+                if export_result[0]:
+                    print(f"[DEBUG] Successfully exported current style to temporary file: {temp_qml_path}")
+                    
+                    # Read the exported QML content
+                    with open(temp_qml_path, 'r', encoding='utf-8') as f:
+                        exported_qml_content = f.read()
+                    print(f"[DEBUG] Exported QML content length: {len(exported_qml_content)} characters")
+                    
+                    # Create target QML file path
+                    target_style_path = os.path.join(os.path.dirname(target_layer.source()), f"{target_layer.name()}.qml")
+                    
+                    # Write the exported QML content to target file
+                    with open(target_style_path, 'w', encoding='utf-8') as f:
+                        f.write(exported_qml_content)
+                    
+                    # Load the style into the target layer
+                    load_result = target_layer.loadNamedStyle(target_style_path)
+                    if load_result[1]:  # Check the success boolean (second element)
+                        print(f"Successfully copied complete style from {source_layer.name()} to {target_layer.name()}")
+                        
+                        # IMPORTANT: After loading QML style, we need to override field configurations
+                        # with the current layer's field configurations to ensure we get the latest settings
+                        self._override_qml_field_configurations_with_current(source_layer, target_layer)
+                        
+                        # Parse QML file to find expression fields and add them as virtual fields
+                        virtual_fields = self._parse_qml_expression_fields(target_style_path)
+                        if virtual_fields:
+                            # Add virtual fields to the layer
+                            provider = target_layer.dataProvider()
+                            for field_name, expression in virtual_fields.items():
+                                # Check if the field already exists as a regular field
+                                existing_field_idx = target_layer.fields().indexOf(field_name)
+                                if existing_field_idx >= 0:
+                                    # Remove the regular field and add it as virtual
+                                    provider.deleteAttributes([existing_field_idx])
+                                    target_layer.updateFields()
+                                
+                                # Add the virtual field
+                                virtual_field = QgsField(field_name, QVariant.String, "string")
+                                virtual_field.setAlias(field_name)
+                                # Set the expression for the virtual field
+                                target_layer.addExpressionField(expression, virtual_field)
+                        
+                        target_layer.triggerRepaint()
+                        return True
+                    else:
+                        print(f"Failed to load exported style into target layer: {load_result[0]}")
+                else:
+                    print(f"Failed to export style from source layer: {export_result[1]}")
+                    
+            finally:
+                # Clean up temporary file
+                try:
+                    os.unlink(temp_qml_path)
+                except:
+                    pass
+            
+            # Method 2: Try to copy the actual QML file content if it exists and is different from current style
             source_style_path = source_layer.styleURI()
             if source_style_path and source_style_path.endswith('.qml') and os.path.exists(source_style_path):
-                # Read the QML content
+                # Only use this if the styleURI file is different from what we just exported
                 try:
                     with open(source_style_path, 'r', encoding='utf-8') as f:
                         qml_content = f.read()
-                    
-                    # Check for virtual fields in QML
-                    if '<expressionfields>' in qml_content:
-                        # Extract virtual field names
-                        import re
-                        virtual_fields = re.findall(r'<field name="([^"]+)"', qml_content)
                     
                     # Create target QML file path
                     target_style_path = os.path.join(os.path.dirname(target_layer.source()), f"{target_layer.name()}.qml")
@@ -888,68 +1100,7 @@ class QGISLayerService(ILayerService):
                         print(f"Failed to load QML style into target layer: {load_result[0]}")
                         
                 except Exception as e:
-                    pass
-            
-            # Method 2: Use QGIS's built-in style copying (more reliable)
-            print(f"[DEBUG] Trying QGIS built-in style copying")
-            import tempfile
-            
-            # Create temporary file for style export
-            with tempfile.NamedTemporaryFile(suffix='.qml', delete=False) as temp_file:
-                temp_qml_path = temp_file.name
-            
-            try:
-                # Export source layer style to temporary QML file
-                export_result = source_layer.saveNamedStyle(temp_qml_path)
-                if export_result[0]:
-                    print(f"[DEBUG] Successfully exported style to temporary file: {temp_qml_path}")
-                    
-                    # Read the exported QML content
-                    with open(temp_qml_path, 'r', encoding='utf-8') as f:
-                        exported_qml_content = f.read()
-                    print(f"[DEBUG] Exported QML content length: {len(exported_qml_content)} characters")
-                    
-                    # Create target QML file path
-                    target_style_path = os.path.join(os.path.dirname(target_layer.source()), f"{target_layer.name()}.qml")
-                    
-                    # Write the exported QML content to target file
-                    with open(target_style_path, 'w', encoding='utf-8') as f:
-                        f.write(exported_qml_content)
-                    # Load the style into the target layer
-                    load_result = target_layer.loadNamedStyle(target_style_path)
-                    if load_result[1]:  # Check the success boolean (second element)
-                        print(f"Successfully copied complete style from {source_layer.name()} to {target_layer.name()}")
-                        
-                        # Parse QML file to find expression fields and add them as virtual fields
-                        virtual_fields = self._parse_qml_expression_fields(target_style_path)
-                        if virtual_fields:
-                            # Add virtual fields to the layer
-                            provider = target_layer.dataProvider()
-                            for field_name, expression in virtual_fields.items():
-                                # Check if the field already exists as a regular field
-                                existing_field_idx = target_layer.fields().indexOf(field_name)
-                                if existing_field_idx >= 0:
-                                    # Remove the regular field and add it as virtual
-                                    provider.deleteAttributes([existing_field_idx])
-                                    target_layer.updateFields()
-                                
-                                # Add the virtual field
-                                virtual_field = QgsField(field_name, QVariant.String, "string")
-                                virtual_field.setAlias(field_name)
-                                # Set the expression for the virtual field
-                                target_layer.addExpressionField(expression, virtual_field)
-                        
-                        target_layer.triggerRepaint()
-                        return True
-                    else:
-                        print(f"Failed to load exported style into target layer: {load_result[0]}")
-                    
-            finally:
-                # Clean up temporary file
-                try:
-                    os.unlink(temp_qml_path)
-                except:
-                    pass
+                    print(f"Error copying QML file content: {str(e)}")
             
             # Method 3: Direct renderer and form copying as fallback
             success = False
@@ -959,23 +1110,26 @@ class QGISLayerService(ILayerService):
                 try:
                     target_layer.setRenderer(source_layer.renderer().clone())
                     success = True
+                    print(f"Copied renderer from {source_layer.name()} to {target_layer.name()}")
                 except Exception as e:
-                    pass
+                    print(f"Error copying renderer: {str(e)}")
             
             # Copy form configuration
             if hasattr(source_layer, 'editFormConfig'):
                 try:
                     target_layer.setEditFormConfig(source_layer.editFormConfig())
                     success = True
+                    print(f"Copied form configuration from {source_layer.name()} to {target_layer.name()}")
                 except Exception as e:
-                    pass
+                    print(f"Error copying form configuration: {str(e)}")
             
             # Copy field configurations
             try:
                 self._copy_field_configurations(source_layer, target_layer)
                 success = True
+                print(f"Copied field configurations from {source_layer.name()} to {target_layer.name()}")
             except Exception as e:
-                pass
+                print(f"Error copying field configurations: {str(e)}")
             
             if success:
                 target_layer.triggerRepaint()

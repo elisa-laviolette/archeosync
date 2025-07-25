@@ -246,8 +246,12 @@ class QGISProjectCreationService(QObject):
             # Create bookmark for recording area
             self._create_recording_area_bookmark(project, feature_data, feature_data['display_name'])
 
+            # Fix ValueRelation layer references for all layers
+            for layer in project.mapLayers().values():
+                if isinstance(layer, QgsVectorLayer):
+                    self._layer_service._fix_valuerelation_layer_references(layer, project)
+
             # Ensure all layers are properly refreshed before saving
-            print("[DEBUG] Refreshing all layers before saving project")
             for layer in project.mapLayers().values():
                 if hasattr(layer, 'triggerRepaint'):
                     layer.triggerRepaint()
@@ -256,7 +260,6 @@ class QGISProjectCreationService(QObject):
 
             # Save the project
             project_path = os.path.join(project_dir, f"{project_name}.qgs")
-            print(f"[DEBUG] Saving project to: {project_path}")
             success = project.write(project_path)
             if not success:
                 raise RuntimeError(f"Failed to save project: {project_path}")
@@ -281,7 +284,7 @@ class QGISProjectCreationService(QObject):
             # Apply filter
             source_layer.setSubsetString(filter_expression)
 
-            # Debug output - count features manually to get accurate count
+            # Count features for debug output
             filtered_count = 0
             for feature in source_layer.getFeatures():
                 filtered_count += 1
@@ -312,13 +315,10 @@ class QGISProjectCreationService(QObject):
                                 project: QgsProject) -> bool:
         """Create an empty copy of a layer with the same structure."""
         try:
-            print(f"[DEBUG] _create_empty_layer_copy called for layer: {layer_name}")
             source_layer = self._layer_service.get_layer_by_id(source_layer_id)
             if not source_layer:
                 print(f"[DEBUG] Could not get source layer for ID: {source_layer_id}")
                 return False
-
-            print(f"[DEBUG] Source layer has {source_layer.fields().count()} fields")
             # Create empty layer with same structure
             success = self._copy_layer_structure_to_geopackage(source_layer, output_path, layer_name)
             
@@ -407,8 +407,10 @@ class QGISProjectCreationService(QObject):
     def _copy_layer_structure_to_geopackage(self, source_layer, output_path, layer_name):
         """Copy only the structure of a layer to a Geopackage file (no features) with preserved forms and styles."""
         try:
-            print(f"[DEBUG] _copy_layer_structure_to_geopackage called for layer: {layer_name}")
+            print(f"[DEBUG] Creating structure for layer: {layer_name}")
+            
             from qgis.core import QgsVectorFileWriter, QgsWkbTypes
+            
             # Determine geometry type from source layer
             geom_type = source_layer.geometryType()
             if geom_type == QgsWkbTypes.PolygonGeometry:
@@ -418,15 +420,65 @@ class QGISProjectCreationService(QObject):
             else:
                 geom_string = "Point"
             
+            print(f"[DEBUG] Geometry type: {geom_type} -> {geom_string}")
+            
             # Handle custom CRS properly
             crs_string = self._get_crs_string(source_layer.crs())
+            print(f"[DEBUG] CRS string: {crs_string}")
+            
             temp_layer = QgsVectorLayer(f"{geom_string}?crs={crs_string}", "temp", "memory")
             
-            # Copy all fields (including virtual fields)
+            if not temp_layer.isValid():
+                print(f"Error: Could not create temporary layer for {layer_name}")
+                return False
+            
+            print(f"[DEBUG] Successfully created temporary memory layer")
+            
+            # Copy all fields (including virtual fields) with proper field configurations
             temp_layer.startEditing()
-            for field in source_layer.fields():
-                temp_layer.addAttribute(field)
+            source_fields = source_layer.fields()
+            
+            # Create a mapping of field names to their configurations
+            field_configs = {}
+            for i in range(source_fields.count()):
+                field_name = source_fields[i].name()
+                field_configs[field_name] = {
+                    'field': source_fields[i],
+                    'editor_widget': source_layer.editorWidgetSetup(i),
+                    'default_value': source_layer.defaultValueDefinition(i),
+                    'constraints': source_layer.constraints(i) if hasattr(source_layer, 'constraints') else None
+                }
+            
+            # Add fields to temp layer
+            for field_name, config in field_configs.items():
+                temp_layer.addAttribute(config['field'])
+            
             temp_layer.commitChanges()
+            
+            # Now apply field configurations after the layer is committed
+            temp_layer.startEditing()
+            for field_name, config in field_configs.items():
+                field_idx = temp_layer.fields().indexOf(field_name)
+                if field_idx >= 0:
+                    # Set editor widget configuration
+                    if config['editor_widget'] and hasattr(config['editor_widget'], 'type'):
+                        temp_layer.setEditorWidgetSetup(field_idx, config['editor_widget'])
+                    
+                    # Set default value definition
+                    if config['default_value'] and config['default_value'].isValid():
+                        temp_layer.setDefaultValueDefinition(field_idx, config['default_value'])
+                    
+                    # Set field constraints if available
+                    if config['constraints'] and hasattr(temp_layer, 'setConstraints'):
+                        temp_layer.setConstraints(field_idx, config['constraints'])
+            
+            temp_layer.commitChanges()
+
+            # Ensure the output directory exists
+            import os
+            output_dir = os.path.dirname(output_path)
+            if output_dir and not os.path.exists(output_dir):
+                os.makedirs(output_dir)
 
             options = QgsVectorFileWriter.SaveVectorOptions()
             options.driverName = "GPKG"
@@ -440,11 +492,32 @@ class QGISProjectCreationService(QObject):
                         print(f"Error writing layer structure to Geopackage: {error[1]}")
                         return False
                     
+                    print(f"[DEBUG] Successfully created Geopackage structure for {layer_name}")
+                    
+                    # Verify the Geopackage was created and the layer exists
+                    if not os.path.exists(output_path):
+                        print(f"Error: Geopackage file was not created: {output_path}")
+                        return False
+                    
+                    # Try to load the layer from the Geopackage to verify it was created correctly
+                    test_layer = QgsVectorLayer(f"{output_path}|layername={layer_name}", "test", "ogr")
+                    if not test_layer.isValid():
+                        # Try alternative loading method
+                        test_layer = QgsVectorLayer(output_path, "test", "ogr")
+                        if not test_layer.isValid():
+                            print(f"Error: Could not load layer from created Geopackage: {output_path}")
+                            return False
+                    
                     # After successful structure copy, copy forms, styles, and field configurations
-                    self._copy_layer_properties_to_geopackage(source_layer, output_path, layer_name)
+                    properties_success = self._copy_layer_properties_to_geopackage(source_layer, output_path, layer_name)
+                    if not properties_success:
+                        print(f"Warning: Failed to copy properties to Geopackage for {layer_name}, but structure was created")
+                        return True  # Return True because the structure was created successfully
+                    
                     return True
-                except TypeError:
+                except TypeError as e:
                     # Fallback to classic API
+                    print(f"[DEBUG] V2 API failed, falling back to classic API for {layer_name}: {str(e)}")
                     pass
 
             # Classic API (older QGIS)
@@ -457,8 +530,31 @@ class QGISProjectCreationService(QObject):
                 print(f"Error writing layer structure to Geopackage (classic): {error}")
                 return False
             
+            print(f"[DEBUG] Successfully created Geopackage structure for {layer_name} (classic API)")
+            
+            # Verify the Geopackage was created and the layer exists
+            if not os.path.exists(output_path):
+                print(f"Error: Geopackage file was not created: {output_path}")
+                return False
+            
+            # Try to load the layer from the Geopackage to verify it was created correctly
+            test_layer = QgsVectorLayer(f"{output_path}|layername={layer_name}", "test", "ogr")
+            if not test_layer.isValid():
+                # Try alternative loading method
+                test_layer = QgsVectorLayer(output_path, "test", "ogr")
+                if not test_layer.isValid():
+                    print(f"Error: Could not load layer from created Geopackage: {output_path}")
+                    return False
+            
             # After successful structure copy, copy forms, styles, and field configurations
-            self._copy_layer_properties_to_geopackage(source_layer, output_path, layer_name)
+            print(f"[DEBUG] About to copy properties to Geopackage for {layer_name}")
+            properties_success = self._copy_layer_properties_to_geopackage(source_layer, output_path, layer_name)
+            if not properties_success:
+                print(f"Warning: Failed to copy properties to Geopackage for {layer_name}, but structure was created")
+                return True  # Return True because the structure was created successfully
+            
+            # Verification step removed for cleaner output
+            
             return True
         except Exception as e:
             print(f"[DEBUG] Exception in _copy_layer_structure_to_geopackage: {str(e)}")
@@ -497,70 +593,83 @@ class QGISProjectCreationService(QObject):
             # Load the target layer from the Geopackage
             target_layer = QgsVectorLayer(output_path, layer_name, "ogr")
             if not target_layer.isValid():
-                print(f"Warning: Could not load target layer for property copying: {output_path}")
-                return False
-            
-            print(f"[DEBUG] Copying properties from {source_layer.name()} to {target_layer.name()}")
-            print(f"[DEBUG] Source layer style URI: {source_layer.styleURI()}")
-            print(f"[DEBUG] Target layer style URI: {target_layer.styleURI()}")
+                # Try alternative loading method
+                try:
+                    # Try loading with the full path including layer name
+                    target_layer = QgsVectorLayer(f"{output_path}|layername={layer_name}", layer_name, "ogr")
+                    if not target_layer.isValid():
+                        print(f"[DEBUG] Warning: Could not load target layer for property copying: {output_path}")
+                        return False
+                except Exception as e:
+                    print(f"[DEBUG] Warning: Could not load target layer for property copying: {str(e)}")
+                    return False
             
             # Copy layer properties using the layer service methods
             self._layer_service._copy_layer_properties(source_layer, target_layer)
             
-            # Try to copy QML style
+            # Try to copy QML style with improved method
             qml_success = self._layer_service._copy_qml_style(source_layer, target_layer)
             
             # If QML style copying failed, use renderer fallback
             if not qml_success:
-                print(f"QML style copying failed for {layer_name}, using renderer clone as fallback")
+                print(f"[DEBUG] QML style copying failed for {layer_name}, using renderer clone as fallback")
                 self._layer_service._copy_renderer_fallback(source_layer, target_layer)
             
             # Force the layer to save its style to the Geopackage
-            try:
-                # Try to save the style directly to the Geopackage
-                # Use a more robust approach for Geopackage style saving
-                style_result = target_layer.saveStyleToDatabase(layer_name, "", True, "")
-                if style_result[0]:
-                    print(f"[DEBUG] Successfully saved style to Geopackage database for {layer_name}")
-                else:
-                    print(f"[DEBUG] Failed to save style to Geopackage database for {layer_name}: {style_result[1]}")
-                    # Try alternative approach
-                    try:
-                        # Save as QML and then load it back
-                        temp_qml = target_layer.saveNamedStyle("")
-                        if temp_qml[0]:
-                            target_layer.loadNamedStyle(temp_qml[1])
-                            print(f"[DEBUG] Used alternative style saving method for {layer_name}")
-                    except Exception as alt_e:
-                        print(f"[DEBUG] Alternative style saving also failed: {str(alt_e)}")
-            except Exception as e:
-                print(f"[DEBUG] Error saving style to Geopackage database: {str(e)}")
-                # Try alternative approach
-                try:
-                    # Save as QML and then load it back
-                    temp_qml = target_layer.saveNamedStyle("")
-                    if temp_qml[0]:
-                        target_layer.loadNamedStyle(temp_qml[1])
-                        print(f"[DEBUG] Used alternative style saving method for {layer_name}")
-                except Exception as alt_e:
-                    print(f"[DEBUG] Alternative style saving also failed: {str(alt_e)}")
+            # Use QML save/load method (most reliable)
+            style_saved = False
             
-            # Also try to save the style as a QML file in the same directory as the Geopackage
+            # Method 1: Save as QML and load back (most reliable)
             try:
-                import os
-                qml_path = os.path.splitext(output_path)[0] + ".qml"
-                if target_layer.saveNamedStyle(qml_path)[0]:
-                    print(f"[DEBUG] Saved QML style file: {qml_path}")
+                # Save as QML and then load it back
+                temp_qml = target_layer.saveNamedStyle("")
+                if isinstance(temp_qml, tuple) and len(temp_qml) == 2 and temp_qml[0] and isinstance(temp_qml[1], str):
+                    load_result = target_layer.loadNamedStyle(temp_qml[1])
+                    if isinstance(load_result, tuple) and load_result[0]:
+                        print(f"[DEBUG] Used QML save/load method for {layer_name}")
+                        style_saved = True
+                    else:
+                        print(f"[DEBUG] QML load failed: {load_result[1] if isinstance(load_result, tuple) and len(load_result) > 1 else load_result}")
                 else:
-                    print(f"[DEBUG] Failed to save QML style file: {qml_path}")
+                    print(f"[DEBUG] QML save failed: {temp_qml[1] if isinstance(temp_qml, tuple) and len(temp_qml) > 1 else temp_qml}")
             except Exception as e:
-                print(f"[DEBUG] Error saving QML style file: {str(e)}")
+                print(f"[DEBUG] QML save/load method failed: {str(e)}")
+            
+            # Method 2: Save QML file in the same directory as the Geopackage
+            # This is the most reliable method and ensures the style is preserved
+            if not style_saved:
+                try:
+                    import os
+                    qml_path = os.path.splitext(output_path)[0] + ".qml"
+                    save_result = target_layer.saveNamedStyle(qml_path)
+                    if isinstance(save_result, tuple) and save_result[0]:
+                        print(f"[DEBUG] Saved QML style file: {qml_path}")
+                        # Try to load the QML style back to ensure it's properly associated
+                        load_result = target_layer.loadNamedStyle(qml_path)
+                        if isinstance(load_result, tuple) and load_result[0]:
+                            print(f"[DEBUG] Successfully loaded QML style from {qml_path}")
+                            style_saved = True
+                        else:
+                            print(f"[DEBUG] Failed to load QML style from {qml_path}: {load_result[1] if isinstance(load_result, tuple) and len(load_result) > 1 else load_result}")
+                    else:
+                        print(f"[DEBUG] Failed to save QML style file: {qml_path}: {save_result[1] if isinstance(save_result, tuple) and len(save_result) > 1 else save_result}")
+                except Exception as e:
+                    print(f"[DEBUG] Error saving QML style file: {str(e)}")
+            
+            if not style_saved:
+                print(f"[DEBUG] Warning: Could not save style to Geopackage for {layer_name}, but layer structure and properties were copied successfully")
+            
+            # Force the layer to update and save changes
+            target_layer.triggerRepaint()
+            target_layer.updateExtents()
             
             print(f"Successfully copied forms, styles, and field configurations to {layer_name}")
             return True
             
         except Exception as e:
             print(f"Error copying layer properties to Geopackage: {str(e)}")
+            import traceback
+            traceback.print_exc()
             return False
 
     def _has_relationship_with_recording_areas(self, layer_id: str, recording_areas_layer_id: str) -> bool:
