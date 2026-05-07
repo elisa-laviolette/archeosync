@@ -349,6 +349,9 @@ class SettingsDialog(QtWidgets.QDialog):
         # Recording areas layer
         self._recording_areas_widget = self._create_layer_selector(self.tr("-- Select a polygon layer --"))
         form_layout.addRow(self.tr("Recording Areas Layer:"), self._recording_areas_widget)
+        self._recording_area_variable_source_combo = QtWidgets.QComboBox()
+        self._recording_area_variable_source_combo.setMinimumWidth(300)
+        form_layout.addRow(self.tr("Recording Area Variable Source:"), self._recording_area_variable_source_combo)
         
         # Objects layer
         self._objects_widget = self._create_layer_selector(self.tr("-- Select a polygon or multipolygon layer --"))
@@ -761,6 +764,7 @@ class SettingsDialog(QtWidgets.QDialog):
         )
         # Layer selector connections
         self._recording_areas_widget.refresh_button.clicked.connect(self._refresh_layer_list)
+        self._recording_areas_widget.combo_box.currentIndexChanged.connect(self._on_recording_areas_layer_changed)
         self._objects_widget.refresh_button.clicked.connect(self._refresh_objects_layer_list)
         self._objects_widget.combo_box.currentIndexChanged.connect(self._on_objects_layer_changed)
         self._features_widget.refresh_button.clicked.connect(self._refresh_features_layer_list)
@@ -803,9 +807,45 @@ class SettingsDialog(QtWidgets.QDialog):
                 index = combo_box.findData(current_layer_id)
                 if index >= 0:
                     combo_box.setCurrentIndex(index)
+
+            self._refresh_recording_area_variable_source_options()
             
         except Exception as e:
             self._show_error(self.tr("Layer Error"), self.tr(f"Failed to refresh layer list: {str(e)}"))
+
+    def _on_recording_areas_layer_changed(self) -> None:
+        """Update recording-area variable source options when recording layer changes."""
+        self._refresh_recording_area_variable_source_options()
+
+    def _refresh_recording_area_variable_source_options(self) -> None:
+        """
+        Refresh available sources for the project `recording_area` variable.
+
+        Users can choose:
+        - the display value (default),
+        - the feature id,
+        - or one of the recording-area layer fields.
+        """
+        current_value = self._recording_area_variable_source_combo.currentData()
+        self._recording_area_variable_source_combo.clear()
+        self._recording_area_variable_source_combo.addItem(self.tr("Display value"), "display")
+        self._recording_area_variable_source_combo.addItem(self.tr("Feature ID"), "id")
+
+        recording_areas_layer_id = self._recording_areas_widget.combo_box.currentData()
+        if recording_areas_layer_id:
+            fields = self._layer_service.get_layer_fields(recording_areas_layer_id)
+            if not isinstance(fields, list):
+                fields = []
+            for field in fields:
+                field_name = field.get("name")
+                if not field_name:
+                    continue
+                label = self.tr(f"Field: {field_name}")
+                self._recording_area_variable_source_combo.addItem(label, f"field:{field_name}")
+
+        selected_value = current_value if current_value else "display"
+        index = self._recording_area_variable_source_combo.findData(selected_value)
+        self._recording_area_variable_source_combo.setCurrentIndex(index if index >= 0 else 0)
     
     def _refresh_objects_layer_list(self) -> None:
         """Refresh the list of available polygon and multipolygon layers for objects."""
@@ -1057,6 +1097,17 @@ class SettingsDialog(QtWidgets.QDialog):
                 index = self._recording_areas_widget.combo_box.findData(recording_areas_layer_id)
                 if index >= 0:
                     self._recording_areas_widget.combo_box.setCurrentIndex(index)
+
+            recording_area_variable_source = self._settings_manager.get_value(
+                'recording_area_variable_source',
+                'display'
+            )
+            self._refresh_recording_area_variable_source_options()
+            variable_source_index = self._recording_area_variable_source_combo.findData(
+                recording_area_variable_source
+            )
+            if variable_source_index >= 0:
+                self._recording_area_variable_source_combo.setCurrentIndex(variable_source_index)
             
             # Load objects layer
             objects_layer_id = self._settings_manager.get_value('objects_layer', '')
@@ -1150,6 +1201,7 @@ class SettingsDialog(QtWidgets.QDialog):
                 'csv_archive_folder': csv_archive_path,
                 'field_project_archive_folder': field_project_archive_path,
                 'recording_areas_layer': recording_areas_layer_id,
+                'recording_area_variable_source': recording_area_variable_source,
                 'objects_layer': objects_layer_id,
                 'objects_number_field': self._settings_manager.get_value('objects_number_field', ''),
                 'objects_level_field': self._settings_manager.get_value('objects_level_field', ''),
@@ -1190,6 +1242,7 @@ class SettingsDialog(QtWidgets.QDialog):
                 'csv_archive_folder': self._csv_archive_widget.input_field.text(),
                 'field_project_archive_folder': self._field_project_archive_widget.input_field.text(),
                 'recording_areas_layer': self._recording_areas_widget.combo_box.currentData(),
+                'recording_area_variable_source': self._recording_area_variable_source_combo.currentData(),
                 'objects_layer': self._objects_widget.combo_box.currentData(),
                 'objects_number_field': self._number_field_combo.currentData(),
                 'objects_level_field': self._level_field_combo.currentData(),
@@ -1278,6 +1331,11 @@ class SettingsDialog(QtWidgets.QDialog):
                     self._recording_areas_widget.combo_box.setCurrentIndex(0)
             else:
                 self._recording_areas_widget.combo_box.setCurrentIndex(0)
+
+            recording_area_variable_source = self._original_values.get('recording_area_variable_source', 'display')
+            self._refresh_recording_area_variable_source_options()
+            variable_source_index = self._recording_area_variable_source_combo.findData(recording_area_variable_source)
+            self._recording_area_variable_source_combo.setCurrentIndex(variable_source_index if variable_source_index >= 0 else 0)
             
             # Revert objects layer selection
             objects_layer_id = self._original_values.get('objects_layer', '')

@@ -97,6 +97,8 @@ A QGIS plugin for archaeologists to prepare data for field work and import it ba
 
 **Project Naming**: When a level is defined, field project names will be the display name of the recording area followed by '_' and the content of the Next level column. For example: "Test Area_A" or "Excavation Site_Level 1". If no level is defined, only the recording area name is used.
 
+**Project Variable (`recording_area`)**: In **Settings > Layers & Fields**, the new **Recording Area Variable Source** option lets you choose what is written to the `recording_area` project variable: the display value, the feature ID, or a specific field from the recording areas layer.
+
 **Background Image Processing**: When a background image is selected, the system will automatically clip the raster to the recording area boundary with a configurable offset (default: 20 cm). This ensures the background image extends slightly beyond the recording area for better context in the field. The original raster remains unchanged, and the clipped version is used only for the field project. Background images are positioned at the bottom of the layer tree for optimal visualization.
 
 **Raster Enhancement**: Clipped raster layers can be enhanced with brightness, contrast, and saturation adjustments. These settings are applied during field project creation and saved in QML style files to ensure consistent appearance across different QGIS installations. Enhancement settings are particularly useful for improving visibility of archaeological features in challenging lighting conditions or for highlighting specific elements in the background imagery.

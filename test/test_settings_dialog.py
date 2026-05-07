@@ -275,6 +275,7 @@ class TestSettingsDialog:
             'csv_archive_folder': '',
             'field_project_archive_folder': '',
             'recording_areas_layer': '',
+            'recording_area_variable_source': 'display',
             'objects_layer': '',
             'objects_number_field': '',
             'objects_level_field': '',
@@ -458,6 +459,33 @@ class TestSettingsDialog:
         # Check that layer1 is still selected
         combo_box = self.dialog._recording_areas_widget.combo_box
         assert combo_box.currentData() == "layer1"
+
+    def test_recording_area_variable_source_options_include_layer_fields(self):
+        """Recording area variable source should offer display, id, and layer fields."""
+        self.mock_layer_service.get_polygon_layers.return_value = [
+            {
+                'id': 'recording_layer',
+                'name': 'Recording Areas',
+                'source': '/path/to/recording.shp',
+                'crs': 'EPSG:4326',
+                'feature_count': 3
+            }
+        ]
+        self.mock_layer_service.get_layer_fields.return_value = [
+            {'name': 'id', 'type': 'Integer', 'is_integer': True},
+            {'name': 'display_code', 'type': 'String', 'is_integer': False},
+        ]
+
+        self.dialog._refresh_layer_list()
+        self.dialog._recording_areas_widget.combo_box.setCurrentIndex(1)
+        self.dialog._refresh_recording_area_variable_source_options()
+
+        variable_source_combo = self.dialog._recording_area_variable_source_combo
+        all_values = [variable_source_combo.itemData(i) for i in range(variable_source_combo.count())]
+        assert "display" in all_values
+        assert "id" in all_values
+        assert "field:id" in all_values
+        assert "field:display_code" in all_values
 
 
 @pytest.mark.qgis

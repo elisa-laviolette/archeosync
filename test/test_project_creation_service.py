@@ -548,4 +548,83 @@ class TestProjectCreationService:
             mock_bookmark.setExtent.assert_called_once_with(mock_bounding_box)
             mock_bookmark_manager.addBookmark.assert_called_once_with(mock_bookmark)
 
+    def test_copy_layer_to_geopackage_retries_without_unsupported_field(self, tmp_path):
+        """
+        When the writer reports an unsupported attribute type (e.g. geometry-valued attribute),
+        the service should retry after dropping the offending field.
+        """
+        from qgis.PyQt.QtCore import QVariant
+        from qgis.core import QgsVectorLayer, QgsField, QgsFeature
+
+        # Source layer with an offending field name (type doesn't matter here; writer is mocked)
+        src = QgsVectorLayer("Point?crs=EPSG:4326", "src", "memory")
+        assert src.isValid()
+        src.startEditing()
+        src.addAttribute(QgsField("id", QVariant.Int))
+        src.addAttribute(QgsField("section_geometry", QVariant.String))
+        src.updateFields()
+        f = QgsFeature(src.fields())
+        f.setAttributes([1, "dummy"])
+        src.addFeature(f)
+        src.commitChanges()
+
+        output_path = str(tmp_path / "out.gpkg")
+
+        captured_field_names = []
+
+        def write_side_effect(layer, path, options):
+            # Capture fields of the layer passed to writer
+            captured_field_names.append([fld.name() for fld in layer.fields()])
+            # First call fails with unsupported field, second succeeds
+            if len(captured_field_names) == 1:
+                return (4, "Unsupported type for field section_geometry")
+            return (0, "")
+
+        with patch("qgis.core.QgsVectorFileWriter.writeAsVectorFormatV2", side_effect=write_side_effect):
+            ok = self.project_service._copy_layer_to_geopackage(src, output_path, "Layer")
+
+        assert ok is True
+        assert len(captured_field_names) == 2
+        assert "section_geometry" in captured_field_names[0]
+        assert "section_geometry" not in captured_field_names[1]
+
+    def test_copy_project_relations_to_field_project_remaps_layer_ids(self):
+        """Relations must be recreated in the field project with remapped layer IDs."""
+        source_project = Mock()
+        target_project = Mock()
+
+        # Source relation manager with one relation between two source layer ids
+        source_relation_manager = Mock()
+        rel = Mock()
+        rel.referencingLayerId.return_value = "src_child"
+        rel.referencedLayerId.return_value = "src_parent"
+        rel.fieldPairs.return_value = {"parent_id": "id"}
+        rel.id.return_value = "rel_1"
+        rel.name.return_value = "Parent/Child"
+        source_relation_manager.relations.return_value = {"rel_1": rel}
+        source_project.relationManager.return_value = source_relation_manager
+
+        # Target relation manager should receive a newly created QgsRelation
+        target_relation_manager = Mock()
+        target_relation_manager.addRelation.return_value = True
+        target_project.relationManager.return_value = target_relation_manager
+
+        mapping = {"src_child": "tgt_child", "src_parent": "tgt_parent"}
+
+        new_relation_instance = Mock()
+        new_relation_instance.isValid.return_value = True
+
+        with patch("qgis.core.QgsRelation", return_value=new_relation_instance):
+            self.project_service._copy_project_relations_to_field_project(
+                source_project=source_project,
+                target_project=target_project,
+                source_to_target_layer_ids=mapping,
+            )
+
+        new_relation_instance.setName.assert_called_once_with("Parent/Child")
+        new_relation_instance.setReferencingLayer.assert_called_once_with("tgt_child")
+        new_relation_instance.setReferencedLayer.assert_called_once_with("tgt_parent")
+        new_relation_instance.addFieldPair.assert_called_once_with("parent_id", "id")
+        target_relation_manager.addRelation.assert_called_once_with(new_relation_instance)
+
  

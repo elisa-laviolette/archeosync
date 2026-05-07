@@ -341,6 +341,10 @@ class ArcheoSyncPlugin(QObject):
             # Extract feature data early to avoid issues with QGIS object deletion
             feature_data = []
             layer_display_expression = recording_layer.displayExpression()
+            recording_area_variable_source = self._settings_manager.get_value(
+                'recording_area_variable_source',
+                'display'
+            )
             
             for feature in selected_features:
                 # Extract geometry as WKT
@@ -387,7 +391,13 @@ class ArcheoSyncPlugin(QObject):
                     'id': feature_id,
                     'geometry_wkt': geometry_wkt,
                     'attributes': attributes,
-                    'display_name': display_name
+                    'display_name': display_name,
+                    'recording_area_variable_value': self._resolve_recording_area_variable_value(
+                        source=recording_area_variable_source,
+                        feature=feature,
+                        feature_id=feature_id,
+                        display_name=display_name
+                    )
                 })
             
             # Get next values for all features
@@ -471,6 +481,30 @@ class ArcheoSyncPlugin(QObject):
                 self.tr("Error"),
                 self.tr(f"An error occurred during field project preparation:\n{str(e)}")
             )
+
+    def _resolve_recording_area_variable_value(self, source: str, feature, feature_id: Optional[int], display_name: str) -> str:
+        """
+        Resolve the value stored in the project `recording_area` variable.
+
+        Source values:
+            - "display": evaluated display expression value
+            - "id": feature identifier
+            - "field:<name>": value from the specified attribute field
+        """
+        if source == "id":
+            return str(feature_id) if feature_id is not None else display_name
+
+        if isinstance(source, str) and source.startswith("field:"):
+            field_name = source.split(":", 1)[1].strip()
+            if field_name:
+                try:
+                    value = feature.attribute(field_name)
+                    if value is not None and str(value) != "NULL" and str(value).strip():
+                        return str(value).strip()
+                except Exception as exc:
+                    print(f"Could not resolve recording_area variable from field '{field_name}': {exc}")
+
+        return display_name
     
     def run_import_data(self) -> None:
         """Run the import data dialog."""
