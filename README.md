@@ -204,6 +204,15 @@ make test
 
 The project includes comprehensive test coverage with robust validation and quality assurance.
 
+### Translation Files
+
+- Compile translations with `make transcompile` (or `make translations` to update then compile).
+- The plugin loads `.qm` files from `i18n/` and supports these naming conventions:
+  - `ArcheoSyncPlugin_<locale>.qm` (preferred)
+  - `ArcheoSyncPlugin_<language>.qm`
+  - `<locale>.qm`
+  - `<language>.qm`
+
 ### Project Structure
 
 - `archeosync/`: Main plugin package
