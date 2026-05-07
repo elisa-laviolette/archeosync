@@ -149,6 +149,56 @@ def _horizontal_orientation():
     raise AttributeError("Qt horizontal orientation flag is not available.")
 
 
+def _user_role_item_data_role():
+    """Return Qt item-data UserRole compatible with Qt5 and Qt6."""
+    if hasattr(Qt, "UserRole"):
+        return Qt.UserRole
+    item_data_role = getattr(Qt, "ItemDataRole", None)
+    if item_data_role is not None and hasattr(item_data_role, "UserRole"):
+        return item_data_role.UserRole
+    raise AttributeError("Qt UserRole item-data role is not available.")
+
+
+def _item_is_user_checkable_flag():
+    """Return the item-flag for user-checkable items (Qt5/Qt6 compatible)."""
+    if hasattr(Qt, "ItemIsUserCheckable"):
+        return Qt.ItemIsUserCheckable
+    item_flag = getattr(Qt, "ItemFlag", None)
+    if item_flag is not None and hasattr(item_flag, "ItemIsUserCheckable"):
+        return item_flag.ItemIsUserCheckable
+    raise AttributeError("Qt ItemIsUserCheckable flag is not available.")
+
+
+def _item_is_enabled_flag():
+    """Return the item-flag for enabled items (Qt5/Qt6 compatible)."""
+    if hasattr(Qt, "ItemIsEnabled"):
+        return Qt.ItemIsEnabled
+    item_flag = getattr(Qt, "ItemFlag", None)
+    if item_flag is not None and hasattr(item_flag, "ItemIsEnabled"):
+        return item_flag.ItemIsEnabled
+    raise AttributeError("Qt ItemIsEnabled flag is not available.")
+
+
+def _checked_check_state():
+    """Return the check-state value for checked items (Qt5/Qt6 compatible)."""
+    if hasattr(Qt, "Checked"):
+        return Qt.Checked
+    check_state = getattr(Qt, "CheckState", None)
+    if check_state is not None and hasattr(check_state, "Checked"):
+        return check_state.Checked
+    raise AttributeError("Qt Checked check-state is not available.")
+
+
+def _unchecked_check_state():
+    """Return the check-state value for unchecked items (Qt5/Qt6 compatible)."""
+    if hasattr(Qt, "Unchecked"):
+        return Qt.Unchecked
+    check_state = getattr(Qt, "CheckState", None)
+    if check_state is not None and hasattr(check_state, "Unchecked"):
+        return check_state.Unchecked
+    raise AttributeError("Qt Unchecked check-state is not available.")
+
+
 class SettingsDialog(QtWidgets.QDialog):
     """
     Settings dialog for ArcheoSync plugin.
@@ -878,12 +928,17 @@ class SettingsDialog(QtWidgets.QDialog):
     def _refresh_extra_layers_list(self) -> None:
         """Refresh the list of available vector layers for extra QField layers."""
         try:
+            user_role = _user_role_item_data_role()
+            item_is_user_checkable = _item_is_user_checkable_flag()
+            item_is_enabled = _item_is_enabled_flag()
+            checked_state = _checked_check_state()
+            unchecked_state = _unchecked_check_state()
             # Get current checked state by layer id
             checked_layer_ids = set()
             for i in range(self._extra_layers_list.count()):
                 item = self._extra_layers_list.item(i)
-                if item.checkState() == Qt.Checked:
-                    checked_layer_ids.add(item.data(Qt.UserRole))
+                if item.checkState() == checked_state:
+                    checked_layer_ids.add(item.data(user_role))
             
             # Get the current recording areas layer id
             recording_areas_layer_id = self._recording_areas_widget.combo_box.currentData()
@@ -898,27 +953,29 @@ class SettingsDialog(QtWidgets.QDialog):
                 item = QtWidgets.QListWidgetItem()
                 display_text = self.tr(f"{layer_info['name']} ({layer_info['feature_count']} features)")
                 item.setText(display_text)
-                item.setData(Qt.UserRole, layer_info['id'])
-                item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+                item.setData(user_role, layer_info['id'])
+                item.setFlags(item.flags() | item_is_user_checkable)
                 # Recording areas layer: always checked and disabled
                 if layer_info['id'] == recording_areas_layer_id:
-                    item.setCheckState(Qt.Checked)
-                    item.setFlags(item.flags() & ~Qt.ItemIsEnabled)
+                    item.setCheckState(checked_state)
+                    item.setFlags(item.flags() & ~item_is_enabled)
                 else:
                     # Restore checked state if previously checked
-                    item.setCheckState(Qt.Checked if layer_info['id'] in checked_layer_ids else Qt.Unchecked)
+                    item.setCheckState(checked_state if layer_info['id'] in checked_layer_ids else unchecked_state)
                 self._extra_layers_list.addItem(item)
         except Exception as e:
             self._show_error(self.tr("Layer Error"), self.tr(f"Failed to refresh extra layers list: {str(e)}"))
     
     def _get_selected_extra_layers(self) -> List[str]:
         """Get the list of checked extra layer IDs (excluding the recording areas layer)."""
+        user_role = _user_role_item_data_role()
+        checked_state = _checked_check_state()
         selected_layers = []
         recording_areas_layer_id = self._recording_areas_widget.combo_box.currentData()
         for i in range(self._extra_layers_list.count()):
             item = self._extra_layers_list.item(i)
-            if item.checkState() == Qt.Checked and item.data(Qt.UserRole) != recording_areas_layer_id:
-                selected_layers.append(item.data(Qt.UserRole))
+            if item.checkState() == checked_state and item.data(user_role) != recording_areas_layer_id:
+                selected_layers.append(item.data(user_role))
         return selected_layers
     
     def _on_objects_layer_changed(self) -> None:
@@ -1066,11 +1123,11 @@ class SettingsDialog(QtWidgets.QDialog):
             # Set checked state for extra layers (recording areas handled in refresh)
             for i in range(self._extra_layers_list.count()):
                 item = self._extra_layers_list.item(i)
-                layer_id = item.data(Qt.UserRole)
+                layer_id = item.data(_user_role_item_data_role())
                 if layer_id in extra_layers:
-                    item.setCheckState(Qt.Checked)
-                elif item.flags() & Qt.ItemIsEnabled:
-                    item.setCheckState(Qt.Unchecked)
+                    item.setCheckState(_checked_check_state())
+                elif item.flags() & _item_is_enabled_flag():
+                    item.setCheckState(_unchecked_check_state())
             
             # Load warning settings
             self._enable_distance_warnings.setChecked(_to_bool(self._settings_manager.get_value('enable_distance_warnings', True)))

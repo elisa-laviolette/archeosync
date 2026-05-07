@@ -118,6 +118,91 @@ class TestSettingsDialogBasic:
         with patch.object(settings_dialog_module, "Qt", fake_qt):
             assert settings_dialog_module._horizontal_orientation() == "qt6-horizontal"
 
+    def test_user_role_item_data_role_supports_qt5_style(self):
+        """The UserRole helper should support Qt5's direct UserRole."""
+        import ui.settings_dialog as settings_dialog_module
+
+        fake_qt = type("FakeQt", (), {"UserRole": 32})
+        with patch.object(settings_dialog_module, "Qt", fake_qt):
+            assert settings_dialog_module._user_role_item_data_role() == 32
+
+    def test_user_role_item_data_role_supports_qt6_style(self):
+        """The UserRole helper should support Qt6's ItemDataRole.UserRole."""
+        import ui.settings_dialog as settings_dialog_module
+
+        fake_item_data_role = type("ItemDataRole", (), {"UserRole": 256})
+        fake_qt = type("FakeQt", (), {"ItemDataRole": fake_item_data_role})
+        with patch.object(settings_dialog_module, "Qt", fake_qt):
+            assert settings_dialog_module._user_role_item_data_role() == 256
+
+    def test_item_is_user_checkable_flag_supports_qt5_style(self):
+        """The item-flag helper should support Qt5's direct ItemIsUserCheckable."""
+        import ui.settings_dialog as settings_dialog_module
+
+        fake_qt = type("FakeQt", (), {"ItemIsUserCheckable": 1})
+        with patch.object(settings_dialog_module, "Qt", fake_qt):
+            assert settings_dialog_module._item_is_user_checkable_flag() == 1
+
+    def test_item_is_user_checkable_flag_supports_qt6_style(self):
+        """The item-flag helper should support Qt6's ItemFlag.ItemIsUserCheckable."""
+        import ui.settings_dialog as settings_dialog_module
+
+        fake_item_flag = type("ItemFlag", (), {"ItemIsUserCheckable": 2})
+        fake_qt = type("FakeQt", (), {"ItemFlag": fake_item_flag})
+        with patch.object(settings_dialog_module, "Qt", fake_qt):
+            assert settings_dialog_module._item_is_user_checkable_flag() == 2
+
+    def test_item_is_enabled_flag_supports_qt5_style(self):
+        """The item-flag helper should support Qt5's direct ItemIsEnabled."""
+        import ui.settings_dialog as settings_dialog_module
+
+        fake_qt = type("FakeQt", (), {"ItemIsEnabled": 4})
+        with patch.object(settings_dialog_module, "Qt", fake_qt):
+            assert settings_dialog_module._item_is_enabled_flag() == 4
+
+    def test_item_is_enabled_flag_supports_qt6_style(self):
+        """The item-flag helper should support Qt6's ItemFlag.ItemIsEnabled."""
+        import ui.settings_dialog as settings_dialog_module
+
+        fake_item_flag = type("ItemFlag", (), {"ItemIsEnabled": 8})
+        fake_qt = type("FakeQt", (), {"ItemFlag": fake_item_flag})
+        with patch.object(settings_dialog_module, "Qt", fake_qt):
+            assert settings_dialog_module._item_is_enabled_flag() == 8
+
+    def test_checked_check_state_supports_qt5_style(self):
+        """The check-state helper should support Qt5's direct Checked."""
+        import ui.settings_dialog as settings_dialog_module
+
+        fake_qt = type("FakeQt", (), {"Checked": "qt5-checked"})
+        with patch.object(settings_dialog_module, "Qt", fake_qt):
+            assert settings_dialog_module._checked_check_state() == "qt5-checked"
+
+    def test_checked_check_state_supports_qt6_style(self):
+        """The check-state helper should support Qt6's CheckState.Checked."""
+        import ui.settings_dialog as settings_dialog_module
+
+        fake_check_state = type("CheckState", (), {"Checked": "qt6-checked"})
+        fake_qt = type("FakeQt", (), {"CheckState": fake_check_state})
+        with patch.object(settings_dialog_module, "Qt", fake_qt):
+            assert settings_dialog_module._checked_check_state() == "qt6-checked"
+
+    def test_unchecked_check_state_supports_qt5_style(self):
+        """The check-state helper should support Qt5's direct Unchecked."""
+        import ui.settings_dialog as settings_dialog_module
+
+        fake_qt = type("FakeQt", (), {"Unchecked": "qt5-unchecked"})
+        with patch.object(settings_dialog_module, "Qt", fake_qt):
+            assert settings_dialog_module._unchecked_check_state() == "qt5-unchecked"
+
+    def test_unchecked_check_state_supports_qt6_style(self):
+        """The check-state helper should support Qt6's CheckState.Unchecked."""
+        import ui.settings_dialog as settings_dialog_module
+
+        fake_check_state = type("CheckState", (), {"Unchecked": "qt6-unchecked"})
+        fake_qt = type("FakeQt", (), {"CheckState": fake_check_state})
+        with patch.object(settings_dialog_module, "Qt", fake_qt):
+            assert settings_dialog_module._unchecked_check_state() == "qt6-unchecked"
+
     def test_dialog_button_ok_identifier_supports_qt5_style(self):
         """The OK button helper should support Qt5's direct Ok flag."""
         import ui.settings_dialog as settings_dialog_module
