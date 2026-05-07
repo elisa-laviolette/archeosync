@@ -5,6 +5,7 @@
 [general]
 name=ArcheoSync
 qgisMinimumVersion=3.0
+qgisMaximumVersion=4.99
 description=This plugin allows archaeologists to prepare data for the field and to import it back into the project
 version=0.15.0
 author=Elisa Caron-Laviolette

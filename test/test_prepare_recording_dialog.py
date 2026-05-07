@@ -20,6 +20,7 @@ from qgis.PyQt.QtCore import Qt
 # Try to import QGIS modules, skip tests if not available
 try:
     from qgis.PyQt.QtWidgets import QDialog
+    import ui.prepare_recording_dialog as prepare_recording_dialog_module
     from ui.prepare_recording_dialog import PrepareRecordingDialog
     from core.interfaces import ILayerService, ISettingsManager, IQFieldService
     QGIS_AVAILABLE = True
@@ -71,6 +72,25 @@ class TestPrepareRecordingDialog(unittest.TestCase):
     def test_dialog_modal(self):
         """Test that dialog is modal."""
         self.assertTrue(self.dialog.isModal())
+
+    def test_select_rows_behavior_supports_qt5_and_qt6(self):
+        """Selection behavior helper should support both Qt5 and Qt6 APIs."""
+        fake_item_view_qt5 = type("FakeItemViewQt5", (), {"SelectRows": "qt5-select-rows"})
+        fake_qt_widgets_qt5 = type("FakeQtWidgetsQt5", (), {"QAbstractItemView": fake_item_view_qt5})
+        with patch.object(prepare_recording_dialog_module, "QtWidgets", fake_qt_widgets_qt5):
+            self.assertEqual(
+                prepare_recording_dialog_module._select_rows_behavior(),
+                "qt5-select-rows"
+            )
+
+        fake_selection_behavior = type("SelectionBehavior", (), {"SelectRows": "qt6-select-rows"})
+        fake_item_view_qt6 = type("FakeItemViewQt6", (), {"SelectionBehavior": fake_selection_behavior})
+        fake_qt_widgets_qt6 = type("FakeQtWidgetsQt6", (), {"QAbstractItemView": fake_item_view_qt6})
+        with patch.object(prepare_recording_dialog_module, "QtWidgets", fake_qt_widgets_qt6):
+            self.assertEqual(
+                prepare_recording_dialog_module._select_rows_behavior(),
+                "qt6-select-rows"
+            )
     
     def test_update_selected_count_no_layer_configured(self):
         """Test update when no recording areas layer is configured."""
@@ -85,7 +105,7 @@ class TestPrepareRecordingDialog(unittest.TestCase):
         self.assertEqual(self.dialog._selected_count_label.text(), "Selected Entities: 0")
         
         # Verify OK button is hidden (no selection)
-        ok_button = self.dialog._button_box.button(self.dialog._button_box.Ok)
+        ok_button = self.dialog._button_box.button(prepare_recording_dialog_module._dialog_button_ok())
         self.assertFalse(ok_button.isVisible())
     
     def test_update_selected_count_layer_not_found(self):
@@ -104,7 +124,7 @@ class TestPrepareRecordingDialog(unittest.TestCase):
         self.assertEqual(self.dialog._selected_count_label.text(), "Selected Entities: 0")
         
         # Verify OK button is hidden (no selection)
-        ok_button = self.dialog._button_box.button(self.dialog._button_box.Ok)
+        ok_button = self.dialog._button_box.button(prepare_recording_dialog_module._dialog_button_ok())
         self.assertFalse(ok_button.isVisible())
     
     def test_update_selected_count_no_selection(self):
@@ -132,7 +152,7 @@ class TestPrepareRecordingDialog(unittest.TestCase):
         self.assertEqual(self.dialog._selected_count_label.text(), "Selected Entities: 0")
         
         # Verify OK button is hidden (no selection)
-        ok_button = self.dialog._button_box.button(self.dialog._button_box.Ok)
+        ok_button = self.dialog._button_box.button(prepare_recording_dialog_module._dialog_button_ok())
         self.assertFalse(ok_button.isVisible())
         
         # Verify table is empty
@@ -188,7 +208,7 @@ class TestPrepareRecordingDialog(unittest.TestCase):
         self.assertEqual(dialog._selected_count_label.text(), "Selected Entities: 1")
         
         # Verify OK button is enabled and has correct text (selection exists)
-        ok_button = dialog._button_box.button(dialog._button_box.Ok)
+        ok_button = dialog._button_box.button(prepare_recording_dialog_module._dialog_button_ok())
         self.assertTrue(ok_button.isEnabled())
         self.assertEqual(ok_button.text(), "Prepare Recording")
         
@@ -234,7 +254,7 @@ class TestPrepareRecordingDialog(unittest.TestCase):
         self.assertEqual(self.dialog._selected_count_label.text(), "Selected Entities: Error")
         
         # Verify OK button is hidden (QField is disabled by default in mock)
-        ok_button = self.dialog._button_box.button(self.dialog._button_box.Ok)
+        ok_button = self.dialog._button_box.button(prepare_recording_dialog_module._dialog_button_ok())
         self.assertFalse(ok_button.isVisible())
     
     def test_button_box_exists(self):
@@ -243,8 +263,8 @@ class TestPrepareRecordingDialog(unittest.TestCase):
         button_box = self.dialog._button_box
         
         # Verify buttons exist
-        ok_button = button_box.button(button_box.Ok)
-        cancel_button = button_box.button(button_box.Cancel)
+        ok_button = button_box.button(prepare_recording_dialog_module._dialog_button_ok())
+        cancel_button = button_box.button(prepare_recording_dialog_module._dialog_button_cancel())
         
         self.assertIsNotNone(ok_button)
         self.assertIsNotNone(cancel_button)
@@ -547,7 +567,7 @@ class TestPrepareRecordingDialog(unittest.TestCase):
         
         # Verify editing is enabled
         edit_triggers = self.dialog._entities_table.editTriggers()
-        expected_triggers = QtWidgets.QAbstractItemView.DoubleClicked | QtWidgets.QAbstractItemView.EditKeyPressed
+        expected_triggers = prepare_recording_dialog_module._edit_triggers_flags()
         self.assertEqual(edit_triggers, expected_triggers)
 
     def test_populate_entities_table_with_number_field_only(self):
@@ -765,20 +785,20 @@ class TestPrepareRecordingDialog(unittest.TestCase):
         
         # Verify read-only columns are not editable
         name_item = self.dialog._entities_table.item(0, 0)  # Name column
-        self.assertFalse(name_item.flags() & Qt.ItemIsEditable)
+        self.assertFalse(name_item.flags() & prepare_recording_dialog_module._item_is_editable_flag())
         
         last_number_item = self.dialog._entities_table.item(0, 1)  # Last number column
-        self.assertFalse(last_number_item.flags() & Qt.ItemIsEditable)
+        self.assertFalse(last_number_item.flags() & prepare_recording_dialog_module._item_is_editable_flag())
         
         last_level_item = self.dialog._entities_table.item(0, 3)  # Last level column
-        self.assertFalse(last_level_item.flags() & Qt.ItemIsEditable)
+        self.assertFalse(last_level_item.flags() & prepare_recording_dialog_module._item_is_editable_flag())
         
         # Verify editable columns are editable
         first_number_item = self.dialog._entities_table.item(0, 2)  # First number column
-        self.assertTrue(first_number_item.flags() & Qt.ItemIsEditable)
+        self.assertTrue(first_number_item.flags() & prepare_recording_dialog_module._item_is_editable_flag())
         
         level_item = self.dialog._entities_table.item(0, 4)  # Level column
-        self.assertTrue(level_item.flags() & Qt.ItemIsEditable)
+        self.assertTrue(level_item.flags() & prepare_recording_dialog_module._item_is_editable_flag())
         
         # Verify background image dropdown was created
         background_widget = self.dialog._entities_table.cellWidget(0, 5)  # Background image column

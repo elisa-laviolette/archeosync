@@ -35,7 +35,7 @@ Usage:
         parent=parent_widget
     )
     
-    if dialog.exec_() == QDialog.Accepted:
+    if dialog.exec() == QDialog.Accepted:
         # Settings were saved successfully
         pass
 
@@ -73,6 +73,80 @@ def _to_float(value):
         return float(value)
     except (TypeError, ValueError):
         return 0.0
+
+
+def _align_center_flag():
+    """Return a center-alignment flag compatible with Qt5 and Qt6."""
+    if hasattr(Qt, "AlignCenter"):
+        return Qt.AlignCenter
+    alignment_flag = getattr(Qt, "AlignmentFlag", None)
+    if alignment_flag is not None and hasattr(alignment_flag, "AlignCenter"):
+        return alignment_flag.AlignCenter
+    raise AttributeError("Qt center alignment flag is not available.")
+
+
+def _no_selection_mode():
+    """Return the QAbstractItemView no-selection mode for Qt5 and Qt6."""
+    item_view = QtWidgets.QAbstractItemView
+    if hasattr(item_view, "NoSelection"):
+        return item_view.NoSelection
+
+    selection_mode = getattr(item_view, "SelectionMode", None)
+    if selection_mode is not None and hasattr(selection_mode, "NoSelection"):
+        return selection_mode.NoSelection
+
+    raise AttributeError("QAbstractItemView no-selection mode is not available.")
+
+
+def _dialog_button_ok_cancel():
+    """Return QDialogButtonBox OK/Cancel flags compatible with Qt5 and Qt6."""
+    button_box = QtWidgets.QDialogButtonBox
+    if hasattr(button_box, "Ok") and hasattr(button_box, "Cancel"):
+        return button_box.Ok | button_box.Cancel
+
+    standard_button = getattr(button_box, "StandardButton", None)
+    if standard_button is not None and hasattr(standard_button, "Ok") and hasattr(standard_button, "Cancel"):
+        return standard_button.Ok | standard_button.Cancel
+
+    raise AttributeError("QDialogButtonBox OK/Cancel flags are not available.")
+
+
+def _dialog_button_ok():
+    """Return QDialogButtonBox OK button identifier for Qt5 and Qt6."""
+    button_box = QtWidgets.QDialogButtonBox
+    if hasattr(button_box, "Ok"):
+        return button_box.Ok
+
+    standard_button = getattr(button_box, "StandardButton", None)
+    if standard_button is not None and hasattr(standard_button, "Ok"):
+        return standard_button.Ok
+
+    raise AttributeError("QDialogButtonBox OK button identifier is not available.")
+
+
+def _dialog_button_cancel():
+    """Return QDialogButtonBox Cancel button identifier for Qt5 and Qt6."""
+    button_box = QtWidgets.QDialogButtonBox
+    if hasattr(button_box, "Cancel"):
+        return button_box.Cancel
+
+    standard_button = getattr(button_box, "StandardButton", None)
+    if standard_button is not None and hasattr(standard_button, "Cancel"):
+        return standard_button.Cancel
+
+    raise AttributeError("QDialogButtonBox Cancel button identifier is not available.")
+
+
+def _horizontal_orientation():
+    """Return horizontal orientation flag compatible with Qt5 and Qt6."""
+    if hasattr(Qt, "Horizontal"):
+        return Qt.Horizontal
+
+    orientation = getattr(Qt, "Orientation", None)
+    if orientation is not None and hasattr(orientation, "Horizontal"):
+        return orientation.Horizontal
+
+    raise AttributeError("Qt horizontal orientation flag is not available.")
 
 
 class SettingsDialog(QtWidgets.QDialog):
@@ -127,7 +201,7 @@ class SettingsDialog(QtWidgets.QDialog):
         
         # Add title
         title_label = QtWidgets.QLabel(self.tr("ArcheoSync Plugin Settings"))
-        title_label.setAlignment(Qt.AlignCenter)
+        title_label.setAlignment(_align_center_flag())
         title_label.setStyleSheet("font-size: 16px; font-weight: bold; margin: 10px;")
         main_layout.addWidget(title_label)
         
@@ -530,7 +604,7 @@ class SettingsDialog(QtWidgets.QDialog):
         
         # List widget for layer selection (with checkboxes)
         self._extra_layers_list = QtWidgets.QListWidget()
-        self._extra_layers_list.setSelectionMode(QtWidgets.QAbstractItemView.NoSelection)
+        self._extra_layers_list.setSelectionMode(_no_selection_mode())
         self._extra_layers_list.setMaximumHeight(150)
         layout.addWidget(self._extra_layers_list)
         
@@ -597,14 +671,14 @@ class SettingsDialog(QtWidgets.QDialog):
     def _create_button_box(self, parent_layout: QtWidgets.QVBoxLayout) -> None:
         """Create the dialog button box."""
         self._button_box = QtWidgets.QDialogButtonBox(
-            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel,
-            Qt.Horizontal,
+            _dialog_button_ok_cancel(),
+            _horizontal_orientation(),
             self
         )
         
         # Set button texts for translation
-        self._button_box.button(QtWidgets.QDialogButtonBox.Ok).setText(self.tr("OK"))
-        self._button_box.button(QtWidgets.QDialogButtonBox.Cancel).setText(self.tr("Cancel"))
+        self._button_box.button(_dialog_button_ok()).setText(self.tr("OK"))
+        self._button_box.button(_dialog_button_cancel()).setText(self.tr("Cancel"))
         
         parent_layout.addWidget(self._button_box)
     

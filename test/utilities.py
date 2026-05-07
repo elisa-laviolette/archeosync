@@ -51,7 +51,7 @@ def get_qgis_app():
         try:
             gui_flag = True  # All test will run qgis in gui mode
             # Set QGIS_PREFIX_PATH explicitly
-            prefix_path = os.environ.get('QGIS_PREFIX_PATH', '/Applications/QGIS-LTR.app/Contents/MacOS')
+            prefix_path = os.environ.get('QGIS_PREFIX_PATH', '/Applications/QGIS-final-4_0_1.app/Contents/MacOS')
             
             # Ensure we have a QApplication instance first
             if QApplication.instance() is None:

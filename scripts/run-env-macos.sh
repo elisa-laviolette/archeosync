@@ -1,12 +1,12 @@
 #!/bin/bash
 
 # Default QGIS installation path for macOS
-QGIS_PREFIX_PATH="/Applications/QGIS-LTR.app/Contents/MacOS"
+QGIS_PREFIX_PATH="/Applications/QGIS-final-4_0_1.app/Contents/MacOS"
 if [ -n "$1" ]; then
     QGIS_PREFIX_PATH=$1
 fi
 
-PROJ_LIB="/Applications/QGIS-LTR.app/Contents/Resources/proj"
+PROJ_LIB="/Applications/QGIS-final-4_0_1.app/Contents/Resources/proj"
 
 echo "Setting up QGIS environment for macOS..."
 echo "QGIS PATH: $QGIS_PREFIX_PATH"

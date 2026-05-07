@@ -66,6 +66,10 @@ PEP8EXCLUDE=pydev,resources.py,conf.py,third_party,ui
 #	  AppData\Roaming\QGIS\QGIS3\profiles\default\python\plugins'
 
 QGISDIR=/Users/elisacaron-laviolette/Library/Application Support/QGIS/QGIS3/profiles/default/python/plugins
+QGIS_APP_PATH ?= /Applications/QGIS-final-4_0_1.app
+QGIS_PREFIX_PATH_VALUE ?= $(QGIS_APP_PATH)/Contents/MacOS
+PROJ_LIB_VALUE ?= $(QGIS_APP_PATH)/Contents/Resources/proj
+QGIS_PYTHON ?= $(QGIS_PREFIX_PATH_VALUE)/python
 
 #################################################
 # Normally you would not need to edit below here
@@ -103,13 +107,13 @@ test: compile transcompile
 	@echo "  source scripts/run-env-macos.sh [qgis_path]"
 	@echo "----------------------"
 
-	@-QGIS_PREFIX_PATH=/Applications/QGIS-LTR.app/Contents/MacOS \
-	  PROJ_LIB=/Applications/QGIS-LTR.app/Contents/Resources/proj \
+	@-QGIS_PREFIX_PATH=$(QGIS_PREFIX_PATH_VALUE) \
+	  PROJ_LIB=$(PROJ_LIB_VALUE) \
 	  PYTHONPATH=`pwd`:$(PYTHONPATH) \
 	  QGIS_DEBUG=0 \
 	  QGIS_LOG_FILE=/dev/null \
 	  PYTHONWARNINGS="ignore::DeprecationWarning,ignore::PendingDeprecationWarning" \
-	  /Applications/QGIS-LTR.app/Contents/MacOS/bin/python3 -m pytest test/ -v --tb=short -m "not qgis" || true
+	  $(QGIS_PYTHON) -m pytest test/ -v --tb=short -m "not qgis" || true
 	@echo "----------------------"
 	@echo "If you get a 'no module named qgis.core error, try sourcing"
 	@echo "the helper script we have provided first then run make test."
@@ -127,13 +131,13 @@ test-qgis: compile transcompile
 	@echo "  source scripts/run-env-macos.sh [qgis_path]"
 	@echo "----------------------"
 
-	@-QGIS_PREFIX_PATH=/Applications/QGIS-LTR.app/Contents/MacOS \
-	  PROJ_LIB=/Applications/QGIS-LTR.app/Contents/Resources/proj \
+	@-QGIS_PREFIX_PATH=$(QGIS_PREFIX_PATH_VALUE) \
+	  PROJ_LIB=$(PROJ_LIB_VALUE) \
 	  PYTHONPATH=`pwd`:$(PYTHONPATH) \
 	  QGIS_DEBUG=0 \
 	  QGIS_LOG_FILE=/dev/null \
 	  PYTHONWARNINGS="ignore::DeprecationWarning,ignore::PendingDeprecationWarning" \
-	  /Applications/QGIS-LTR.app/Contents/MacOS/bin/python3 -m pytest test/ -v --tb=short || true
+	  $(QGIS_PYTHON) -m pytest test/ -v --tb=short || true
 
 
 
@@ -150,22 +154,22 @@ test-all: compile transcompile
 	@echo "======================================"
 	@echo
 	@echo "Step 1: Running unit tests (no QGIS dependencies)..."
-	@-QGIS_PREFIX_PATH=/Applications/QGIS-LTR.app/Contents/MacOS \
-	  PROJ_LIB=/Applications/QGIS-LTR.app/Contents/Resources/proj \
+	@-QGIS_PREFIX_PATH=$(QGIS_PREFIX_PATH_VALUE) \
+	  PROJ_LIB=$(PROJ_LIB_VALUE) \
 	  PYTHONPATH=`pwd`:$(PYTHONPATH) \
 	  QGIS_DEBUG=0 \
 	  QGIS_LOG_FILE=/dev/null \
 	  PYTHONWARNINGS="ignore::DeprecationWarning,ignore::PendingDeprecationWarning" \
-	  /Applications/QGIS-LTR.app/Contents/MacOS/bin/python3 -m pytest test/ -v --tb=short -m "not qgis" || true
+	  $(QGIS_PYTHON) -m pytest test/ -v --tb=short -m "not qgis" || true
 	@echo
 	@echo "Step 2: Running QGIS-dependent tests..."
-	@-QGIS_PREFIX_PATH=/Applications/QGIS-LTR.app/Contents/MacOS \
-	  PROJ_LIB=/Applications/QGIS-LTR.app/Contents/Resources/proj \
+	@-QGIS_PREFIX_PATH=$(QGIS_PREFIX_PATH_VALUE) \
+	  PROJ_LIB=$(PROJ_LIB_VALUE) \
 	  PYTHONPATH=`pwd`:$(PYTHONPATH) \
 	  QGIS_DEBUG=0 \
 	  QGIS_LOG_FILE=/dev/null \
 	  PYTHONWARNINGS="ignore::DeprecationWarning,ignore::PendingDeprecationWarning" \
-	  /Applications/QGIS-LTR.app/Contents/MacOS/bin/python3 -m pytest test/ -v --tb=short || true
+	  $(QGIS_PYTHON) -m pytest test/ -v --tb=short || true
 	@echo
 	@echo "======================================"
 	@echo "Complete test suite finished!"

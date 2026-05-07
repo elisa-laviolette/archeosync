@@ -46,6 +46,116 @@ class TestSettingsDialogBasic:
         except ImportError:
             pytest.skip("SettingsDialog module not available")
 
+    def test_align_center_flag_supports_qt5_style(self):
+        """The alignment helper should support Qt5's direct AlignCenter flag."""
+        import ui.settings_dialog as settings_dialog_module
+
+        fake_qt = type("FakeQt", (), {"AlignCenter": "qt5-center"})
+        with patch.object(settings_dialog_module, "Qt", fake_qt):
+            assert settings_dialog_module._align_center_flag() == "qt5-center"
+
+    def test_align_center_flag_supports_qt6_style(self):
+        """The alignment helper should support Qt6's AlignmentFlag.AlignCenter."""
+        import ui.settings_dialog as settings_dialog_module
+
+        fake_alignment_flag = type("AlignmentFlag", (), {"AlignCenter": "qt6-center"})
+        fake_qt = type("FakeQt", (), {"AlignmentFlag": fake_alignment_flag})
+        with patch.object(settings_dialog_module, "Qt", fake_qt):
+            assert settings_dialog_module._align_center_flag() == "qt6-center"
+
+    def test_no_selection_mode_supports_qt5_style(self):
+        """The selection mode helper should support Qt5's direct NoSelection flag."""
+        import ui.settings_dialog as settings_dialog_module
+
+        fake_item_view = type("FakeItemView", (), {"NoSelection": "qt5-no-selection"})
+        fake_qt_widgets = type("FakeQtWidgets", (), {"QAbstractItemView": fake_item_view})
+        with patch.object(settings_dialog_module, "QtWidgets", fake_qt_widgets):
+            assert settings_dialog_module._no_selection_mode() == "qt5-no-selection"
+
+    def test_no_selection_mode_supports_qt6_style(self):
+        """The selection mode helper should support Qt6's SelectionMode.NoSelection."""
+        import ui.settings_dialog as settings_dialog_module
+
+        fake_selection_mode = type("SelectionMode", (), {"NoSelection": "qt6-no-selection"})
+        fake_item_view = type("FakeItemView", (), {"SelectionMode": fake_selection_mode})
+        fake_qt_widgets = type("FakeQtWidgets", (), {"QAbstractItemView": fake_item_view})
+        with patch.object(settings_dialog_module, "QtWidgets", fake_qt_widgets):
+            assert settings_dialog_module._no_selection_mode() == "qt6-no-selection"
+
+    def test_dialog_button_ok_cancel_supports_qt5_style(self):
+        """The button helper should support Qt5's direct Ok/Cancel flags."""
+        import ui.settings_dialog as settings_dialog_module
+
+        fake_button_box = type("FakeButtonBox", (), {"Ok": 1, "Cancel": 2})
+        fake_qt_widgets = type("FakeQtWidgets", (), {"QDialogButtonBox": fake_button_box})
+        with patch.object(settings_dialog_module, "QtWidgets", fake_qt_widgets):
+            assert settings_dialog_module._dialog_button_ok_cancel() == 3
+
+    def test_dialog_button_ok_cancel_supports_qt6_style(self):
+        """The button helper should support Qt6's StandardButton.Ok/Cancel flags."""
+        import ui.settings_dialog as settings_dialog_module
+
+        fake_standard_button = type("StandardButton", (), {"Ok": 4, "Cancel": 8})
+        fake_button_box = type("FakeButtonBox", (), {"StandardButton": fake_standard_button})
+        fake_qt_widgets = type("FakeQtWidgets", (), {"QDialogButtonBox": fake_button_box})
+        with patch.object(settings_dialog_module, "QtWidgets", fake_qt_widgets):
+            assert settings_dialog_module._dialog_button_ok_cancel() == 12
+
+    def test_horizontal_orientation_supports_qt5_style(self):
+        """The orientation helper should support Qt5's direct Horizontal flag."""
+        import ui.settings_dialog as settings_dialog_module
+
+        fake_qt = type("FakeQt", (), {"Horizontal": "qt5-horizontal"})
+        with patch.object(settings_dialog_module, "Qt", fake_qt):
+            assert settings_dialog_module._horizontal_orientation() == "qt5-horizontal"
+
+    def test_horizontal_orientation_supports_qt6_style(self):
+        """The orientation helper should support Qt6's Orientation.Horizontal."""
+        import ui.settings_dialog as settings_dialog_module
+
+        fake_orientation = type("Orientation", (), {"Horizontal": "qt6-horizontal"})
+        fake_qt = type("FakeQt", (), {"Orientation": fake_orientation})
+        with patch.object(settings_dialog_module, "Qt", fake_qt):
+            assert settings_dialog_module._horizontal_orientation() == "qt6-horizontal"
+
+    def test_dialog_button_ok_identifier_supports_qt5_style(self):
+        """The OK button helper should support Qt5's direct Ok flag."""
+        import ui.settings_dialog as settings_dialog_module
+
+        fake_button_box = type("FakeButtonBox", (), {"Ok": "qt5-ok"})
+        fake_qt_widgets = type("FakeQtWidgets", (), {"QDialogButtonBox": fake_button_box})
+        with patch.object(settings_dialog_module, "QtWidgets", fake_qt_widgets):
+            assert settings_dialog_module._dialog_button_ok() == "qt5-ok"
+
+    def test_dialog_button_ok_identifier_supports_qt6_style(self):
+        """The OK button helper should support Qt6's StandardButton.Ok flag."""
+        import ui.settings_dialog as settings_dialog_module
+
+        fake_standard_button = type("StandardButton", (), {"Ok": "qt6-ok"})
+        fake_button_box = type("FakeButtonBox", (), {"StandardButton": fake_standard_button})
+        fake_qt_widgets = type("FakeQtWidgets", (), {"QDialogButtonBox": fake_button_box})
+        with patch.object(settings_dialog_module, "QtWidgets", fake_qt_widgets):
+            assert settings_dialog_module._dialog_button_ok() == "qt6-ok"
+
+    def test_dialog_button_cancel_identifier_supports_qt5_style(self):
+        """The Cancel button helper should support Qt5's direct Cancel flag."""
+        import ui.settings_dialog as settings_dialog_module
+
+        fake_button_box = type("FakeButtonBox", (), {"Cancel": "qt5-cancel"})
+        fake_qt_widgets = type("FakeQtWidgets", (), {"QDialogButtonBox": fake_button_box})
+        with patch.object(settings_dialog_module, "QtWidgets", fake_qt_widgets):
+            assert settings_dialog_module._dialog_button_cancel() == "qt5-cancel"
+
+    def test_dialog_button_cancel_identifier_supports_qt6_style(self):
+        """The Cancel button helper should support Qt6's StandardButton.Cancel flag."""
+        import ui.settings_dialog as settings_dialog_module
+
+        fake_standard_button = type("StandardButton", (), {"Cancel": "qt6-cancel"})
+        fake_button_box = type("FakeButtonBox", (), {"StandardButton": fake_standard_button})
+        fake_qt_widgets = type("FakeQtWidgets", (), {"QDialogButtonBox": fake_button_box})
+        with patch.object(settings_dialog_module, "QtWidgets", fake_qt_widgets):
+            assert settings_dialog_module._dialog_button_cancel() == "qt6-cancel"
+
 
 @pytest.mark.qgis
 @pytest.mark.skipif(not QGIS_AVAILABLE, reason="QGIS not available")

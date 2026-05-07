@@ -25,7 +25,7 @@ from typing import List, Optional, Dict, Any, Tuple
 import os
 import tempfile
 from qgis.core import QgsProject, QgsVectorLayer, QgsRasterLayer, QgsExpression, QgsExpressionContext, QgsExpressionContextUtils, QgsFields, QgsField, QgsFeature, QgsGeometry, QgsPointXY, QgsEditFormConfig, QgsDefaultValue, QgsCoordinateReferenceSystem
-from PyQt5.QtCore import QVariant
+from qgis.PyQt.QtCore import QVariant
 
 try:
     from ..core.interfaces import ILayerService
@@ -1254,7 +1254,7 @@ class QGISLayerService(ILayerService):
         Copy all virtual fields (expression fields) from source_layer to target_layer.
         If a field exists in target_layer, it will be overwritten as a virtual field with the same expression.
         """
-        from PyQt5.QtCore import QVariant
+        from qgis.PyQt.QtCore import QVariant
         import os
         import tempfile
         

@@ -25,13 +25,23 @@ Usage:
         parent=parent_widget
     )
     
-    if dialog.exec_() == QDialog.Accepted:
+    if dialog.exec() == QDialog.Accepted:
         final_mapping = dialog.get_final_mapping()
 """
 
 from typing import Dict, List, Optional
 from qgis.PyQt import QtWidgets
 from qgis.PyQt.QtCore import Qt
+
+
+def _align_center_flag():
+    """Return a center-alignment flag compatible with Qt5 and Qt6."""
+    if hasattr(Qt, "AlignCenter"):
+        return Qt.AlignCenter
+    alignment_flag = getattr(Qt, "AlignmentFlag", None)
+    if alignment_flag is not None and hasattr(alignment_flag, "AlignCenter"):
+        return alignment_flag.AlignCenter
+    raise AttributeError("Qt center alignment flag is not available.")
 
 
 class ColumnMappingDialog(QtWidgets.QDialog):
@@ -75,7 +85,7 @@ class ColumnMappingDialog(QtWidgets.QDialog):
         
         # Add title
         title_label = QtWidgets.QLabel(self.tr("Map Columns Across CSV Files"))
-        title_label.setAlignment(Qt.AlignCenter)
+        title_label.setAlignment(_align_center_flag())
         title_label.setStyleSheet("font-size: 16px; font-weight: bold; margin: 10px;")
         main_layout.addWidget(title_label)
         

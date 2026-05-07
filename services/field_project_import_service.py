@@ -524,7 +524,7 @@ class FieldProjectImportService(QObject):
             
             # Add fields with proper types using QgsField objects
             from qgis.core import QgsField
-            from PyQt5.QtCore import QVariant
+            from qgis.PyQt.QtCore import QVariant
             
             # QGIS field type name to QVariant type mapping
             QGIS_TO_QVARIANT = {

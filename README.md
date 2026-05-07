@@ -2,6 +2,12 @@
 
 A QGIS plugin for archaeologists to prepare data for field work and import it back into the project.
 
+## QGIS Compatibility
+
+- Supported versions: QGIS 3.x and QGIS 4.x
+- This release provides a minimal compatibility migration focused on plugin metadata and Qt dialog execution compatibility (`exec` / `exec_`) between Qt5 and Qt6 runtimes.
+- Out of scope for this migration: deep refactoring of potentially deprecated QGIS APIs and exhaustive runtime validation across all QGIS 4 distributions.
+
 ## Features
 
 - **Configuration Management**: Set up folders for field projects, total station data, and completed projects

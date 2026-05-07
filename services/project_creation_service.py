@@ -42,7 +42,7 @@ The service provides:
 import os
 import re
 from typing import Optional, Any, Dict, List
-from qgis.core import QgsProject, QgsVectorLayer, QgsRasterLayer, QgsFeature, QgsGeometry, QgsWkbTypes, QgsVectorFileWriter, QgsCoordinateReferenceSystem, QgsBookmark, QgsReferencedRectangle
+from qgis.core import QgsProject, QgsVectorLayer, QgsRasterLayer, QgsFeature, QgsGeometry, QgsWkbTypes, QgsVectorFileWriter, QgsCoordinateReferenceSystem
 from qgis.PyQt.QtWidgets import QMessageBox
 from qgis.PyQt.QtCore import QObject
 
@@ -1049,6 +1049,14 @@ class QGISProjectCreationService(QObject):
             # Get the project CRS
             project_crs = project.crs()
             
+            # Import bookmark classes lazily for forward compatibility.
+            # Some QGIS versions may expose bookmark APIs differently.
+            try:
+                from qgis.core import QgsBookmark, QgsReferencedRectangle
+            except ImportError:
+                print("Bookmark API not available in this QGIS version, skipping bookmark creation.")
+                return
+
             # Create a referenced rectangle with the project CRS
             bounding_box = geom.boundingBox()
             referenced_rect = QgsReferencedRectangle(bounding_box, project_crs)

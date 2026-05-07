@@ -303,7 +303,7 @@ class QGISRasterProcessingService(IRasterProcessingService):
             temp_base = temp_path[:-4]
             
             # Create a temporary vector layer
-            from PyQt5.QtCore import QVariant
+            from qgis.PyQt.QtCore import QVariant
             
             # Create fields
             fields = QgsFields()
@@ -796,7 +796,7 @@ class QGISRasterProcessingService(IRasterProcessingService):
             print(f"Creating temporary shapefile: {temp_path}")
             
             # Create fields
-            from PyQt5.QtCore import QVariant
+            from qgis.PyQt.QtCore import QVariant
             fields = QgsFields()
             fields.append(QgsField("id", QVariant.Int))
             

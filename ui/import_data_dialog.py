@@ -29,7 +29,7 @@ Usage:
         parent=parent_widget
     )
     
-    if dialog.exec_() == QDialog.Accepted:
+    if dialog.exec() == QDialog.Accepted:
         # Import data was selected
         selected_csv_files = dialog.get_selected_csv_files()
         selected_completed_projects = dialog.get_selected_completed_projects()
@@ -43,6 +43,29 @@ try:
     from ..core.interfaces import ISettingsManager, IFileSystemService
 except ImportError:
     from core.interfaces import ISettingsManager, IFileSystemService
+
+
+def _align_center_flag():
+    """Return a center-alignment flag compatible with Qt5 and Qt6."""
+    if hasattr(Qt, "AlignCenter"):
+        return Qt.AlignCenter
+    alignment_flag = getattr(Qt, "AlignmentFlag", None)
+    if alignment_flag is not None and hasattr(alignment_flag, "AlignCenter"):
+        return alignment_flag.AlignCenter
+    raise AttributeError("Qt center alignment flag is not available.")
+
+
+def _multi_selection_mode():
+    """Return the QAbstractItemView multi-selection mode for Qt5 and Qt6."""
+    item_view = QtWidgets.QAbstractItemView
+    if hasattr(item_view, "MultiSelection"):
+        return item_view.MultiSelection
+
+    selection_mode = getattr(item_view, "SelectionMode", None)
+    if selection_mode is not None and hasattr(selection_mode, "MultiSelection"):
+        return selection_mode.MultiSelection
+
+    raise AttributeError("QAbstractItemView multi-selection mode is not available.")
 
 
 class ImportDataDialog(QtWidgets.QDialog):
@@ -90,7 +113,7 @@ class ImportDataDialog(QtWidgets.QDialog):
         
         # Add title
         title_label = QtWidgets.QLabel(self.tr("Import Data"))
-        title_label.setAlignment(Qt.AlignCenter)
+        title_label.setAlignment(_align_center_flag())
         title_label.setStyleSheet("font-size: 16px; font-weight: bold; margin: 10px;")
         main_layout.addWidget(title_label)
         
@@ -149,7 +172,7 @@ class ImportDataDialog(QtWidgets.QDialog):
         
         # CSV files list
         self._csv_list_widget = QtWidgets.QListWidget()
-        self._csv_list_widget.setSelectionMode(QtWidgets.QAbstractItemView.MultiSelection)
+        self._csv_list_widget.setSelectionMode(_multi_selection_mode())
         layout.addWidget(self._csv_list_widget)
         
         # CSV files info
@@ -187,7 +210,7 @@ class ImportDataDialog(QtWidgets.QDialog):
         
         # Completed projects list
         self._projects_list_widget = QtWidgets.QListWidget()
-        self._projects_list_widget.setSelectionMode(QtWidgets.QAbstractItemView.MultiSelection)
+        self._projects_list_widget.setSelectionMode(_multi_selection_mode())
         layout.addWidget(self._projects_list_widget)
         
         # Projects info

@@ -100,26 +100,41 @@ class ArcheoSyncPlugin(QObject):
         # Initialize layer service
         self._layer_service = QGISLayerService()
 
-        # Initialize raster processing service FIRST
-        self._raster_processing_service = QGISRasterProcessingService()
+        # Initialize advanced services defensively so plugin activation
+        # does not fail entirely if one optional API changed across QGIS versions.
+        self._raster_processing_service = None
+        self._project_creation_service = None
+        self._csv_import_service = None
+        self._field_project_import_service = None
 
-        # Initialize project creation service
-        self._project_creation_service = QGISProjectCreationService(
-            self._settings_manager,
-            self._layer_service,
-            self._file_system_service,
-            self._raster_processing_service
-        )
-        
-        # Initialize CSV import service
-        self._csv_import_service = CSVImportService(self._iface, self._file_system_service, self._settings_manager)
-        
-        # Initialize field project import service
-        self._field_project_import_service = FieldProjectImportService(
-            self._settings_manager,
-            self._layer_service,
-            self._file_system_service
-        )
+        try:
+            self._raster_processing_service = QGISRasterProcessingService()
+            self._project_creation_service = QGISProjectCreationService(
+                self._settings_manager,
+                self._layer_service,
+                self._file_system_service,
+                self._raster_processing_service
+            )
+        except Exception as exc:
+            print(f"Failed to initialize project creation services: {exc}")
+
+        try:
+            self._csv_import_service = CSVImportService(
+                self._iface,
+                self._file_system_service,
+                self._settings_manager
+            )
+        except Exception as exc:
+            print(f"Failed to initialize CSV import service: {exc}")
+
+        try:
+            self._field_project_import_service = FieldProjectImportService(
+                self._settings_manager,
+                self._layer_service,
+                self._file_system_service
+            )
+        except Exception as exc:
+            print(f"Failed to initialize field project import service: {exc}")
         
         # Initialize configuration validator
         self._configuration_validator = ArcheoSyncConfigurationValidator(
@@ -175,6 +190,24 @@ class ArcheoSyncPlugin(QObject):
         
         self._actions.append(action)
         return action
+
+    @staticmethod
+    def _execute_dialog(dialog) -> int:
+        """
+        Execute a dialog with Qt5/Qt6 compatibility.
+
+        QGIS 3 (Qt5) commonly exposes ``exec_`` while QGIS 4 (Qt6) uses ``exec``.
+        This helper keeps one code path compatible with both runtimes.
+        """
+        exec_method = getattr(dialog, "exec", None)
+        if callable(exec_method):
+            return exec_method()
+
+        legacy_exec_method = getattr(dialog, "exec_", None)
+        if callable(legacy_exec_method):
+            return legacy_exec_method()
+
+        raise AttributeError("Dialog has neither exec() nor exec_() method.")
     
     def initGui(self) -> None:
         """Create the menu entries and toolbar icons inside the QGIS GUI."""
@@ -228,7 +261,7 @@ class ArcheoSyncPlugin(QObject):
         
         # Show the dialog
         if self._settings_dialog:
-            result = self._settings_dialog.exec_()
+            result = self._execute_dialog(self._settings_dialog)
             
             # Handle dialog result
             if result:
@@ -242,6 +275,15 @@ class ArcheoSyncPlugin(QObject):
     
     def run_prepare_recording(self) -> None:
         """Run the prepare recording dialog."""
+        if not self._project_creation_service:
+            from qgis.PyQt.QtWidgets import QMessageBox
+            QMessageBox.critical(
+                self._iface.mainWindow(),
+                self.tr("Initialization Error"),
+                self.tr("Project creation service is unavailable in this QGIS runtime.")
+            )
+            return
+
         # Create and show the prepare recording dialog
         dialog = PrepareRecordingDialog(
             layer_service=self._layer_service,
@@ -249,7 +291,7 @@ class ArcheoSyncPlugin(QObject):
             parent=self._iface.mainWindow()
         )
         
-        result = dialog.exec_()
+        result = self._execute_dialog(dialog)
         
         # Handle dialog result
         if result:
@@ -432,6 +474,15 @@ class ArcheoSyncPlugin(QObject):
     
     def run_import_data(self) -> None:
         """Run the import data dialog."""
+        if not self._csv_import_service or not self._field_project_import_service:
+            from qgis.PyQt.QtWidgets import QMessageBox
+            QMessageBox.critical(
+                self._iface.mainWindow(),
+                self.tr("Initialization Error"),
+                self.tr("Import services are unavailable in this QGIS runtime.")
+            )
+            return
+
         
         # Check if an import summary dock widget already exists
         existing_dock_widget = self._find_existing_import_summary_dock_widget()
@@ -449,7 +500,7 @@ class ArcheoSyncPlugin(QObject):
                 parent=self._iface.mainWindow()
             )
             
-            result = dialog.exec_()
+            result = self._execute_dialog(dialog)
             
             # Handle dialog result
             if result:
@@ -537,7 +588,7 @@ class ArcheoSyncPlugin(QObject):
                 parent=self._iface.mainWindow()
             )
             
-            if mapping_dialog.exec_() != mapping_dialog.Accepted:
+            if self._execute_dialog(mapping_dialog) != mapping_dialog.Accepted:
                 return None  # User cancelled
             
             # Get final mapping from dialog

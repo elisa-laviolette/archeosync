@@ -17,7 +17,7 @@ except ImportError as e:
     sys.exit(1)
 
 # Set up the QGIS application
-QgsApplication.setPrefixPath("/Applications/QGIS-LTR.app/Contents/MacOS", True)  # Adjust path if needed
+QgsApplication.setPrefixPath("/Applications/QGIS-final-4_0_1.app/Contents/MacOS", True)  # Adjust path if needed
 qgs = QgsApplication([], False)
 qgs.initQgis()
 

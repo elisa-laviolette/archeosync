@@ -25,7 +25,7 @@ Usage:
         parent=parent_widget
     )
     
-    if dialog.exec_() == QDialog.Accepted:
+    if dialog.exec() == QDialog.Accepted:
         # Recording preparation was confirmed
         pass
 """
@@ -38,6 +38,91 @@ try:
     from ..core.interfaces import ILayerService, ISettingsManager
 except ImportError:
     from core.interfaces import ILayerService, ISettingsManager
+
+
+def _align_center_flag():
+    """Return a center-alignment flag compatible with Qt5 and Qt6."""
+    if hasattr(Qt, "AlignCenter"):
+        return Qt.AlignCenter
+    alignment_flag = getattr(Qt, "AlignmentFlag", None)
+    if alignment_flag is not None and hasattr(alignment_flag, "AlignCenter"):
+        return alignment_flag.AlignCenter
+    raise AttributeError("Qt center alignment flag is not available.")
+
+
+def _horizontal_orientation():
+    """Return horizontal orientation flag compatible with Qt5 and Qt6."""
+    if hasattr(Qt, "Horizontal"):
+        return Qt.Horizontal
+    orientation = getattr(Qt, "Orientation", None)
+    if orientation is not None and hasattr(orientation, "Horizontal"):
+        return orientation.Horizontal
+    raise AttributeError("Qt horizontal orientation flag is not available.")
+
+
+def _dialog_button_ok_cancel():
+    """Return QDialogButtonBox OK/Cancel flags compatible with Qt5 and Qt6."""
+    button_box = QtWidgets.QDialogButtonBox
+    if hasattr(button_box, "Ok") and hasattr(button_box, "Cancel"):
+        return button_box.Ok | button_box.Cancel
+    standard_button = getattr(button_box, "StandardButton", None)
+    if standard_button is not None and hasattr(standard_button, "Ok") and hasattr(standard_button, "Cancel"):
+        return standard_button.Ok | standard_button.Cancel
+    raise AttributeError("QDialogButtonBox OK/Cancel flags are not available.")
+
+
+def _dialog_button_ok():
+    """Return QDialogButtonBox OK identifier compatible with Qt5 and Qt6."""
+    button_box = QtWidgets.QDialogButtonBox
+    if hasattr(button_box, "Ok"):
+        return button_box.Ok
+    standard_button = getattr(button_box, "StandardButton", None)
+    if standard_button is not None and hasattr(standard_button, "Ok"):
+        return standard_button.Ok
+    raise AttributeError("QDialogButtonBox OK button identifier is not available.")
+
+
+def _dialog_button_cancel():
+    """Return QDialogButtonBox Cancel identifier compatible with Qt5 and Qt6."""
+    button_box = QtWidgets.QDialogButtonBox
+    if hasattr(button_box, "Cancel"):
+        return button_box.Cancel
+    standard_button = getattr(button_box, "StandardButton", None)
+    if standard_button is not None and hasattr(standard_button, "Cancel"):
+        return standard_button.Cancel
+    raise AttributeError("QDialogButtonBox Cancel button identifier is not available.")
+
+
+def _select_rows_behavior():
+    """Return SelectRows behavior compatible with Qt5 and Qt6."""
+    item_view = QtWidgets.QAbstractItemView
+    if hasattr(item_view, "SelectRows"):
+        return item_view.SelectRows
+    selection_behavior = getattr(item_view, "SelectionBehavior", None)
+    if selection_behavior is not None and hasattr(selection_behavior, "SelectRows"):
+        return selection_behavior.SelectRows
+    raise AttributeError("QAbstractItemView SelectRows behavior is not available.")
+
+
+def _edit_triggers_flags():
+    """Return edit trigger flags compatible with Qt5 and Qt6."""
+    item_view = QtWidgets.QAbstractItemView
+    if hasattr(item_view, "DoubleClicked") and hasattr(item_view, "EditKeyPressed"):
+        return item_view.DoubleClicked | item_view.EditKeyPressed
+    edit_trigger = getattr(item_view, "EditTrigger", None)
+    if edit_trigger is not None and hasattr(edit_trigger, "DoubleClicked") and hasattr(edit_trigger, "EditKeyPressed"):
+        return edit_trigger.DoubleClicked | edit_trigger.EditKeyPressed
+    raise AttributeError("QAbstractItemView edit trigger flags are not available.")
+
+
+def _item_is_editable_flag():
+    """Return ItemIsEditable flag compatible with Qt5 and Qt6."""
+    if hasattr(Qt, "ItemIsEditable"):
+        return Qt.ItemIsEditable
+    item_flag = getattr(Qt, "ItemFlag", None)
+    if item_flag is not None and hasattr(item_flag, "ItemIsEditable"):
+        return item_flag.ItemIsEditable
+    raise AttributeError("Qt ItemIsEditable flag is not available.")
 
 
 class PrepareRecordingDialog(QtWidgets.QDialog):
@@ -80,7 +165,7 @@ class PrepareRecordingDialog(QtWidgets.QDialog):
         
         # Add title
         title_label = QtWidgets.QLabel(self.tr("Prepare Recording"))
-        title_label.setAlignment(Qt.AlignCenter)
+        title_label.setAlignment(_align_center_flag())
         title_label.setStyleSheet("font-size: 16px; font-weight: bold; margin: 10px;")
         main_layout.addWidget(title_label)
         
@@ -119,8 +204,8 @@ class PrepareRecordingDialog(QtWidgets.QDialog):
     def _create_button_box(self, parent_layout: QtWidgets.QVBoxLayout) -> None:
         """Create the dialog button box."""
         self._button_box = QtWidgets.QDialogButtonBox(
-            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel,
-            Qt.Horizontal,
+            _dialog_button_ok_cancel(),
+            _horizontal_orientation(),
             self
         )
         
@@ -129,10 +214,10 @@ class PrepareRecordingDialog(QtWidgets.QDialog):
         self._button_box.rejected.connect(self.reject)
         
         # Set button texts for translation
-        self._button_box.button(QtWidgets.QDialogButtonBox.Cancel).setText(self.tr("Cancel"))
+        self._button_box.button(_dialog_button_cancel()).setText(self.tr("Cancel"))
         
         # Initially hide the OK button - it will be shown when features are selected
-        self._button_box.button(QtWidgets.QDialogButtonBox.Ok).setVisible(False)
+        self._button_box.button(_dialog_button_ok()).setVisible(False)
         
         parent_layout.addWidget(self._button_box)
     
@@ -162,9 +247,9 @@ class PrepareRecordingDialog(QtWidgets.QDialog):
         
         # Set table properties
         self._entities_table.setAlternatingRowColors(True)
-        self._entities_table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+        self._entities_table.setSelectionBehavior(_select_rows_behavior())
         # Allow editing for next number and next level columns
-        self._entities_table.setEditTriggers(QtWidgets.QAbstractItemView.DoubleClicked | QtWidgets.QAbstractItemView.EditKeyPressed)
+        self._entities_table.setEditTriggers(_edit_triggers_flags())
         self._entities_table.horizontalHeader().setStretchLastSection(True)
         self._entities_table.setMaximumHeight(200)
         
@@ -181,7 +266,7 @@ class PrepareRecordingDialog(QtWidgets.QDialog):
                 self._recording_areas_label.setText(self.tr("Recording Areas Layer: Not configured"))
                 self._selected_count_label.setText(self.tr("Selected Entities: 0"))
                 self._populate_entities_table([])
-                self._button_box.button(QtWidgets.QDialogButtonBox.Ok).setVisible(False)
+                self._button_box.button(_dialog_button_ok()).setVisible(False)
                 return
             
             # Get layer info
@@ -190,7 +275,7 @@ class PrepareRecordingDialog(QtWidgets.QDialog):
                 self._recording_areas_label.setText(self.tr("Recording Areas Layer: Layer not found"))
                 self._selected_count_label.setText(self.tr("Selected Entities: 0"))
                 self._populate_entities_table([])
-                self._button_box.button(QtWidgets.QDialogButtonBox.Ok).setVisible(False)
+                self._button_box.button(_dialog_button_ok()).setVisible(False)
                 return
             
             # Update layer name
@@ -202,7 +287,7 @@ class PrepareRecordingDialog(QtWidgets.QDialog):
                 self._recording_areas_label.setText(self.tr("Recording Areas Layer: Layer not found"))
                 self._selected_count_label.setText(self.tr("Selected Entities: 0"))
                 self._populate_entities_table([])
-                self._button_box.button(QtWidgets.QDialogButtonBox.Ok).setVisible(False)
+                self._button_box.button(_dialog_button_ok()).setVisible(False)
                 return
             
             # Get selected features
@@ -217,7 +302,7 @@ class PrepareRecordingDialog(QtWidgets.QDialog):
             
             # Show/hide and enable/disable OK button based on selection
             has_selection = selected_count > 0
-            ok_button = self._button_box.button(QtWidgets.QDialogButtonBox.Ok)
+            ok_button = self._button_box.button(_dialog_button_ok())
             
             if has_selection:
                 ok_button.setVisible(True)
@@ -232,7 +317,7 @@ class PrepareRecordingDialog(QtWidgets.QDialog):
             self._recording_areas_label.setText(self.tr("Recording Areas Layer: Error"))
             self._selected_count_label.setText(self.tr("Selected Entities: Error"))
             self._populate_entities_table([])
-            self._button_box.button(QtWidgets.QDialogButtonBox.Ok).setVisible(False)
+            self._button_box.button(_dialog_button_ok()).setVisible(False)
     
     def _populate_entities_table(self, features) -> None:
         """Populate the entities table with feature information."""
@@ -285,7 +370,7 @@ class PrepareRecordingDialog(QtWidgets.QDialog):
             
             # Add name to the table
             name_item = QtWidgets.QTableWidgetItem(feature_name)
-            name_item.setFlags(name_item.flags() & ~Qt.ItemIsEditable)  # Make read-only
+            name_item.setFlags(name_item.flags() & ~_item_is_editable_flag())  # Make read-only
             self._entities_table.setItem(row, 0, name_item)
             
             # Add related objects information if configured
@@ -299,7 +384,7 @@ class PrepareRecordingDialog(QtWidgets.QDialog):
                 
                 # Add last number
                 number_item = QtWidgets.QTableWidgetItem(related_info['last_number'])
-                number_item.setFlags(number_item.flags() & ~Qt.ItemIsEditable)  # Make read-only
+                number_item.setFlags(number_item.flags() & ~_item_is_editable_flag())  # Make read-only
                 self._entities_table.setItem(row, col_index, number_item)
                 col_index += 1
                 
@@ -325,7 +410,7 @@ class PrepareRecordingDialog(QtWidgets.QDialog):
                 
                 # Add last level
                 level_item = QtWidgets.QTableWidgetItem(related_info['last_level'])
-                level_item.setFlags(level_item.flags() & ~Qt.ItemIsEditable)  # Make read-only
+                level_item.setFlags(level_item.flags() & ~_item_is_editable_flag())  # Make read-only
                 self._entities_table.setItem(row, col_index, level_item)
                 col_index += 1
                 

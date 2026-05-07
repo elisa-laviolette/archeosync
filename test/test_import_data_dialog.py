@@ -12,11 +12,13 @@ from qgis.PyQt.QtCore import Qt
 
 try:
     from ..ui.import_data_dialog import ImportDataDialog
+    import ui.import_data_dialog as import_data_dialog_module
     from ..services.settings_service import QGISSettingsManager
     from ..services.file_system_service import QGISFileSystemService
     from ..archeo_sync import ArcheoSyncPlugin
 except ImportError:
     from ui.import_data_dialog import ImportDataDialog
+    import ui.import_data_dialog as import_data_dialog_module
     from services.settings_service import QGISSettingsManager
     from services.file_system_service import QGISFileSystemService
     from archeo_sync import ArcheoSyncPlugin
@@ -62,6 +64,19 @@ class TestImportDataDialog(unittest.TestCase):
         # Check that services were called to load settings
         self.mock_settings_manager.get_value.assert_any_call('total_station_folder', '')
         self.mock_settings_manager.get_value.assert_any_call('completed_projects_folder', '')
+
+    def test_multi_selection_mode_supports_qt5_and_qt6(self):
+        """Selection mode helper should support both Qt5 and Qt6 APIs."""
+        fake_item_view_qt5 = type("FakeItemViewQt5", (), {"MultiSelection": "qt5-multi"})
+        fake_qt_widgets_qt5 = type("FakeQtWidgetsQt5", (), {"QAbstractItemView": fake_item_view_qt5})
+        with patch.object(import_data_dialog_module, "QtWidgets", fake_qt_widgets_qt5):
+            self.assertEqual(import_data_dialog_module._multi_selection_mode(), "qt5-multi")
+
+        fake_selection_mode = type("SelectionMode", (), {"MultiSelection": "qt6-multi"})
+        fake_item_view_qt6 = type("FakeItemViewQt6", (), {"SelectionMode": fake_selection_mode})
+        fake_qt_widgets_qt6 = type("FakeQtWidgetsQt6", (), {"QAbstractItemView": fake_item_view_qt6})
+        with patch.object(import_data_dialog_module, "QtWidgets", fake_qt_widgets_qt6):
+            self.assertEqual(import_data_dialog_module._multi_selection_mode(), "qt6-multi")
     
     def test_csv_files_display(self):
         """Test that CSV files are displayed correctly."""

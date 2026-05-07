@@ -49,6 +49,16 @@ except ImportError:
     from core.interfaces import ISettingsManager, ILayerService
     from core.data_structures import WarningData, ImportSummaryData
 
+
+def _align_center_flag():
+    """Return a center-alignment flag compatible with Qt5 and Qt6."""
+    if hasattr(Qt, "AlignCenter"):
+        return Qt.AlignCenter
+    alignment_flag = getattr(Qt, "AlignmentFlag", None)
+    if alignment_flag is not None and hasattr(alignment_flag, "AlignCenter"):
+        return alignment_flag.AlignCenter
+    raise AttributeError("Qt center alignment flag is not available.")
+
 # Import detection services at module level for testability
 DuplicateObjectsDetectorService = None
 SkippedNumbersDetectorService = None
@@ -141,7 +151,7 @@ class ImportSummaryDockWidget(QDockWidget):
         
         # Add title
         title_label = QtWidgets.QLabel(self.tr("Import Summary"))
-        title_label.setAlignment(Qt.AlignCenter)
+        title_label.setAlignment(_align_center_flag())
         title_label.setStyleSheet("font-size: 14px; font-weight: bold; margin: 5px;")
         main_layout.addWidget(title_label)
         
