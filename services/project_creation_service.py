@@ -44,7 +44,7 @@ import re
 import uuid
 import xml.etree.ElementTree as ET
 from typing import Optional, Any, Dict, List
-from qgis.core import QgsProject, QgsVectorLayer, QgsRasterLayer, QgsFeature, QgsGeometry, QgsWkbTypes, QgsVectorFileWriter, QgsCoordinateReferenceSystem
+from qgis.core import QgsProject, QgsVectorLayer, QgsRasterLayer, QgsFeature, QgsGeometry, QgsWkbTypes, QgsVectorFileWriter, QgsCoordinateReferenceSystem, QgsDefaultValue
 from qgis.PyQt.QtWidgets import QMessageBox
 from qgis.PyQt.QtCore import QObject
 
@@ -182,6 +182,7 @@ class QGISProjectCreationService(QObject):
             )
             if not success:
                 raise RuntimeError(f"Failed to create objects layer: {objects_gpkg_path}")
+            self._apply_defaults_to_created_layer(project, objects_gpkg_path, objects_layer_name, "objects")
             self._try_register_created_layer_id_mapping(
                 project=project,
                 source_layer_id=objects_layer_id,
@@ -203,6 +204,7 @@ class QGISProjectCreationService(QObject):
                 )
                 if not success:
                     raise RuntimeError(f"Failed to create features layer: {features_gpkg_path}")
+                self._apply_defaults_to_created_layer(project, features_gpkg_path, features_layer_name, "features")
                 self._try_register_created_layer_id_mapping(
                     project=project,
                     source_layer_id=features_layer_id,
@@ -225,6 +227,7 @@ class QGISProjectCreationService(QObject):
                 )
                 if not success:
                     raise RuntimeError(f"Failed to create small finds layer: {small_finds_gpkg_path}")
+                self._apply_defaults_to_created_layer(project, small_finds_gpkg_path, small_finds_layer_name, "small_finds")
                 self._try_register_created_layer_id_mapping(
                     project=project,
                     source_layer_id=small_finds_layer_id,
@@ -337,6 +340,58 @@ class QGISProjectCreationService(QObject):
             import traceback
             traceback.print_exc()
             return False
+
+    def _apply_defaults_to_created_layer(self, project: QgsProject, output_path: str, layer_name: str, layer_key: str) -> None:
+        """Apply configured form defaults on a newly copied layer."""
+        try:
+            normalized_output_path = os.path.normpath(output_path)
+            for layer in project.mapLayers().values():
+                if not isinstance(layer, QgsVectorLayer):
+                    continue
+                if layer.name() != layer_name:
+                    continue
+                source_path = os.path.normpath(layer.source().split("|")[0])
+                if source_path != normalized_output_path:
+                    continue
+                self._apply_configured_field_defaults(layer, layer_key)
+                break
+        except Exception as e:
+            print(f"Warning: failed to apply configured defaults for {layer_name}: {str(e)}")
+
+    def _apply_configured_field_defaults(self, layer: QgsVectorLayer, layer_key: str) -> None:
+        """Apply default expressions to fields configured in settings."""
+        objects_number_field = self._settings_manager.get_value('objects_number_field', '')
+        escaped_objects_number_field = str(objects_number_field).replace('"', '""') if objects_number_field else ''
+        objects_number_expression = (
+            f"with_variable('first', coalesce(to_int(@first_number), 1), "
+            f"with_variable('current_max', coalesce(maximum(\"{escaped_objects_number_field}\"), @first - 1), "
+            f"if(@current_max > @first - 1, @current_max, @first - 1) + 1))"
+            if escaped_objects_number_field else "@first_number"
+        )
+        layer_field_map = {
+            "objects": [
+                ("objects_number_field", objects_number_expression),
+                ("objects_recording_area_field", "@recording_area"),
+                ("objects_level_field", "@level"),
+            ],
+            "features": [
+                ("features_recording_area_field", "@recording_area"),
+                ("features_level_field", "@level"),
+            ],
+            "small_finds": [
+                ("small_finds_recording_area_field", "@recording_area"),
+                ("small_finds_level_field", "@level"),
+            ],
+        }
+        field_definitions = layer_field_map.get(layer_key, [])
+        for setting_key, expression in field_definitions:
+            field_name = self._settings_manager.get_value(setting_key, '')
+            if not field_name:
+                continue
+            field_idx = layer.fields().indexOf(field_name)
+            if field_idx < 0:
+                continue
+            layer.setDefaultValueDefinition(field_idx, QgsDefaultValue(expression))
 
     def _try_register_created_layer_id_mapping(
         self,

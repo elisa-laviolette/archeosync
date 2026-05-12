@@ -69,7 +69,9 @@ A QGIS plugin for archaeologists to prepare data for field work and import it ba
    - **Features Layer**: Select the layer for archaeological features
    - **Small Finds Layer**: Select the layer for small finds (supports point, multipoint, and no geometry types)
    - **Total Station Points Layer**: Select the layer for total station points (supports point and multipoint types)
-   - **Objects Field Configuration**: Configure number and level fields for the objects layer
+   - **Objects Field Configuration**: Configure number, level, and recording-area identifier fields for the objects layer
+   - **Features Field Configuration**: Configure level and recording-area identifier fields for the features layer
+   - **Small Finds Field Configuration**: Configure level and recording-area identifier fields for the small finds layer
    - **Extra Layers for Field Projects**: Select additional vector layers to include in field projects
 
    **Raster Tab:**
@@ -98,6 +100,8 @@ A QGIS plugin for archaeologists to prepare data for field work and import it ba
 **Project Naming**: When a level is defined, field project names will be the display name of the recording area followed by '_' and the content of the Next level column. For example: "Test Area_A" or "Excavation Site_Level 1". If no level is defined, only the recording area name is used.
 
 **Project Variable (`recording_area`)**: In **Settings > Layers & Fields**, the new **Recording Area Variable Source** option lets you choose what is written to the `recording_area` project variable: the display value, the feature ID, or a specific field from the recording areas layer.
+
+**Form Default Mapping**: During field-project creation, ArcheoSync injects default expressions on configured fields instead of hard-coded field names. The configured objects number field now computes the next value from the greater of existing object numbers and `@first_number`, then adds 1; configured recording-area identifier fields (objects/features/small finds) use `@recording_area`, and configured level fields use `@level`.
 
 **Background Image Processing**: When a background image is selected, the system will automatically clip the raster to the recording area boundary with a configurable offset (default: 20 cm). This ensures the background image extends slightly beyond the recording area for better context in the field. The original raster remains unchanged, and the clipped version is used only for the field project. Background images are positioned at the bottom of the layer tree for optimal visualization.
 

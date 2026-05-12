@@ -548,6 +548,51 @@ class TestProjectCreationService:
             mock_bookmark.setExtent.assert_called_once_with(mock_bounding_box)
             mock_bookmark_manager.addBookmark.assert_called_once_with(mock_bookmark)
 
+    def test_apply_configured_field_defaults_sets_expected_expressions(self):
+        """Configured fields should receive default expressions used by recording forms."""
+        mock_layer = Mock()
+        mock_fields = Mock()
+        mock_layer.fields.return_value = mock_fields
+        mock_fields.indexOf.side_effect = lambda name: {
+            'object_no': 1,
+            'obj_rec_id': 2,
+            'obj_level': 3,
+            'feat_rec_id': 4,
+            'feat_level': 5,
+            'sf_rec_id': 6,
+            'sf_level': 7,
+        }.get(name, -1)
+
+        self.settings_manager.get_value.side_effect = lambda key, default=None: {
+            'objects_number_field': 'object_no',
+            'objects_recording_area_field': 'obj_rec_id',
+            'objects_level_field': 'obj_level',
+            'features_recording_area_field': 'feat_rec_id',
+            'features_level_field': 'feat_level',
+            'small_finds_recording_area_field': 'sf_rec_id',
+            'small_finds_level_field': 'sf_level',
+        }.get(key, default)
+
+        self.project_service._apply_configured_field_defaults(mock_layer, 'objects')
+        self.project_service._apply_configured_field_defaults(mock_layer, 'features')
+        self.project_service._apply_configured_field_defaults(mock_layer, 'small_finds')
+
+        calls = mock_layer.setDefaultValueDefinition.call_args_list
+        assert len(calls) == 7
+
+        expressions_by_index = {
+            call_args[0][0]: call_args[0][1].expression()
+            for call_args in calls
+        }
+        assert "maximum(\"object_no\")" in expressions_by_index[1]
+        assert "@first_number" in expressions_by_index[1]
+        assert expressions_by_index[2] == '@recording_area'
+        assert expressions_by_index[3] == '@level'
+        assert expressions_by_index[4] == '@recording_area'
+        assert expressions_by_index[5] == '@level'
+        assert expressions_by_index[6] == '@recording_area'
+        assert expressions_by_index[7] == '@level'
+
     def test_copy_layer_to_geopackage_retries_without_unsupported_field(self, tmp_path):
         """
         When the writer reports an unsupported attribute type (e.g. geometry-valued attribute),

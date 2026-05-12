@@ -364,10 +364,14 @@ class SettingsDialog(QtWidgets.QDialog):
         # Features layer
         self._features_widget = self._create_layer_selector(self.tr("-- Select a polygon or multipolygon layer --"))
         form_layout.addRow(self.tr("Features Layer:"), self._features_widget)
+        self._features_fields_widget = self._create_child_fields_widget()
+        form_layout.addRow("", self._features_fields_widget)
         
         # Small finds layer
         self._small_finds_widget = self._create_layer_selector(self.tr("-- Select a point, multipoint, or no geometry layer --"))
         form_layout.addRow(self.tr("Small Finds Layer:"), self._small_finds_widget)
+        self._small_finds_fields_widget = self._create_child_fields_widget(is_small_finds=True)
+        form_layout.addRow("", self._small_finds_fields_widget)
         
         # Total station points layer
         self._total_station_points_widget = self._create_layer_selector(self.tr("-- Select a point or multipoint layer --"))
@@ -631,13 +635,60 @@ class SettingsDialog(QtWidgets.QDialog):
         level_layout.addWidget(level_label)
         level_layout.addWidget(self._level_field_combo)
         level_layout.addStretch()
+
+        recording_area_layout = QtWidgets.QHBoxLayout()
+        recording_area_label = QtWidgets.QLabel(self.tr("Recording Area Field:"))
+        self._objects_recording_area_field_combo = QtWidgets.QComboBox()
+        self._objects_recording_area_field_combo.addItem(self.tr("-- Select recording area field --"), "")
+        self._objects_recording_area_field_combo.setMinimumWidth(200)
+        recording_area_layout.addWidget(recording_area_label)
+        recording_area_layout.addWidget(self._objects_recording_area_field_combo)
+        recording_area_layout.addStretch()
         
         layout.addLayout(number_layout)
         layout.addLayout(level_layout)
+        layout.addLayout(recording_area_layout)
         
         # Initially hide the widget
         widget.setVisible(False)
         
+        return widget
+
+    def _create_child_fields_widget(self, is_small_finds: bool = False) -> QtWidgets.QWidget:
+        """Create field selectors for features/small finds layers."""
+        widget = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(widget)
+        layout.setContentsMargins(20, 0, 0, 0)
+
+        recording_area_layout = QtWidgets.QHBoxLayout()
+        recording_area_label = QtWidgets.QLabel(self.tr("Recording Area Field:"))
+        recording_area_combo = QtWidgets.QComboBox()
+        recording_area_combo.addItem(self.tr("-- Select recording area field --"), "")
+        recording_area_combo.setMinimumWidth(200)
+        recording_area_layout.addWidget(recording_area_label)
+        recording_area_layout.addWidget(recording_area_combo)
+        recording_area_layout.addStretch()
+
+        level_layout = QtWidgets.QHBoxLayout()
+        level_label = QtWidgets.QLabel(self.tr("Level Field:"))
+        level_combo = QtWidgets.QComboBox()
+        level_combo.addItem(self.tr("-- Select level field --"), "")
+        level_combo.setMinimumWidth(200)
+        level_layout.addWidget(level_label)
+        level_layout.addWidget(level_combo)
+        level_layout.addStretch()
+
+        layout.addLayout(recording_area_layout)
+        layout.addLayout(level_layout)
+        widget.setVisible(False)
+
+        if is_small_finds:
+            self._small_finds_recording_area_field_combo = recording_area_combo
+            self._small_finds_level_field_combo = level_combo
+        else:
+            self._features_recording_area_field_combo = recording_area_combo
+            self._features_level_field_combo = level_combo
+
         return widget
     
     def _create_extra_layers_widget(self) -> QtWidgets.QWidget:
@@ -765,10 +816,16 @@ class SettingsDialog(QtWidgets.QDialog):
         # Layer selector connections
         self._recording_areas_widget.refresh_button.clicked.connect(self._refresh_layer_list)
         self._recording_areas_widget.combo_box.currentIndexChanged.connect(self._on_recording_areas_layer_changed)
+        self._recording_area_variable_source_combo.currentIndexChanged.connect(
+            self._on_recording_area_variable_source_changed
+        )
         self._objects_widget.refresh_button.clicked.connect(self._refresh_objects_layer_list)
         self._objects_widget.combo_box.currentIndexChanged.connect(self._on_objects_layer_changed)
+        self._level_field_combo.currentIndexChanged.connect(self._on_objects_level_field_changed)
         self._features_widget.refresh_button.clicked.connect(self._refresh_features_layer_list)
+        self._features_widget.combo_box.currentIndexChanged.connect(self._on_features_layer_changed)
         self._small_finds_widget.refresh_button.clicked.connect(self._refresh_small_finds_layer_list)
+        self._small_finds_widget.combo_box.currentIndexChanged.connect(self._on_small_finds_layer_changed)
         self._total_station_points_widget.refresh_button.clicked.connect(self._refresh_total_station_points_layer_list)
         # Extra layers connections
         self._extra_layers_widget.refresh_button.clicked.connect(self._refresh_extra_layers_list)
@@ -816,6 +873,15 @@ class SettingsDialog(QtWidgets.QDialog):
     def _on_recording_areas_layer_changed(self) -> None:
         """Update recording-area variable source options when recording layer changes."""
         self._refresh_recording_area_variable_source_options()
+        self._refresh_recording_area_field_combos()
+
+    def _on_recording_area_variable_source_changed(self) -> None:
+        """Update recording-area field combos when source selection changes."""
+        self._refresh_recording_area_field_combos()
+
+    def _on_objects_level_field_changed(self) -> None:
+        """Update child level-field combos when objects level field changes."""
+        self._refresh_child_level_field_combos()
 
     def _refresh_recording_area_variable_source_options(self) -> None:
         """
@@ -1033,6 +1099,9 @@ class SettingsDialog(QtWidgets.QDialog):
     def _populate_objects_fields(self, layer_id: str) -> None:
         """Populate the field selection combo boxes for the objects layer."""
         try:
+            previous_number = self._number_field_combo.currentData()
+            previous_level = self._level_field_combo.currentData()
+            previous_recording_area = self._objects_recording_area_field_combo.currentData()
             # Get fields from the layer
             fields = self._layer_service.get_layer_fields(layer_id)
             if fields is None:
@@ -1042,10 +1111,12 @@ class SettingsDialog(QtWidgets.QDialog):
             # Clear existing items
             self._number_field_combo.clear()
             self._level_field_combo.clear()
+            self._objects_recording_area_field_combo.clear()
             
             # Add placeholder items
             self._number_field_combo.addItem(self.tr("-- Select number field --"), "")
             self._level_field_combo.addItem(self.tr("-- Select level field --"), "")
+            self._objects_recording_area_field_combo.addItem(self.tr("-- Select recording area field --"), "")
             
             # Add fields to number field combo (only integer fields)
             integer_fields = [field for field in fields if field['is_integer']]
@@ -1057,9 +1128,162 @@ class SettingsDialog(QtWidgets.QDialog):
             for field in fields:
                 display_text = self.tr(f"{field['name']} ({field['type']})")
                 self._level_field_combo.addItem(display_text, field['name'])
+                if self._is_field_compatible_with_recording_area_source(field):
+                    self._objects_recording_area_field_combo.addItem(display_text, field['name'])
+
+            if previous_number:
+                index = self._number_field_combo.findData(previous_number)
+                if index >= 0:
+                    self._number_field_combo.setCurrentIndex(index)
+            if previous_level:
+                index = self._level_field_combo.findData(previous_level)
+                if index >= 0:
+                    self._level_field_combo.setCurrentIndex(index)
+            if previous_recording_area:
+                index = self._objects_recording_area_field_combo.findData(previous_recording_area)
+                if index >= 0:
+                    self._objects_recording_area_field_combo.setCurrentIndex(index)
             
         except Exception as e:
             self._show_error(self.tr("Field Error"), self.tr(f"Failed to populate field lists: {str(e)}"))
+
+    def _on_features_layer_changed(self) -> None:
+        """Handle changes to the features layer selection."""
+        layer_id = self._features_widget.combo_box.currentData()
+        if layer_id:
+            self._features_fields_widget.setVisible(True)
+            self._populate_child_fields(layer_id, self._features_recording_area_field_combo, self._features_level_field_combo)
+        else:
+            self._features_fields_widget.setVisible(False)
+
+    def _on_small_finds_layer_changed(self) -> None:
+        """Handle changes to the small finds layer selection."""
+        layer_id = self._small_finds_widget.combo_box.currentData()
+        if layer_id:
+            self._small_finds_fields_widget.setVisible(True)
+            self._populate_child_fields(
+                layer_id,
+                self._small_finds_recording_area_field_combo,
+                self._small_finds_level_field_combo
+            )
+        else:
+            self._small_finds_fields_widget.setVisible(False)
+
+    def _populate_child_fields(self, layer_id: str, recording_area_combo: QtWidgets.QComboBox, level_combo: QtWidgets.QComboBox) -> None:
+        """Populate recording-area and level fields for features/small finds."""
+        try:
+            previous_recording_area = recording_area_combo.currentData()
+            previous_level = level_combo.currentData()
+            fields = self._layer_service.get_layer_fields(layer_id)
+            if fields is None:
+                self._show_error(self.tr("Field Error"), self.tr(f"Could not retrieve fields for layer {layer_id}"))
+                return
+
+            recording_area_combo.clear()
+            level_combo.clear()
+            recording_area_combo.addItem(self.tr("-- Select recording area field --"), "")
+            level_combo.addItem(self.tr("-- Select level field --"), "")
+
+            for field in fields:
+                display_text = self.tr(f"{field['name']} ({field['type']})")
+                if self._is_field_compatible_with_recording_area_source(field):
+                    recording_area_combo.addItem(display_text, field['name'])
+                if self._is_field_compatible_with_level_type(field):
+                    level_combo.addItem(display_text, field['name'])
+
+            if previous_recording_area:
+                index = recording_area_combo.findData(previous_recording_area)
+                if index >= 0:
+                    recording_area_combo.setCurrentIndex(index)
+            if previous_level:
+                index = level_combo.findData(previous_level)
+                if index >= 0:
+                    level_combo.setCurrentIndex(index)
+        except Exception as e:
+            self._show_error(self.tr("Field Error"), self.tr(f"Failed to populate field lists: {str(e)}"))
+
+    def _is_field_compatible_with_recording_area_source(self, field: dict) -> bool:
+        """Return True if a field type is compatible with the selected recording_area source."""
+        expected_is_integer = self._get_recording_area_source_integer_type()
+        if expected_is_integer is None:
+            return True
+        return bool(field.get('is_integer', False)) == expected_is_integer
+
+    def _is_field_compatible_with_level_type(self, field: dict) -> bool:
+        """Return True if a field type matches the selected objects level field type."""
+        expected_is_integer = self._get_objects_level_integer_type()
+        if expected_is_integer is None:
+            return True
+        return bool(field.get('is_integer', False)) == expected_is_integer
+
+    def _get_recording_area_source_integer_type(self):
+        """Return expected integer type for recording_area source, or None if unconstrained."""
+        source = self._recording_area_variable_source_combo.currentData()
+        if source == "id":
+            return True
+        if isinstance(source, str) and source.startswith("field:"):
+            source_field_name = source.split(":", 1)[1]
+            recording_layer_id = self._recording_areas_widget.combo_box.currentData()
+            if not recording_layer_id or not source_field_name:
+                return None
+            fields = self._layer_service.get_layer_fields(recording_layer_id)
+            if not isinstance(fields, list):
+                return None
+            for field in fields:
+                if field.get('name') == source_field_name:
+                    return bool(field.get('is_integer', False))
+        return None
+
+    def _get_objects_level_integer_type(self):
+        """Return selected objects-level field integer type, or None if not constrained."""
+        objects_layer_id = self._objects_widget.combo_box.currentData()
+        level_field_name = self._level_field_combo.currentData()
+        if not objects_layer_id or not level_field_name:
+            return None
+        fields = self._layer_service.get_layer_fields(objects_layer_id)
+        if not isinstance(fields, list):
+            return None
+        for field in fields:
+            if field.get('name') == level_field_name:
+                return bool(field.get('is_integer', False))
+        return None
+
+    def _refresh_recording_area_field_combos(self) -> None:
+        """Refresh recording-area field choices according to selected source type."""
+        objects_layer_id = self._objects_widget.combo_box.currentData()
+        if objects_layer_id:
+            self._populate_objects_fields(objects_layer_id)
+        features_layer_id = self._features_widget.combo_box.currentData()
+        if features_layer_id:
+            self._populate_child_fields(
+                features_layer_id,
+                self._features_recording_area_field_combo,
+                self._features_level_field_combo
+            )
+        small_finds_layer_id = self._small_finds_widget.combo_box.currentData()
+        if small_finds_layer_id:
+            self._populate_child_fields(
+                small_finds_layer_id,
+                self._small_finds_recording_area_field_combo,
+                self._small_finds_level_field_combo
+            )
+
+    def _refresh_child_level_field_combos(self) -> None:
+        """Refresh child level choices according to selected objects-level type."""
+        features_layer_id = self._features_widget.combo_box.currentData()
+        if features_layer_id:
+            self._populate_child_fields(
+                features_layer_id,
+                self._features_recording_area_field_combo,
+                self._features_level_field_combo
+            )
+        small_finds_layer_id = self._small_finds_widget.combo_box.currentData()
+        if small_finds_layer_id:
+            self._populate_child_fields(
+                small_finds_layer_id,
+                self._small_finds_recording_area_field_combo,
+                self._small_finds_level_field_combo
+            )
     
     def _update_ui_state(self) -> None:
         """Update UI state based on current settings."""
@@ -1119,6 +1343,7 @@ class SettingsDialog(QtWidgets.QDialog):
                     # Load field selections after layer is set
                     number_field = self._settings_manager.get_value('objects_number_field', '')
                     level_field = self._settings_manager.get_value('objects_level_field', '')
+                    recording_area_field = self._settings_manager.get_value('objects_recording_area_field', '')
                     if number_field:
                         index = self._number_field_combo.findData(number_field)
                         if index >= 0:
@@ -1127,6 +1352,10 @@ class SettingsDialog(QtWidgets.QDialog):
                         index = self._level_field_combo.findData(level_field)
                         if index >= 0:
                             self._level_field_combo.setCurrentIndex(index)
+                    if recording_area_field:
+                        index = self._objects_recording_area_field_combo.findData(recording_area_field)
+                        if index >= 0:
+                            self._objects_recording_area_field_combo.setCurrentIndex(index)
             
             # Load features layer
             features_layer_id = self._settings_manager.get_value('features_layer', '')
@@ -1135,6 +1364,16 @@ class SettingsDialog(QtWidgets.QDialog):
                 index = self._features_widget.combo_box.findData(features_layer_id)
                 if index >= 0:
                     self._features_widget.combo_box.setCurrentIndex(index)
+                    features_recording_area_field = self._settings_manager.get_value('features_recording_area_field', '')
+                    features_level_field = self._settings_manager.get_value('features_level_field', '')
+                    if features_recording_area_field:
+                        index = self._features_recording_area_field_combo.findData(features_recording_area_field)
+                        if index >= 0:
+                            self._features_recording_area_field_combo.setCurrentIndex(index)
+                    if features_level_field:
+                        index = self._features_level_field_combo.findData(features_level_field)
+                        if index >= 0:
+                            self._features_level_field_combo.setCurrentIndex(index)
             
             # Load small finds layer
             small_finds_layer_id = self._settings_manager.get_value('small_finds_layer', '')
@@ -1143,6 +1382,16 @@ class SettingsDialog(QtWidgets.QDialog):
                 index = self._small_finds_widget.combo_box.findData(small_finds_layer_id)
                 if index >= 0:
                     self._small_finds_widget.combo_box.setCurrentIndex(index)
+                    small_finds_recording_area_field = self._settings_manager.get_value('small_finds_recording_area_field', '')
+                    small_finds_level_field = self._settings_manager.get_value('small_finds_level_field', '')
+                    if small_finds_recording_area_field:
+                        index = self._small_finds_recording_area_field_combo.findData(small_finds_recording_area_field)
+                        if index >= 0:
+                            self._small_finds_recording_area_field_combo.setCurrentIndex(index)
+                    if small_finds_level_field:
+                        index = self._small_finds_level_field_combo.findData(small_finds_level_field)
+                        if index >= 0:
+                            self._small_finds_level_field_combo.setCurrentIndex(index)
             
             # Load total station points layer
             total_station_points_layer_id = self._settings_manager.get_value('total_station_points_layer', '')
@@ -1205,8 +1454,13 @@ class SettingsDialog(QtWidgets.QDialog):
                 'objects_layer': objects_layer_id,
                 'objects_number_field': self._settings_manager.get_value('objects_number_field', ''),
                 'objects_level_field': self._settings_manager.get_value('objects_level_field', ''),
+                'objects_recording_area_field': self._settings_manager.get_value('objects_recording_area_field', ''),
                 'features_layer': features_layer_id,
+                'features_recording_area_field': self._settings_manager.get_value('features_recording_area_field', ''),
+                'features_level_field': self._settings_manager.get_value('features_level_field', ''),
                 'small_finds_layer': small_finds_layer_id,
+                'small_finds_recording_area_field': self._settings_manager.get_value('small_finds_recording_area_field', ''),
+                'small_finds_level_field': self._settings_manager.get_value('small_finds_level_field', ''),
                 'total_station_points_layer': total_station_points_layer_id,
 
                 'raster_clipping_offset': float(raster_offset),
@@ -1246,8 +1500,13 @@ class SettingsDialog(QtWidgets.QDialog):
                 'objects_layer': self._objects_widget.combo_box.currentData(),
                 'objects_number_field': self._number_field_combo.currentData(),
                 'objects_level_field': self._level_field_combo.currentData(),
+                'objects_recording_area_field': self._objects_recording_area_field_combo.currentData(),
                 'features_layer': self._features_widget.combo_box.currentData(),
+                'features_recording_area_field': self._features_recording_area_field_combo.currentData(),
+                'features_level_field': self._features_level_field_combo.currentData(),
                 'small_finds_layer': self._small_finds_widget.combo_box.currentData(),
+                'small_finds_recording_area_field': self._small_finds_recording_area_field_combo.currentData(),
+                'small_finds_level_field': self._small_finds_level_field_combo.currentData(),
                 'total_station_points_layer': self._total_station_points_widget.combo_box.currentData(),
 
                 'raster_clipping_offset': self._raster_offset_spinbox.value(),
@@ -1346,6 +1605,7 @@ class SettingsDialog(QtWidgets.QDialog):
                     # Revert field selections
                     number_field = self._original_values.get('objects_number_field', '')
                     level_field = self._original_values.get('objects_level_field', '')
+                    recording_area_field = self._original_values.get('objects_recording_area_field', '')
                     if number_field:
                         index = self._number_field_combo.findData(number_field)
                         if index >= 0:
@@ -1354,6 +1614,10 @@ class SettingsDialog(QtWidgets.QDialog):
                         index = self._level_field_combo.findData(level_field)
                         if index >= 0:
                             self._level_field_combo.setCurrentIndex(index)
+                    if recording_area_field:
+                        index = self._objects_recording_area_field_combo.findData(recording_area_field)
+                        if index >= 0:
+                            self._objects_recording_area_field_combo.setCurrentIndex(index)
                 else:
                     self._objects_widget.combo_box.setCurrentIndex(0)
             else:
@@ -1365,6 +1629,16 @@ class SettingsDialog(QtWidgets.QDialog):
                 index = self._features_widget.combo_box.findData(features_layer_id)
                 if index >= 0:
                     self._features_widget.combo_box.setCurrentIndex(index)
+                    features_recording_area_field = self._original_values.get('features_recording_area_field', '')
+                    features_level_field = self._original_values.get('features_level_field', '')
+                    if features_recording_area_field:
+                        index = self._features_recording_area_field_combo.findData(features_recording_area_field)
+                        if index >= 0:
+                            self._features_recording_area_field_combo.setCurrentIndex(index)
+                    if features_level_field:
+                        index = self._features_level_field_combo.findData(features_level_field)
+                        if index >= 0:
+                            self._features_level_field_combo.setCurrentIndex(index)
                 else:
                     self._features_widget.combo_box.setCurrentIndex(0)
             else:
@@ -1376,6 +1650,16 @@ class SettingsDialog(QtWidgets.QDialog):
                 index = self._small_finds_widget.combo_box.findData(small_finds_layer_id)
                 if index >= 0:
                     self._small_finds_widget.combo_box.setCurrentIndex(index)
+                    small_finds_recording_area_field = self._original_values.get('small_finds_recording_area_field', '')
+                    small_finds_level_field = self._original_values.get('small_finds_level_field', '')
+                    if small_finds_recording_area_field:
+                        index = self._small_finds_recording_area_field_combo.findData(small_finds_recording_area_field)
+                        if index >= 0:
+                            self._small_finds_recording_area_field_combo.setCurrentIndex(index)
+                    if small_finds_level_field:
+                        index = self._small_finds_level_field_combo.findData(small_finds_level_field)
+                        if index >= 0:
+                            self._small_finds_level_field_combo.setCurrentIndex(index)
                 else:
                     self._small_finds_widget.combo_box.setCurrentIndex(0)
             else:

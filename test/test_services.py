@@ -1745,6 +1745,149 @@ class TestArcheoSyncConfigurationValidator(unittest.TestCase):
         result = self.validator.validate_objects_layer_fields("test_layer_id", None, "level")
         self.assertTrue(result.is_valid)
 
+    def test_validate_layer_field_exists_field_not_found(self):
+        """Generic field validation should fail when field does not exist."""
+        fields = [
+            {'name': 'id', 'is_integer': True},
+            {'name': 'code', 'is_integer': False}
+        ]
+        self.validator._layer_service.get_layer_fields.return_value = fields
+
+        result = self.validator.validate_layer_field_exists(
+            "test_layer_id",
+            "missing_field",
+            "Features recording area field"
+        )
+        self.assertFalse(result.is_valid)
+        self.assertIn("Features recording area field 'missing_field' not found in layer", result.message)
+
+    def test_validate_all_settings_with_configured_form_fields(self):
+        """validate_all_settings should validate newly configurable recording/level fields."""
+        self.file_system_service.path_exists.return_value = True
+        self.file_system_service.is_directory.return_value = True
+        self.file_system_service.list_files.return_value = ['test.csv']
+        self.layer_service.is_valid_polygon_layer.return_value = True
+        self.layer_service.is_valid_polygon_or_multipolygon_layer.return_value = True
+        self.layer_service.is_valid_point_or_multipoint_layer.return_value = True
+        self.layer_service.get_layer_relationships.return_value = []
+
+        def _fields_for_layer(layer_id):
+            base_fields = [
+                {'name': 'id', 'is_integer': True},
+                {'name': 'level', 'is_integer': False},
+                {'name': 'recording_area_id', 'is_integer': True},
+            ]
+            if layer_id == 'objects_layer':
+                return base_fields + [{'name': 'number', 'is_integer': True}]
+            return base_fields
+
+        self.layer_service.get_layer_fields.side_effect = _fields_for_layer
+
+        settings = {
+            'field_projects_folder': '/valid/path',
+            'total_station_folder': '/valid/path',
+            'completed_projects_folder': '/valid/path',
+            'recording_areas_layer': 'recording_layer',
+            'objects_layer': 'objects_layer',
+            'objects_number_field': 'number',
+            'objects_level_field': 'level',
+            'objects_recording_area_field': 'recording_area_id',
+            'features_layer': 'features_layer',
+            'features_level_field': 'level',
+            'features_recording_area_field': 'recording_area_id',
+            'small_finds_layer': 'small_finds_layer',
+            'small_finds_level_field': 'level',
+            'small_finds_recording_area_field': 'recording_area_id',
+        }
+
+        results = self.validator.validate_all_settings(settings)
+
+        self.assertNotIn('objects_layer_fields', results)
+        self.assertNotIn('features_layer_fields', results)
+        self.assertNotIn('small_finds_layer_fields', results)
+
+    def test_validate_all_settings_level_field_types_must_match_across_layers(self):
+        """Level fields should use coherent types across configured layers."""
+        self.file_system_service.path_exists.return_value = True
+        self.file_system_service.is_directory.return_value = True
+        self.file_system_service.list_files.return_value = ['test.csv']
+        self.layer_service.is_valid_polygon_layer.return_value = True
+        self.layer_service.is_valid_polygon_or_multipolygon_layer.return_value = True
+        self.layer_service.is_valid_point_or_multipoint_layer.return_value = True
+        self.layer_service.get_layer_relationships.return_value = []
+
+        def _fields_for_layer(layer_id):
+            if layer_id == 'objects_layer':
+                return [{'name': 'level', 'is_integer': False}, {'name': 'recording_area_id', 'is_integer': True}, {'name': 'number', 'is_integer': True}]
+            if layer_id == 'features_layer':
+                return [{'name': 'level', 'is_integer': True}, {'name': 'recording_area_id', 'is_integer': True}]
+            if layer_id == 'small_finds_layer':
+                return [{'name': 'level', 'is_integer': False}, {'name': 'recording_area_id', 'is_integer': True}]
+            return [{'name': 'id', 'is_integer': True}]
+
+        self.layer_service.get_layer_fields.side_effect = _fields_for_layer
+
+        settings = {
+            'recording_areas_layer': 'recording_layer',
+            'objects_layer': 'objects_layer',
+            'objects_number_field': 'number',
+            'objects_level_field': 'level',
+            'objects_recording_area_field': 'recording_area_id',
+            'features_layer': 'features_layer',
+            'features_level_field': 'level',
+            'features_recording_area_field': 'recording_area_id',
+            'small_finds_layer': 'small_finds_layer',
+            'small_finds_level_field': 'level',
+            'small_finds_recording_area_field': 'recording_area_id',
+            'recording_area_variable_source': 'id',
+        }
+
+        results = self.validator.validate_all_settings(settings)
+        self.assertIn('level_field_types', results)
+        self.assertGreater(len(results['level_field_types']), 0)
+
+    def test_validate_all_settings_recording_area_types_must_match_variable_source(self):
+        """Recording-area field types should match recording-area variable source type."""
+        self.file_system_service.path_exists.return_value = True
+        self.file_system_service.is_directory.return_value = True
+        self.file_system_service.list_files.return_value = ['test.csv']
+        self.layer_service.is_valid_polygon_layer.return_value = True
+        self.layer_service.is_valid_polygon_or_multipolygon_layer.return_value = True
+        self.layer_service.is_valid_point_or_multipoint_layer.return_value = True
+        self.layer_service.get_layer_relationships.return_value = []
+
+        def _fields_for_layer(layer_id):
+            if layer_id == 'recording_layer':
+                return [{'name': 'code', 'is_integer': False}]
+            if layer_id == 'objects_layer':
+                return [{'name': 'number', 'is_integer': True}, {'name': 'level', 'is_integer': False}, {'name': 'recording_area_id', 'is_integer': True}]
+            if layer_id == 'features_layer':
+                return [{'name': 'level', 'is_integer': False}, {'name': 'recording_area_id', 'is_integer': True}]
+            if layer_id == 'small_finds_layer':
+                return [{'name': 'level', 'is_integer': False}, {'name': 'recording_area_id', 'is_integer': True}]
+            return [{'name': 'id', 'is_integer': True}]
+
+        self.layer_service.get_layer_fields.side_effect = _fields_for_layer
+
+        settings = {
+            'recording_areas_layer': 'recording_layer',
+            'objects_layer': 'objects_layer',
+            'objects_number_field': 'number',
+            'objects_level_field': 'level',
+            'objects_recording_area_field': 'recording_area_id',
+            'features_layer': 'features_layer',
+            'features_level_field': 'level',
+            'features_recording_area_field': 'recording_area_id',
+            'small_finds_layer': 'small_finds_layer',
+            'small_finds_level_field': 'level',
+            'small_finds_recording_area_field': 'recording_area_id',
+            'recording_area_variable_source': 'field:code',
+        }
+
+        results = self.validator.validate_all_settings(settings)
+        self.assertIn('recording_area_field_types', results)
+        self.assertGreater(len(results['recording_area_field_types']), 0)
+
     def test_validate_layer_relationships_no_recording_areas_layer(self):
         """Test relationship validation when no recording areas layer is set."""
         # When recording areas layer is not set, relationships are not required

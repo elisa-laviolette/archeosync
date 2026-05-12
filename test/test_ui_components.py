@@ -562,6 +562,18 @@ class TestSettingsDialog(unittest.TestCase):
         
         # Verify initial state (hidden)
         self.assertFalse(self.dialog._objects_fields_widget.isVisible())
+
+    def test_features_and_small_finds_fields_widgets_creation(self):
+        """Features and small finds field widgets should exist and be hidden by default."""
+        self.assertIsNotNone(self.dialog._features_fields_widget)
+        self.assertIsNotNone(self.dialog._features_recording_area_field_combo)
+        self.assertIsNotNone(self.dialog._features_level_field_combo)
+        self.assertFalse(self.dialog._features_fields_widget.isVisible())
+
+        self.assertIsNotNone(self.dialog._small_finds_fields_widget)
+        self.assertIsNotNone(self.dialog._small_finds_recording_area_field_combo)
+        self.assertIsNotNone(self.dialog._small_finds_level_field_combo)
+        self.assertFalse(self.dialog._small_finds_fields_widget.isVisible())
     
     def test_objects_layer_changed_shows_fields_widget(self):
         """Test that field selection widget appears when objects layer is selected."""
@@ -640,6 +652,64 @@ class TestSettingsDialog(unittest.TestCase):
         self.assertIn("number (Integer)", level_items)
         self.assertIn("level (String)", level_items)
         self.assertIn("name (String)", level_items)
+
+    def test_populate_child_fields_filters_recording_area_by_source_type(self):
+        """Child recording-area combos should only show fields compatible with selected source type."""
+        self.dialog._recording_area_variable_source_combo.clear()
+        self.dialog._recording_area_variable_source_combo.addItem("Feature ID", "id")
+        self.dialog._recording_area_variable_source_combo.setCurrentIndex(0)
+
+        fields = [
+            {'name': 'rec_id', 'type': 'Integer', 'is_integer': True},
+            {'name': 'rec_code', 'type': 'String', 'is_integer': False},
+        ]
+        self.dialog._layer_service.get_layer_fields.return_value = fields
+
+        self.dialog._populate_child_fields(
+            "test_layer_id",
+            self.dialog._features_recording_area_field_combo,
+            self.dialog._features_level_field_combo
+        )
+
+        recording_items = [
+            self.dialog._features_recording_area_field_combo.itemText(i)
+            for i in range(self.dialog._features_recording_area_field_combo.count())
+        ]
+        self.assertIn("rec_id (Integer)", recording_items)
+        self.assertNotIn("rec_code (String)", recording_items)
+
+    def test_populate_child_fields_filters_level_by_objects_level_type(self):
+        """Child level combos should only show fields matching objects level type."""
+        self.dialog._objects_widget.combo_box.clear()
+        self.dialog._objects_widget.combo_box.addItem("Objects", "objects_layer_id")
+        self.dialog._objects_widget.combo_box.setCurrentIndex(0)
+
+        self.dialog._level_field_combo.clear()
+        self.dialog._level_field_combo.addItem("obj_level (String)", "obj_level")
+        self.dialog._level_field_combo.setCurrentIndex(0)
+
+        def fields_side_effect(layer_id):
+            if layer_id == "objects_layer_id":
+                return [{'name': 'obj_level', 'type': 'String', 'is_integer': False}]
+            return [
+                {'name': 'level_text', 'type': 'String', 'is_integer': False},
+                {'name': 'level_num', 'type': 'Integer', 'is_integer': True},
+            ]
+
+        self.dialog._layer_service.get_layer_fields.side_effect = fields_side_effect
+
+        self.dialog._populate_child_fields(
+            "features_layer_id",
+            self.dialog._features_recording_area_field_combo,
+            self.dialog._features_level_field_combo
+        )
+
+        level_items = [
+            self.dialog._features_level_field_combo.itemText(i)
+            for i in range(self.dialog._features_level_field_combo.count())
+        ]
+        self.assertIn("level_text (String)", level_items)
+        self.assertNotIn("level_num (Integer)", level_items)
     
     def test_populate_objects_fields_layer_not_found(self):
         """Test field population when layer is not found."""
@@ -676,8 +746,18 @@ class TestSettingsDialog(unittest.TestCase):
         # Set up field selections
         self.dialog._number_field_combo.addItem("number (Integer)", "number")
         self.dialog._level_field_combo.addItem("level (String)", "level")
+        self.dialog._objects_recording_area_field_combo.addItem("rec_id (Integer)", "rec_id")
+        self.dialog._features_recording_area_field_combo.addItem("rec_id (Integer)", "rec_id")
+        self.dialog._features_level_field_combo.addItem("level (String)", "level")
+        self.dialog._small_finds_recording_area_field_combo.addItem("rec_id (Integer)", "rec_id")
+        self.dialog._small_finds_level_field_combo.addItem("level (String)", "level")
         self.dialog._number_field_combo.setCurrentIndex(1)
         self.dialog._level_field_combo.setCurrentIndex(1)
+        self.dialog._objects_recording_area_field_combo.setCurrentIndex(1)
+        self.dialog._features_recording_area_field_combo.setCurrentIndex(1)
+        self.dialog._features_level_field_combo.setCurrentIndex(1)
+        self.dialog._small_finds_recording_area_field_combo.setCurrentIndex(1)
+        self.dialog._small_finds_level_field_combo.setCurrentIndex(1)
         
         # Mock validation to pass
         self.dialog._configuration_validator.validate_all_settings.return_value = {}
@@ -690,6 +770,11 @@ class TestSettingsDialog(unittest.TestCase):
             # Verify field selections were saved
             mock_set_value.assert_any_call('objects_number_field', 'number')
             mock_set_value.assert_any_call('objects_level_field', 'level')
+            mock_set_value.assert_any_call('objects_recording_area_field', 'rec_id')
+            mock_set_value.assert_any_call('features_recording_area_field', 'rec_id')
+            mock_set_value.assert_any_call('features_level_field', 'level')
+            mock_set_value.assert_any_call('small_finds_recording_area_field', 'rec_id')
+            mock_set_value.assert_any_call('small_finds_level_field', 'level')
     
     def test_load_settings_populates_field_selections(self):
         """Test that field selections are loaded correctly."""

@@ -407,16 +407,21 @@ class PrepareRecordingDialog(QtWidgets.QDialog):
                     related_info = self._layer_service.get_related_objects_info(
                         feature, objects_layer_id, number_field, level_field, recording_areas_layer_id
                     )
+                highest_last_level = self._get_highest_last_level_across_configured_layers(
+                    feature=feature,
+                    recording_areas_layer_id=recording_areas_layer_id,
+                    default_last_level=related_info['last_level']
+                )
                 
                 # Add last level
-                level_item = QtWidgets.QTableWidgetItem(related_info['last_level'])
+                level_item = QtWidgets.QTableWidgetItem(highest_last_level)
                 level_item.setFlags(level_item.flags() & ~_item_is_editable_flag())  # Make read-only
                 self._entities_table.setItem(row, col_index, level_item)
                 col_index += 1
                 
                 # Add level (editable)
                 level = self._layer_service.calculate_next_level(
-                    related_info['last_level'], level_field, objects_layer_id
+                    highest_last_level, level_field, objects_layer_id
                 )
                 level_item = QtWidgets.QTableWidgetItem(level)
                 self._entities_table.setItem(row, col_index, level_item)
@@ -427,6 +432,45 @@ class PrepareRecordingDialog(QtWidgets.QDialog):
         
         # Resize columns to content
         self._entities_table.resizeColumnsToContents()
+
+    def _get_highest_last_level_across_configured_layers(
+        self,
+        feature,
+        recording_areas_layer_id: str,
+        default_last_level: str
+    ) -> str:
+        """
+        Return highest last level among configured objects/features/small_finds layers.
+
+        When multiple layers contribute level values, preparation must continue from the
+        highest already-used level across all configured layers.
+        """
+        layer_settings = [
+            ("objects_layer", "objects_level_field"),
+            ("features_layer", "features_level_field"),
+            ("small_finds_layer", "small_finds_level_field"),
+        ]
+        level_values: List[str] = []
+
+        for layer_setting_key, level_setting_key in layer_settings:
+            layer_id = self._settings_manager.get_value(layer_setting_key, '')
+            configured_level_field = self._settings_manager.get_value(level_setting_key, '')
+            if not layer_id or not configured_level_field:
+                continue
+            layer_info = self._layer_service.get_related_objects_info(
+                feature,
+                layer_id,
+                None,
+                configured_level_field,
+                recording_areas_layer_id
+            )
+            last_level = str(layer_info.get('last_level', '') or '')
+            if last_level:
+                level_values.append(last_level)
+
+        if not level_values:
+            return default_last_level
+        return max(level_values)
     
     def _add_background_image_dropdown(self, row: int, col: int, feature, recording_areas_layer_id: str) -> None:
         """

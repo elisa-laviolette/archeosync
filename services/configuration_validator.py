@@ -48,7 +48,7 @@ The validator provides:
 - Extensible validation rules
 """
 
-from typing import List, Optional
+from typing import Dict, List, Optional
 from pathlib import Path
 
 try:
@@ -407,6 +407,110 @@ class ArcheoSyncConfigurationValidator(IConfigurationValidator):
                 return ValidationResult(False, f"Level field '{level_field}' not found in layer")
         
         return ValidationResult(True, "Field validation successful")
+
+    def validate_layer_field_exists(self, layer_id: str, field_name: Optional[str], field_label: str) -> ValidationResult:
+        """
+        Validate that a configured field exists on a given layer.
+
+        Args:
+            layer_id: Layer ID where the field should exist
+            field_name: Configured field name (optional)
+            field_label: Human readable field label used in error messages
+        """
+        if not layer_id or not field_name:
+            return ValidationResult(True, "No layer or field selected, field validation skipped")
+
+        fields = self._layer_service.get_layer_fields(layer_id)
+        if fields is None:
+            return ValidationResult(False, f"Could not retrieve fields for layer {layer_id}")
+
+        field_map = {field['name']: field for field in fields}
+        if field_name not in field_map:
+            return ValidationResult(False, f"{field_label} '{field_name}' not found in layer")
+
+        return ValidationResult(True, "Field validation successful")
+
+    def _get_field_map(self, layer_id: str) -> Optional[Dict[str, dict]]:
+        """Return a field-name map for a layer."""
+        fields = self._layer_service.get_layer_fields(layer_id)
+        if fields is None:
+            return None
+        return {field['name']: field for field in fields}
+
+    def _field_is_integer(self, layer_id: str, field_name: str) -> Optional[bool]:
+        """Return whether a configured field is integer, or None if unknown."""
+        if not layer_id or not field_name:
+            return None
+        field_map = self._get_field_map(layer_id)
+        if field_map is None or field_name not in field_map:
+            return None
+        return bool(field_map[field_name].get('is_integer', False))
+
+    def _validate_level_field_type_consistency(self, settings: dict) -> List[str]:
+        """Ensure configured level fields use consistent types across layers."""
+        errors = []
+        layer_level_pairs = [
+            ("objects", settings.get("objects_layer", ""), settings.get("objects_level_field", "")),
+            ("features", settings.get("features_layer", ""), settings.get("features_level_field", "")),
+            ("small_finds", settings.get("small_finds_layer", ""), settings.get("small_finds_level_field", "")),
+        ]
+        selected = []
+        for layer_key, layer_id, field_name in layer_level_pairs:
+            if not layer_id or not field_name:
+                continue
+            is_integer = self._field_is_integer(layer_id, field_name)
+            if is_integer is None:
+                continue
+            selected.append((layer_key, is_integer))
+
+        if len(selected) < 2:
+            return errors
+
+        expected_is_integer = selected[0][1]
+        mismatched_layers = [layer_key for layer_key, is_integer in selected[1:] if is_integer != expected_is_integer]
+        if mismatched_layers:
+            expected_label = "integer" if expected_is_integer else "non-integer"
+            mismatched_label = ", ".join(mismatched_layers)
+            errors.append(
+                f"Level fields must have consistent types across layers; expected {expected_label} based on first configured layer, mismatch on: {mismatched_label}"
+            )
+        return errors
+
+    def _validate_recording_area_field_type_consistency(self, settings: dict) -> List[str]:
+        """Ensure recording-area fields match selected recording_area variable source type."""
+        errors = []
+        source = settings.get("recording_area_variable_source", "display") or "display"
+        expected_is_integer: Optional[bool] = None
+
+        if source == "id":
+            expected_is_integer = True
+        elif isinstance(source, str) and source.startswith("field:"):
+            source_field_name = source.split(":", 1)[1]
+            recording_layer_id = settings.get("recording_areas_layer", "")
+            if recording_layer_id and source_field_name:
+                expected_is_integer = self._field_is_integer(recording_layer_id, source_field_name)
+
+        # "display" does not provide strict typing guarantees, so we skip type checking.
+        if expected_is_integer is None:
+            return errors
+
+        layer_recording_area_pairs = [
+            ("objects", settings.get("objects_layer", ""), settings.get("objects_recording_area_field", "")),
+            ("features", settings.get("features_layer", ""), settings.get("features_recording_area_field", "")),
+            ("small_finds", settings.get("small_finds_layer", ""), settings.get("small_finds_recording_area_field", "")),
+        ]
+        for layer_key, layer_id, field_name in layer_recording_area_pairs:
+            if not layer_id or not field_name:
+                continue
+            actual_is_integer = self._field_is_integer(layer_id, field_name)
+            if actual_is_integer is None:
+                continue
+            if actual_is_integer != expected_is_integer:
+                expected_label = "integer" if expected_is_integer else "non-integer"
+                errors.append(
+                    f"{layer_key.replace('_', ' ').title()} recording area field '{field_name}' type must match Recording Area Variable Source ({expected_label})"
+                )
+        return errors
     
     def validate_layer_relationships(self, recording_areas_layer_id: str, objects_layer_id: str, features_layer_id: str, small_finds_layer_id: str) -> List[str]:
         """
@@ -550,16 +654,64 @@ class ArcheoSyncConfigurationValidator(IConfigurationValidator):
                 )
                 if not field_validation.is_valid:
                     validation_results['objects_layer_fields'] = [field_validation.message]
+                else:
+                    objects_recording_field_validation = self.validate_layer_field_exists(
+                        settings['objects_layer'],
+                        settings.get('objects_recording_area_field', ''),
+                        "Objects recording area field"
+                    )
+                    if not objects_recording_field_validation.is_valid:
+                        validation_results['objects_layer_fields'] = [objects_recording_field_validation.message]
         
         if 'features_layer' in settings:
             validation_results['features_layer'] = self.validate_features_layer(
                 settings['features_layer']
             )
+            if settings['features_layer']:
+                features_field_errors = []
+                features_recording_area_field_validation = self.validate_layer_field_exists(
+                    settings['features_layer'],
+                    settings.get('features_recording_area_field', ''),
+                    "Features recording area field"
+                )
+                if not features_recording_area_field_validation.is_valid:
+                    features_field_errors.append(features_recording_area_field_validation.message)
+
+                features_level_field_validation = self.validate_layer_field_exists(
+                    settings['features_layer'],
+                    settings.get('features_level_field', ''),
+                    "Features level field"
+                )
+                if not features_level_field_validation.is_valid:
+                    features_field_errors.append(features_level_field_validation.message)
+
+                if features_field_errors:
+                    validation_results['features_layer_fields'] = features_field_errors
         
         if 'small_finds_layer' in settings:
             validation_results['small_finds_layer'] = self.validate_small_finds_layer(
                 settings['small_finds_layer']
             )
+            if settings['small_finds_layer']:
+                small_finds_field_errors = []
+                small_finds_recording_area_field_validation = self.validate_layer_field_exists(
+                    settings['small_finds_layer'],
+                    settings.get('small_finds_recording_area_field', ''),
+                    "Small finds recording area field"
+                )
+                if not small_finds_recording_area_field_validation.is_valid:
+                    small_finds_field_errors.append(small_finds_recording_area_field_validation.message)
+
+                small_finds_level_field_validation = self.validate_layer_field_exists(
+                    settings['small_finds_layer'],
+                    settings.get('small_finds_level_field', ''),
+                    "Small finds level field"
+                )
+                if not small_finds_level_field_validation.is_valid:
+                    small_finds_field_errors.append(small_finds_level_field_validation.message)
+
+                if small_finds_field_errors:
+                    validation_results['small_finds_layer_fields'] = small_finds_field_errors
         
         if 'total_station_points_layer' in settings:
             validation_results['total_station_points_layer'] = self.validate_total_station_points_layer(
@@ -616,6 +768,14 @@ class ArcheoSyncConfigurationValidator(IConfigurationValidator):
             )
             if relationship_errors:
                 validation_results['layer_relationships'] = relationship_errors
+
+        level_type_errors = self._validate_level_field_type_consistency(settings)
+        if level_type_errors:
+            validation_results['level_field_types'] = level_type_errors
+
+        recording_area_type_errors = self._validate_recording_area_field_type_consistency(settings)
+        if recording_area_type_errors:
+            validation_results['recording_area_field_types'] = recording_area_type_errors
         
         return validation_results
     

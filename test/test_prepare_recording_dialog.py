@@ -421,6 +421,65 @@ class TestPrepareRecordingDialog(unittest.TestCase):
         background_widget = self.dialog._entities_table.cellWidget(0, 5)  # Background image column
         self.assertIsInstance(background_widget, QtWidgets.QComboBox)
 
+    def test_populate_entities_table_uses_highest_level_across_all_configured_layers(self):
+        """Next level must be based on highest last level across objects/features/small_finds."""
+        def mock_get_value(key, default=None):
+            settings = {
+                'recording_areas_layer': 'recording_layer_id',
+                'objects_layer': 'objects_layer_id',
+                'objects_number_field': 'number_field',
+                'objects_level_field': 'level_field',
+                'features_layer': 'features_layer_id',
+                'features_level_field': 'level_field',
+                'small_finds_layer': 'small_finds_layer_id',
+                'small_finds_level_field': 'level_field',
+            }
+            return settings.get(key, default)
+
+        self.mock_settings_manager.get_value.side_effect = mock_get_value
+
+        # Recreate table with level/number columns enabled.
+        self.dialog._create_entities_table(self.dialog._entities_table.parent().layout())
+
+        # Mock layer service for feature name lookup.
+        mock_layer = Mock()
+        mock_layer.displayExpression.return_value = ''
+        mock_fields = Mock()
+        mock_fields.indexOf.return_value = 0
+        mock_layer.fields.return_value = mock_fields
+        self.mock_layer_service.get_layer_by_id.return_value = mock_layer
+
+        mock_feature = Mock()
+        mock_feature.id.return_value = 1
+        mock_feature.attribute.return_value = 'Test Area'
+
+        # Return different last levels per layer: highest should be "Level C".
+        def related_info_side_effect(feature, layer_id, number_field, level_field, recording_layer_id):
+            if layer_id == 'objects_layer_id':
+                return {'last_number': '10', 'last_level': 'Level A'}
+            if layer_id == 'features_layer_id':
+                return {'last_number': '', 'last_level': 'Level C'}
+            if layer_id == 'small_finds_layer_id':
+                return {'last_number': '', 'last_level': 'Level B'}
+            return {'last_number': '', 'last_level': ''}
+
+        self.mock_layer_service.get_related_objects_info.side_effect = related_info_side_effect
+        self.mock_layer_service.calculate_next_level.return_value = 'Level D'
+
+        self.dialog._populate_entities_table([mock_feature])
+
+        # Last level column also uses highest level across configured layers.
+        last_level_item = self.dialog._entities_table.item(0, 3)  # Last level column
+        self.assertEqual(last_level_item.text(), 'Level C')
+
+        # Next level uses highest level ("Level C"), not only objects level.
+        self.mock_layer_service.calculate_next_level.assert_called_once_with(
+            'Level C', 'level_field', 'objects_layer_id'
+        )
+
+        level_item = self.dialog._entities_table.item(0, 4)  # Next level column
+        self.assertEqual(level_item.text(), 'Level D')
+
     def test_get_next_values_for_feature(self):
         """Test getting next values for a specific feature."""
         # Mock settings to return objects layer and both fields
