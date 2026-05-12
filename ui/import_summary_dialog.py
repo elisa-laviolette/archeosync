@@ -21,6 +21,9 @@ Architecture Benefits:
 - Extensibility: Easy to add new summary information
 
 Usage:
+    Import ``DOCK_WIDGET_AREAS`` from this module with ``ImportSummaryDockWidget`` so dock
+    placement works on both QGIS 3 (Qt5) and QGIS 4 (Qt6).
+
     summary_data = ImportSummaryData(
         csv_points_count=150,
         features_count=25,
@@ -34,7 +37,7 @@ Usage:
     
     # Create dock widget
     dock_widget = ImportSummaryDockWidget(summary_data, iface=iface, parent=parent_widget)
-    iface.addDockWidget(Qt.RightDockWidgetArea, dock_widget)
+    iface.addDockWidget(DOCK_WIDGET_AREAS.right, dock_widget)
 """
 
 from typing import Optional, List, Dict, Any, Union
@@ -58,6 +61,64 @@ def _align_center_flag():
     if alignment_flag is not None and hasattr(alignment_flag, "AlignCenter"):
         return alignment_flag.AlignCenter
     raise AttributeError("Qt center alignment flag is not available.")
+
+
+class DockWidgetAreas:
+    """
+    Qt5 vs Qt6 dock area flags for QDockWidget and QMainWindow.
+
+    Qt5 exposes ``Qt.LeftDockWidgetArea`` on ``Qt``; Qt6 nests them under
+    ``Qt.DockWidgetArea`` (PyQt6 / QGIS 4).
+    """
+
+    __slots__ = ("left", "right", "top", "bottom")
+
+    def __init__(self) -> None:
+        if hasattr(Qt, "LeftDockWidgetArea"):
+            self.left = Qt.LeftDockWidgetArea
+            self.right = Qt.RightDockWidgetArea
+            self.top = Qt.TopDockWidgetArea
+            self.bottom = Qt.BottomDockWidgetArea
+        else:
+            dwa = Qt.DockWidgetArea
+            self.left = dwa.LeftDockWidgetArea
+            self.right = dwa.RightDockWidgetArea
+            self.top = dwa.TopDockWidgetArea
+            self.bottom = dwa.BottomDockWidgetArea
+
+    @property
+    def all_sides(self) -> int:
+        """Bit mask allowing docking on all four sides."""
+        return self.left | self.right | self.top | self.bottom
+
+
+DOCK_WIDGET_AREAS = DockWidgetAreas()
+
+
+def _scroll_bar_as_needed_policy():
+    """Return ScrollBarAsNeeded policy compatible with Qt5 and Qt6."""
+    if hasattr(Qt, "ScrollBarAsNeeded"):
+        return Qt.ScrollBarAsNeeded
+    scroll_policy = getattr(Qt, "ScrollBarPolicy", None)
+    if scroll_policy is not None and hasattr(scroll_policy, "ScrollBarAsNeeded"):
+        return scroll_policy.ScrollBarAsNeeded
+    raise AttributeError("Qt ScrollBarAsNeeded policy is not available.")
+
+
+def _default_qdockwidget_features():
+    """
+    Default QDockWidget feature flags (closable, movable, floatable) for Qt5 and Qt6.
+
+    Qt6 may nest these under ``QDockWidget.DockWidgetFeature``.
+    """
+    if hasattr(QDockWidget, "DockWidgetClosable"):
+        return (
+            QDockWidget.DockWidgetClosable
+            | QDockWidget.DockWidgetMovable
+            | QDockWidget.DockWidgetFloatable
+        )
+    feat = QDockWidget.DockWidgetFeature
+    return feat.DockWidgetClosable | feat.DockWidgetMovable | feat.DockWidgetFloatable
 
 # Import detection services at module level for testability
 DuplicateObjectsDetectorService = None
@@ -117,7 +178,6 @@ class ImportSummaryDockWidget(QDockWidget):
             csv_import_service: CSV import service for archiving files after validation
             field_project_import_service: Field project import service for archiving projects after validation
             layer_service: Layer service for layer operations
-            translation_service: Translation service for internationalization
             parent: Parent widget for the dock widget
         """
         print(f"[DEBUG][UI] ImportSummaryDockWidget created with {len(getattr(summary_data, 'distance_warnings', []))} distance warnings")
@@ -135,12 +195,65 @@ class ImportSummaryDockWidget(QDockWidget):
         # Initialize UI
         self._setup_ui()
         self._setup_connections()
+
+    def _append_out_of_bounds_warnings_section(
+        self, content_layout: QtWidgets.QVBoxLayout
+    ) -> None:
+        """
+        Append out-of-bounds (recording area boundary) warnings to the scrollable summary.
+
+        Reads ``ImportSummaryData.out_of_bounds_warnings`` (filled at import and on refresh).
+        Each structured warning can open the temporary layer attribute table with a filter
+        applied so the user can inspect offending features.
+        """
+        warnings_list = getattr(self._summary_data, "out_of_bounds_warnings", None) or []
+        if not warnings_list:
+            return
+        print(f"[DEBUG][UI] Displaying {len(warnings_list)} out-of-bounds warnings")
+        warnings_layout = QtWidgets.QVBoxLayout()
+        warnings_label = QtWidgets.QLabel(self.tr("Out-of-Bounds Warnings:"))
+        warnings_label.setStyleSheet("font-weight: bold; color: #A0522D;")
+        warnings_layout.addWidget(warnings_label)
+        for warning in warnings_list:
+            warning_item_layout = QtWidgets.QHBoxLayout()
+            if hasattr(warning, "message"):
+                warning_text = warning.message
+            else:
+                warning_text = str(warning)
+            warning_item = QtWidgets.QLabel(f"• {warning_text}")
+            warning_item.setStyleSheet("color: #A0522D; margin-left: 10px;")
+            warning_item.setWordWrap(True)
+            warning_item_layout.addWidget(warning_item)
+            if hasattr(warning, "message") and self._iface:
+                if getattr(warning, "second_layer_name", None):
+                    button = QtWidgets.QPushButton(self.tr("Select and Show Both Entities"))
+                    button.setStyleSheet(
+                        "background-color: #FF6B35; color: white; border: none; "
+                        "padding: 5px; border-radius: 3px;"
+                    )
+                    button.clicked.connect(
+                        lambda checked, w=warning: self._open_both_filtered_attribute_tables(w)
+                    )
+                else:
+                    button = QtWidgets.QPushButton(self.tr("Select and Show Entities"))
+                    button.setStyleSheet(
+                        "background-color: #4CAF50; color: white; border: none; "
+                        "padding: 5px; border-radius: 3px;"
+                    )
+                    button.clicked.connect(
+                        lambda checked, w=warning: self._open_filtered_attribute_table(w)
+                    )
+                warning_item_layout.addWidget(button)
+            warning_item_layout.addStretch()
+            warnings_layout.addLayout(warning_item_layout)
+        content_layout.addLayout(warnings_layout)
+        print("[DEBUG][UI] Added out-of-bounds warnings layout to content_layout")
     
     def _setup_ui(self) -> None:
         """Set up the user interface components."""
         self.setWindowTitle(self.tr("Import Summary"))
-        self.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea | Qt.TopDockWidgetArea | Qt.BottomDockWidgetArea)
-        self.setFeatures(QDockWidget.DockWidgetClosable | QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable)
+        self.setAllowedAreas(DOCK_WIDGET_AREAS.all_sides)
+        self.setFeatures(_default_qdockwidget_features())
         
         # Create the main widget
         main_widget = QtWidgets.QWidget()
@@ -170,13 +283,20 @@ class ImportSummaryDockWidget(QDockWidget):
         # Create scroll area for content
         scroll_area = QtWidgets.QScrollArea()
         scroll_area.setWidgetResizable(True)
-        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll_area.setHorizontalScrollBarPolicy(_scroll_bar_as_needed_policy())
+        scroll_area.setVerticalScrollBarPolicy(_scroll_bar_as_needed_policy())
         
         # Create content widget
         content_widget = QtWidgets.QWidget()
         content_layout = QtWidgets.QVBoxLayout(content_widget)
-        
+
+        # Boundary warnings first so they stay visible without scrolling past long sections
+        print(
+            f"[DEBUG][UI] Summary UI: out_of_bounds_warnings count="
+            f"{len(getattr(self._summary_data, 'out_of_bounds_warnings', None) or [])}"
+        )
+        self._append_out_of_bounds_warnings_section(content_layout)
+
         # CSV Points section
         if self._summary_data.csv_points_count > 0:
             csv_group = self._create_csv_section()
@@ -676,6 +796,49 @@ class ImportSummaryDockWidget(QDockWidget):
                 self.tr(f"An error occurred while canceling the import: {str(e)}")
             )
     
+    def _sync_virtual_fields_to_temporary_import_layers(self) -> None:
+        """
+        Copy virtual (expression) fields from definitive layers onto pending import layers.
+
+        Matches ``ArcheoSyncPlugin._show_import_summary`` so "Refresh warnings" runs detectors
+        on the same layer field definitions as the initial summary; otherwise reads (e.g. of
+        the configured object number field) can diverge and stale or spurious warnings reappear.
+        """
+        if not self._layer_service or not self._settings_manager:
+            return
+        # Objects
+        temp_objects_layer = self._layer_service.get_layer_by_name("New Objects")
+        definitive_objects_layer = None
+        objects_layer_id = self._settings_manager.get_value("objects_layer")
+        if objects_layer_id:
+            definitive_objects_layer = self._layer_service.get_layer_by_id(objects_layer_id)
+        if temp_objects_layer and definitive_objects_layer:
+            self._layer_service.copy_virtual_fields(definitive_objects_layer, temp_objects_layer)
+        # Features
+        temp_features_layer = self._layer_service.get_layer_by_name("New Features")
+        definitive_features_layer = None
+        features_layer_id = self._settings_manager.get_value("features_layer")
+        if features_layer_id:
+            definitive_features_layer = self._layer_service.get_layer_by_id(features_layer_id)
+        if temp_features_layer and definitive_features_layer:
+            self._layer_service.copy_virtual_fields(definitive_features_layer, temp_features_layer)
+        # Small Finds
+        temp_small_finds_layer = self._layer_service.get_layer_by_name("New Small Finds")
+        definitive_small_finds_layer = None
+        small_finds_layer_id = self._settings_manager.get_value("small_finds_layer")
+        if small_finds_layer_id:
+            definitive_small_finds_layer = self._layer_service.get_layer_by_id(small_finds_layer_id)
+        if temp_small_finds_layer and definitive_small_finds_layer:
+            self._layer_service.copy_virtual_fields(definitive_small_finds_layer, temp_small_finds_layer)
+        # Total Station Points
+        temp_points_layer = self._layer_service.get_layer_by_name("Imported_CSV_Points")
+        definitive_points_layer = None
+        points_layer_id = self._settings_manager.get_value("total_station_points_layer")
+        if points_layer_id:
+            definitive_points_layer = self._layer_service.get_layer_by_id(points_layer_id)
+        if temp_points_layer and definitive_points_layer:
+            self._layer_service.copy_virtual_fields(definitive_points_layer, temp_points_layer)
+
     def _handle_refresh_warnings(self) -> None:
         """Handle the refresh warnings button click - re-run detection services to refresh warnings."""
         try:
@@ -689,7 +852,9 @@ class ImportSummaryDockWidget(QDockWidget):
                     self.tr("Detection services are not available. Please ensure the plugin is properly installed.")
                 )
                 return
-            
+
+            self._sync_virtual_fields_to_temporary_import_layers()
+
             # Re-run duplicate objects detection if objects were imported
             duplicate_objects_warnings = []
             if self._summary_data.objects_count > 0:
@@ -929,12 +1094,18 @@ class ImportSummaryDockWidget(QDockWidget):
         """Create the summary content section and insert at a specific index."""
         scroll_area = QtWidgets.QScrollArea()
         scroll_area.setWidgetResizable(True)
-        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll_area.setHorizontalScrollBarPolicy(_scroll_bar_as_needed_policy())
+        scroll_area.setVerticalScrollBarPolicy(_scroll_bar_as_needed_policy())
         
         content_widget = QtWidgets.QWidget()
         content_layout = QtWidgets.QVBoxLayout(content_widget)
-        
+
+        print(
+            f"[DEBUG][UI] Summary UI: out_of_bounds_warnings count="
+            f"{len(getattr(self._summary_data, 'out_of_bounds_warnings', None) or [])}"
+        )
+        self._append_out_of_bounds_warnings_section(content_layout)
+
         # CSV Points section
         if self._summary_data.csv_points_count > 0:
             csv_group = self._create_csv_section()
@@ -981,7 +1152,7 @@ class ImportSummaryDockWidget(QDockWidget):
                 warnings_layout.addLayout(warning_item_layout)
             content_layout.addLayout(warnings_layout)
             print("[DEBUG][UI] Added distance warnings layout to content_layout")
-        
+
         content_layout.addStretch()
         scroll_area.setWidget(content_widget)
         parent_layout.insertWidget(insert_index, scroll_area)
@@ -1380,8 +1551,12 @@ class ImportSummaryDialog(ImportSummaryDockWidget):
     Import Summary dialog for ArcheoSync plugin (legacy).
     
     This is kept for backward compatibility. New code should use ImportSummaryDockWidget.
+    Optional keyword ``translation_service`` is accepted for compatibility, stored as
+    ``_translation_service``, and not forwarded to ``ImportSummaryDockWidget``.
     """
     
     def __init__(self, *args, **kwargs):
         """Initialize the import summary dialog (legacy)."""
-        super().__init__(*args, **kwargs) 
+        translation_service = kwargs.pop("translation_service", None)
+        super().__init__(*args, **kwargs)
+        self._translation_service = translation_service 

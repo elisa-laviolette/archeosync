@@ -397,7 +397,7 @@ Consultez la console pour plus de détails.</translation>
         <translation>Avertissements de numéros manquants :</translation>
     </message>
     <message>
-        <location filename="../ui/import_summary_dialog.py" line="440"/>
+        <location filename="../ui/import_summary_dialog.py" line="215"/>
         <source>Out-of-Bounds Warnings:</source>
         <translation>Avertissements hors limites :</translation>
     </message>

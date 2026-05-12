@@ -4,17 +4,26 @@ Tests for ImportSummaryDialog.
 This module tests the import summary dialog functionality.
 """
 
+import sys
 import unittest
 from unittest.mock import Mock, patch, MagicMock
 from typing import List, Dict, Any
 
 try:
     from qgis.PyQt import QtWidgets
-    from ui.import_summary_dialog import ImportSummaryDialog, ImportSummaryDockWidget
+    from ui.import_summary_dialog import (
+        ImportSummaryDialog,
+        ImportSummaryDockWidget,
+        DOCK_WIDGET_AREAS,
+    )
     from core.data_structures import ImportSummaryData, WarningData
 except ImportError:
     from qgis.PyQt import QtWidgets
-    from ..ui.import_summary_dialog import ImportSummaryDialog, ImportSummaryDockWidget
+    from ..ui.import_summary_dialog import (
+        ImportSummaryDialog,
+        ImportSummaryDockWidget,
+        DOCK_WIDGET_AREAS,
+    )
     from ..core.data_structures import ImportSummaryData, WarningData
 
 
@@ -23,6 +32,11 @@ class TestImportSummaryDialog(unittest.TestCase):
     
     def setUp(self):
         """Set up test fixtures."""
+        if QtWidgets.QApplication.instance() is None:
+            self._qt_app = QtWidgets.QApplication(sys.argv if sys.argv else ["test"])
+        else:
+            self._qt_app = QtWidgets.QApplication.instance()
+
         self.mock_iface = Mock()
         self.mock_settings_manager = Mock()
         self.mock_csv_import_service = Mock()
@@ -85,11 +99,54 @@ class TestImportSummaryDialog(unittest.TestCase):
         self.assertEqual(self.dialog._layer_service, self.mock_layer_service)
         self.assertEqual(self.dialog._translation_service, self.mock_translation_service)
     
+    def test_out_of_bounds_warnings_visible_in_summary_panel(self):
+        """Out-of-bounds warnings on ImportSummaryData must appear in the dock scroll content."""
+        data = ImportSummaryData(
+            features_count=1,
+            out_of_bounds_warnings=[
+                WarningData(
+                    message="Features 2 outside boundary",
+                    recording_area_name="21_J49",
+                    layer_name="New Features",
+                    filter_expression='"fid" IN (2)',
+                )
+            ],
+        )
+        dock = ImportSummaryDockWidget(
+            summary_data=data,
+            iface=self.mock_iface,
+            settings_manager=self.mock_settings_manager,
+            csv_import_service=self.mock_csv_import_service,
+            field_project_import_service=self.mock_field_project_import_service,
+            layer_service=self.mock_layer_service,
+            parent=self.parent,
+        )
+        texts = {lbl.text() for lbl in dock.findChildren(QtWidgets.QLabel)}
+        self.assertIn("Out-of-Bounds Warnings:", texts)
+        self.assertTrue(any("Features 2 outside boundary" in t for t in texts))
+
     def test_refresh_warnings_button_exists(self):
         """Test that the refresh warnings button is created."""
         self.assertIsNotNone(self.dialog._refresh_button)
         self.assertEqual(self.dialog._refresh_button.text(), "Refresh Warnings")
     
+    def test_refresh_warnings_calls_virtual_field_sync_before_detectors(self):
+        """Refresh must sync virtual fields like the initial summary so detectors stay consistent."""
+        with patch.object(
+            self.dialog, "_sync_virtual_fields_to_temporary_import_layers"
+        ) as mock_sync, patch(
+            "ui.import_summary_dialog.DuplicateObjectsDetectorService",
+            return_value=Mock(detect_duplicate_objects=Mock(return_value=[])),
+        ), patch(
+            "ui.import_summary_dialog.SkippedNumbersDetectorService",
+            return_value=Mock(detect_skipped_numbers=Mock(return_value=[])),
+        ), patch("qgis.PyQt.QtWidgets.QMessageBox"), patch.object(
+            self.dialog, "_recreate_summary_content"
+        ):
+            self.dialog._summary_data.objects_count = 2
+            self.dialog._handle_refresh_warnings()
+        mock_sync.assert_called_once()
+
     def test_refresh_warnings_success(self):
         """Test that refresh warnings works correctly."""
         # Mock the detection services
@@ -112,10 +169,27 @@ class TestImportSummaryDialog(unittest.TestCase):
                 filter_expression="updated_filter"
             )
         ]
+
+        mock_oob = Mock()
+        mock_oob.detect_out_of_bounds_features.return_value = []
+        mock_distance = Mock()
+        mock_distance.detect_distance_warnings.return_value = []
+        mock_missing_ts = Mock()
+        mock_missing_ts.detect_missing_total_station_warnings.return_value = []
+        mock_dup_ts = Mock()
+        mock_dup_ts.detect_duplicate_identifiers_warnings.return_value = []
+        mock_height = Mock()
+        mock_height.detect_height_difference_warnings.return_value = []
         
         # Mock the service classes
         with patch('ui.import_summary_dialog.DuplicateObjectsDetectorService', return_value=mock_duplicate_detector), \
              patch('ui.import_summary_dialog.SkippedNumbersDetectorService', return_value=mock_skipped_detector), \
+             patch('services.out_of_bounds_detector_service.OutOfBoundsDetectorService', return_value=mock_oob), \
+             patch('services.distance_detector_service.DistanceDetectorService', return_value=mock_distance), \
+             patch('services.missing_total_station_detector_service.MissingTotalStationDetectorService', return_value=mock_missing_ts), \
+             patch('services.duplicate_total_station_identifiers_detector_service.DuplicateTotalStationIdentifiersDetectorService', return_value=mock_dup_ts), \
+             patch('services.height_difference_detector_service.HeightDifferenceDetectorService', return_value=mock_height), \
+             patch('qgis.PyQt.QtWidgets.QMessageBox'), \
              patch.object(self.dialog, '_recreate_summary_content') as mock_recreate:
             
             # Set up summary data with objects
@@ -228,7 +302,6 @@ class TestImportSummaryDialog(unittest.TestCase):
             csv_import_service=self.mock_csv_import_service,
             field_project_import_service=self.mock_field_project_import_service,
             layer_service=self.mock_layer_service,
-            translation_service=self.mock_translation_service,
             parent=self.parent
         )
         
@@ -249,14 +322,11 @@ class TestImportSummaryDialog(unittest.TestCase):
             csv_import_service=self.mock_csv_import_service,
             field_project_import_service=self.mock_field_project_import_service,
             layer_service=self.mock_layer_service,
-            translation_service=self.mock_translation_service,
             parent=self.parent
         )
         
-        # Check that it allows all dock areas
-        from qgis.PyQt.QtCore import Qt
-        expected_areas = (Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea | 
-                         Qt.TopDockWidgetArea | Qt.BottomDockWidgetArea)
+        # Check that it allows all dock areas (Qt5/Qt6 via DOCK_WIDGET_AREAS)
+        expected_areas = DOCK_WIDGET_AREAS.all_sides
         self.assertEqual(dock_widget.allowedAreas(), expected_areas)
     
     def test_cancel_button_exists(self):

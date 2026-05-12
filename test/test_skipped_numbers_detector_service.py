@@ -6,7 +6,6 @@ This module tests the skipped numbers detector service functionality.
 
 import unittest
 from unittest.mock import Mock, patch, MagicMock
-from typing import List, Dict, Any
 
 try:
     from services.skipped_numbers_detector_service import SkippedNumbersDetectorService
@@ -18,17 +17,42 @@ except ImportError:
 
 class TestSkippedNumbersDetectorService(unittest.TestCase):
     """Test cases for SkippedNumbersDetectorService."""
-    
+
+    @staticmethod
+    def _object_fields_mock():
+        """Fields mock: index 0 = recording area, 1 = object number (matches settings 'test_field')."""
+        fields = Mock()
+
+        def index_of(name: str) -> int:
+            mapping = {"recording_area_field": 0, "test_field": 1}
+            return mapping.get(name, -1)
+
+        fields.indexOf.side_effect = index_of
+        return fields
+
+    @staticmethod
+    def _feature(recording_area_id, number):
+        """Build a feature mock whose attribute(idx) returns area id then number."""
+        mock_feature = Mock()
+
+        def attr(idx):
+            if idx == 0:
+                return recording_area_id
+            if idx == 1:
+                return number
+            return None
+
+        mock_feature.attribute.side_effect = attr
+        return mock_feature
+
     def setUp(self):
         """Set up test fixtures."""
         self.mock_settings_manager = Mock()
         self.mock_layer_service = Mock()
-        self.mock_translation_service = Mock()
-        
+
         self.service = SkippedNumbersDetectorService(
             settings_manager=self.mock_settings_manager,
             layer_service=self.mock_layer_service,
-            translation_service=self.mock_translation_service
         )
     
     def test_detect_skipped_numbers_no_configuration(self):
@@ -175,10 +199,10 @@ class TestSkippedNumbersDetectorService(unittest.TestCase):
         mock_fields.indexOf.return_value = 0  # Name field found at index 0
         mock_recording_areas_layer.fields.return_value = mock_fields
         
-        # Mock feature with name
-        mock_feature = Mock()
+        # Mock feature with name (field access uses __getitem__ on QgsFeature-like objects)
+        mock_feature = MagicMock()
         mock_feature.id.return_value = 123
-        mock_feature.__getitem__.return_value = "Test Area"  # Use __getitem__ instead of attribute
+        mock_feature.__getitem__.return_value = "Test Area"
         mock_recording_areas_layer.getFeatures.return_value = [mock_feature]
         
         name = self.service._get_recording_area_name(mock_recording_areas_layer, 123)
@@ -187,28 +211,23 @@ class TestSkippedNumbersDetectorService(unittest.TestCase):
     
     def test_create_skipped_numbers_warning_with_translation(self):
         """Test that warning message is created with translation."""
-        self.mock_translation_service.tr.return_value = "Recording Area '{recording_area_name}' has skipped numbers: {gaps} in {layer_name}"
-        
-        warning = self.service._create_skipped_numbers_warning("Test Area", [2, 4], "Test Layer")
-        
+        with patch.object(self.service, "tr", side_effect=lambda msg: msg):
+            warning = self.service._create_skipped_numbers_warning("Test Area", [2, 4], "Test Layer")
+
         self.assertEqual(warning, "Recording Area 'Test Area' has skipped numbers: [2, 4] in Test Layer")
-        self.mock_translation_service.tr.assert_called_once()
     
     def test_create_skipped_numbers_warning_single_gap(self):
         """Test that warning message is created for single gap."""
-        # Mock the translation service to return the expected string
-        self.mock_translation_service.tr.return_value = "Recording Area '{recording_area_name}' has skipped numbers: {gaps} in {layer_name}"
-        
-        warning = self.service._create_skipped_numbers_warning("Test Area", [2], "Test Layer")
-        
+        with patch.object(self.service, "tr", side_effect=lambda msg: msg):
+            warning = self.service._create_skipped_numbers_warning("Test Area", [2], "Test Layer")
+
         self.assertEqual(warning, "Recording Area 'Test Area' has skipped numbers: [2] in Test Layer")
     
     def test_create_skipped_numbers_warning_fallback_to_english(self):
         """Test that warning message falls back to English when translation fails."""
-        self.mock_translation_service.tr.side_effect = Exception("Translation failed")
-        
-        warning = self.service._create_skipped_numbers_warning("Test Area", [2, 4], "Test Layer")
-        
+        with patch.object(self.service, "tr", side_effect=Exception("Translation failed")):
+            warning = self.service._create_skipped_numbers_warning("Test Area", [2, 4], "Test Layer")
+
         self.assertEqual(warning, "Recording Area 'Test Area' has skipped numbers: [2, 4] in Test Layer")
     
     def test_detect_skipped_numbers_with_new_objects_layer(self):
@@ -244,46 +263,81 @@ class TestSkippedNumbersDetectorService(unittest.TestCase):
             self.assertIsInstance(warnings, list)
     
     def test_detect_skipped_numbers_between_layers(self):
-        """Test that skipped numbers are detected between layers."""
+        """Gaps already present in definitive only (1 and 5 with temp 3) must not warn at import."""
         self.mock_settings_manager.get_value.side_effect = lambda key, default=None: "test_field"
-        
-        # Mock layers
+
         mock_objects_layer = Mock()
+        mock_objects_layer.name.return_value = "Objects"
+        mock_objects_layer.fields.return_value = self._object_fields_mock()
         mock_new_objects_layer = Mock()
+        mock_new_objects_layer.name.return_value = "New Objects"
+        mock_new_objects_layer.fields.return_value = self._object_fields_mock()
         mock_recording_areas_layer = Mock()
-        
-        # Mock features with numbers
-        mock_feature1 = Mock()
-        mock_feature1.attribute.side_effect = [1, 1]  # recording_area_id, number
-        mock_feature2 = Mock()
-        mock_feature2.attribute.side_effect = [1, 3]  # recording_area_id, number
-        mock_feature3 = Mock()
-        mock_feature3.attribute.side_effect = [1, 5]  # recording_area_id, number
-        
-        mock_objects_layer.getFeatures.return_value = [mock_feature1, mock_feature3]
-        mock_new_objects_layer.getFeatures.return_value = [mock_feature2]
-        
-        # Mock recording area name
+
+        mock_objects_layer.getFeatures.return_value = [
+            self._feature(1, 1),
+            self._feature(1, 5),
+        ]
+        mock_new_objects_layer.getFeatures.return_value = [self._feature(1, 3)]
+
         mock_recording_areas_layer.fields.return_value.indexOf.return_value = -1
-        
-        # Mock QGIS project
+
         mock_project = Mock()
-        mock_project.mapLayers.return_value = {'new_objects_id': mock_new_objects_layer}
-        
-        # Mock relation
+        mock_project.mapLayers.return_value = {"new_objects_id": mock_new_objects_layer}
+
         mock_relation = Mock()
         mock_relation.referencingLayer.return_value = mock_objects_layer
         mock_relation.referencedLayer.return_value = mock_recording_areas_layer
-        mock_relation.fieldPairs.return_value = {'recording_area_field': 'id'}
-        
+        mock_relation.fieldPairs.return_value = {"recording_area_field": "id"}
+
         mock_relation_manager = Mock()
-        mock_relation_manager.relations.return_value = {'relation1': mock_relation}
+        mock_relation_manager.relations.return_value = {"relation1": mock_relation}
         mock_project.relationManager.return_value = mock_relation_manager
-        
-        with patch('qgis.core.QgsProject.instance', return_value=mock_project):
+
+        self.mock_layer_service.get_layer_by_id.side_effect = [mock_objects_layer, mock_recording_areas_layer]
+
+        with patch("qgis.core.QgsProject.instance", return_value=mock_project):
             warnings = self.service.detect_skipped_numbers()
-            
-            # Should return a list of WarningData objects
-            self.assertIsInstance(warnings, list)
-            if warnings:
-                self.assertIsInstance(warnings[0], WarningData) 
+
+        self.assertEqual(warnings, [])
+
+    def test_detect_skipped_numbers_between_layers_warns_for_novel_gap(self):
+        """Warn when the union introduces a gap that does not exist in definitive-only numbering."""
+        self.mock_settings_manager.get_value.side_effect = lambda key, default=None: "test_field"
+
+        mock_objects_layer = Mock()
+        mock_objects_layer.name.return_value = "Objects"
+        mock_objects_layer.fields.return_value = self._object_fields_mock()
+        mock_new_objects_layer = Mock()
+        mock_new_objects_layer.name.return_value = "New Objects"
+        mock_new_objects_layer.fields.return_value = self._object_fields_mock()
+        mock_recording_areas_layer = Mock()
+
+        mock_objects_layer.getFeatures.return_value = [
+            self._feature(1, 1),
+            self._feature(1, 3),
+        ]
+        mock_new_objects_layer.getFeatures.return_value = [self._feature(1, 5)]
+
+        mock_recording_areas_layer.fields.return_value.indexOf.return_value = -1
+
+        mock_project = Mock()
+        mock_project.mapLayers.return_value = {"new_objects_id": mock_new_objects_layer}
+
+        mock_relation = Mock()
+        mock_relation.referencingLayer.return_value = mock_objects_layer
+        mock_relation.referencedLayer.return_value = mock_recording_areas_layer
+        mock_relation.fieldPairs.return_value = {"recording_area_field": "id"}
+
+        mock_relation_manager = Mock()
+        mock_relation_manager.relations.return_value = {"relation1": mock_relation}
+        mock_project.relationManager.return_value = mock_relation_manager
+
+        self.mock_layer_service.get_layer_by_id.side_effect = [mock_objects_layer, mock_recording_areas_layer]
+
+        with patch("qgis.core.QgsProject.instance", return_value=mock_project):
+            warnings = self.service.detect_skipped_numbers()
+
+        self.assertEqual(len(warnings), 1)
+        self.assertIsInstance(warnings[0], WarningData)
+        self.assertEqual(warnings[0].skipped_numbers, [4]) 

@@ -6,7 +6,9 @@ It analyzes the numbering sequence of objects within each recording area and
 identifies gaps in the numbering sequence.
 
 Key Features:
-- Detects gaps in object numbering within recording areas
+- Detects gaps in object numbering within recording areas (definitive + temporary)
+- At import time, ignores gaps that already exist in the definitive objects layer alone;
+  only reports numbering holes introduced or revealed relative to that baseline
 - Provides detailed warnings about skipped numbers
 - Supports translation for warning messages
 - Integrates with existing warning display system
@@ -262,6 +264,11 @@ class SkippedNumbersDetectorService(QObject):
         """
         Detect skipped numbers between original and new objects layers.
         
+        Compares the union of definitive and temporary object numbers per recording area.
+        Warnings are emitted only for gaps that are not already present when considering
+        the definitive layer alone, so pre-existing holes in project data do not surface
+        during import review.
+        
         Args:
             original_objects_layer: The original objects layer
             new_objects_layer: The new objects layer
@@ -336,26 +343,36 @@ class SkippedNumbersDetectorService(QObject):
                 if len(all_numbers) < 2:
                     continue
                 
-                # Sort and find gaps
+                # Sort and find gaps in the combined sequence
                 all_numbers.sort()
                 gaps = self._find_gaps_in_sequence(all_numbers)
                 
                 if gaps:
+                    # Gaps that already exist using only definitive objects are not import issues.
+                    gaps_in_definitive_only: List[int] = []
+                    if len(original_numbers) >= 2:
+                        sorted_original = sorted(original_numbers)
+                        gaps_in_definitive_only = self._find_gaps_in_sequence(sorted_original)
+                    definitive_gap_set = set(gaps_in_definitive_only)
+                    novel_gaps = [g for g in gaps if g not in definitive_gap_set]
+                    if not novel_gaps:
+                        continue
+                    
                     # Get recording area name
                     recording_area_name = self._get_recording_area_name(recording_areas_layer, recording_area_id)
                     
                     # Get context numbers (gaps + before/after)
-                    context_numbers = self._get_context_numbers_for_gaps(all_numbers, gaps)
+                    context_numbers = self._get_context_numbers_for_gaps(all_numbers, novel_gaps)
                     
                     # Create structured warning data for between-layer skipped numbers
                     warning_data = WarningData(
                         message=self._create_skipped_numbers_warning(
-                            recording_area_name, gaps, f"{original_objects_layer.name()} and New Objects"
+                            recording_area_name, novel_gaps, f"{original_objects_layer.name()} and New Objects"
                         ),
                         recording_area_name=recording_area_name,
                         layer_name=original_objects_layer.name(),
                         filter_expression=f'"{recording_area_field}" = \'{recording_area_id}\' AND "{number_field}" IN ({",".join(map(str, context_numbers))})',
-                        skipped_numbers=gaps,
+                        skipped_numbers=novel_gaps,
                         second_layer_name="New Objects",
                         second_filter_expression=f'"{recording_area_field}" = \'{recording_area_id}\' AND "{number_field}" IN ({",".join(map(str, context_numbers))})'
                     )

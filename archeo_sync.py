@@ -46,6 +46,14 @@ from .services import (
     FieldProjectImportService
 )
 
+# Layer names used for pending imports (must match import summary / field import services).
+_TEMPORARY_IMPORT_LAYER_NAMES = (
+    "New Objects",
+    "New Features",
+    "New Small Finds",
+    "Imported_CSV_Points",
+)
+
 
 class ArcheoSyncPlugin(QObject):
     """
@@ -507,7 +515,14 @@ class ArcheoSyncPlugin(QObject):
         return display_name
     
     def run_import_data(self) -> None:
-        """Run the import data dialog."""
+        """
+        Run the import data flow from the menu.
+
+        If temporary import layers are still in the project (import not yet
+        validated or cancelled), rebuild the import summary from current layer
+        contents and show a new dock (detectors re-run; any previous summary dock
+        is replaced). Otherwise open the file/project selection dialog for a new import.
+        """
         if not self._csv_import_service or not self._field_project_import_service:
             from qgis.PyQt.QtWidgets import QMessageBox
             QMessageBox.critical(
@@ -517,28 +532,56 @@ class ArcheoSyncPlugin(QObject):
             )
             return
 
-        
-        # Check if an import summary dock widget already exists
-        existing_dock_widget = self._find_existing_import_summary_dock_widget()
-        
-        if existing_dock_widget:
-            # If a dock widget exists, show it and bring it to front
-            existing_dock_widget.show()
-            existing_dock_widget.raise_()
-            existing_dock_widget.activateWindow()
-        else:
-            # If no dock widget exists, create and show the import data dialog
-            dialog = ImportDataDialog(
-                settings_manager=self._settings_manager,
-                file_system_service=self._file_system_service,
-                parent=self._iface.mainWindow()
-            )
-            
-            result = self._execute_dialog(dialog)
-            
-            # Handle dialog result
-            if result:
-                self._handle_import_data_accepted(dialog)
+        if self._has_pending_import_temporary_layers():
+            summary_data = self._summary_data_from_temporary_import_layers()
+            self._show_import_summary(summary_data)
+            return
+
+        dialog = ImportDataDialog(
+            settings_manager=self._settings_manager,
+            file_system_service=self._file_system_service,
+            parent=self._iface.mainWindow()
+        )
+
+        result = self._execute_dialog(dialog)
+
+        if result:
+            self._handle_import_data_accepted(dialog)
+
+    def _has_pending_import_temporary_layers(self) -> bool:
+        """True if any ArcheoSync temporary import layer is still in the project."""
+        for name in _TEMPORARY_IMPORT_LAYER_NAMES:
+            if self._layer_service.get_layer_by_name(name) is not None:
+                return True
+        return False
+
+    def _summary_data_from_temporary_import_layers(self) -> Dict[str, int]:
+        """
+        Build summary counters from pending temporary layers (duplicates unknown → 0).
+
+        Used when the import summary dock was closed but temporary layers remain.
+        """
+        summary_data: Dict[str, int] = {
+            "csv_points_count": 0,
+            "features_count": 0,
+            "objects_count": 0,
+            "small_finds_count": 0,
+            "csv_duplicates": 0,
+            "features_duplicates": 0,
+            "objects_duplicates": 0,
+            "small_finds_duplicates": 0,
+        }
+        mapping = (
+            ("Imported_CSV_Points", "csv_points_count"),
+            ("New Features", "features_count"),
+            ("New Objects", "objects_count"),
+            ("New Small Finds", "small_finds_count"),
+        )
+        for layer_name, key in mapping:
+            layer = self._layer_service.get_layer_by_name(layer_name)
+            if layer is not None and hasattr(layer, "featureCount"):
+                summary_data[key] = int(layer.featureCount())
+        return summary_data
     
     def _handle_import_data_accepted(self, dialog) -> None:
         """Handle the case when import data dialog is accepted."""
@@ -663,13 +706,23 @@ class ArcheoSyncPlugin(QObject):
     def _show_import_summary(self, summary_data: Dict[str, int]) -> None:
         """Show the import summary dock widget."""
         try:
-            from .ui.import_summary_dialog import ImportSummaryDockWidget, ImportSummaryData
+            from .ui.import_summary_dialog import (
+                ImportSummaryDockWidget,
+                ImportSummaryData,
+                DOCK_WIDGET_AREAS,
+            )
+            # Drop any previous summary dock so we never show stale counts or warning layouts
+            # (e.g. reopening Import with pending layers used to only raise_() an old dock).
+            existing_summary = self._find_existing_import_summary_dock_widget()
+            if existing_summary is not None:
+                self._iface.removeDockWidget(existing_summary)
+                existing_summary.deleteLater()
+                QCoreApplication.processEvents()
+
             from .services.duplicate_objects_detector_service import DuplicateObjectsDetectorService
             from .services.skipped_numbers_detector_service import SkippedNumbersDetectorService
             from .services.out_of_bounds_detector_service import OutOfBoundsDetectorService
             from .services.distance_detector_service import DistanceDetectorService
-            from qgis.PyQt.QtCore import Qt
-            
             # --- Ensure virtual fields are copied from definitive to temporary layers before running detectors ---
             # Objects
             temp_objects_layer = self._layer_service.get_layer_by_name("New Objects")
@@ -879,46 +932,42 @@ class ArcheoSyncPlugin(QObject):
             )
             
             # Add the dock widget to the main window
-            self._iface.addDockWidget(Qt.RightDockWidgetArea, dock_widget)
+            self._iface.addDockWidget(DOCK_WIDGET_AREAS.right, dock_widget)
             
         except Exception as e:
             print(f"Error showing import summary: {e}")
             import traceback
             traceback.print_exc()
-    
+
     def _find_existing_import_summary_dock_widget(self):
         """
-        Find an existing import summary dock widget.
-        
+        Find an existing import summary dock widget attached to the main window.
+
         Returns:
-            The existing dock widget if found, None otherwise
+            The existing dock widget if found, None otherwise.
         """
         try:
-            # Get the main window
             main_window = self._iface.mainWindow()
             if not main_window:
                 print("Debug: No main window found")
                 return None
-            
-            # Look for dock widgets that are instances of ImportSummaryDockWidget
+
             dock_widgets = main_window.findChildren(QDockWidget)
-            
+
             for child in dock_widgets:
-                # Check if this is an ImportSummaryDockWidget by checking the class name
-                if hasattr(child, '__class__') and 'ImportSummaryDockWidget' in child.__class__.__name__:
+                if hasattr(child, "__class__") and "ImportSummaryDockWidget" in child.__class__.__name__:
                     return child
-                
-                # Also check the window title as a fallback (both translated and untranslated)
+
                 title = child.windowTitle()
                 if title in ["Import Summary", self.tr("Import Summary")]:
                     return child
-            
+
             return None
-            
+
         except Exception as e:
             print(f"Error finding existing import summary dock widget: {e}")
             return None
-    
+
     @property
     def settings_manager(self):
         """Get the settings manager instance."""

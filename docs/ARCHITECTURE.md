@@ -268,6 +268,7 @@ Dialog for recording preparation showing selected entities in a table with:
 
 ### ImportDataDialog
 Dialog for importing data from CSV files and completed field projects with:
+- **Menu entry behavior**: The Import Data menu opens this dialog only when no pending temporary import layers (`New Objects`, `New Features`, `New Small Finds`, `Imported_CSV_Points`) exist in the project; otherwise the plugin focuses or recreates the import summary dock (see main plugin `run_import_data`).
 - **Dual List Interface**: Separate lists for CSV files and completed projects
 - **Default Selection**: All items are selected by default for convenience
 - **Quick Selection Controls**: "Select All" and "Deselect All" buttons for both lists
@@ -302,6 +303,7 @@ Dialog for displaying comprehensive import statistics after successful data impo
   - **Multi-Layer Detection**: Detects duplicates within "New Objects" layer, original "Objects" layer, and between both layers
   - **Detailed Information**: Shows specific recording area names and object numbers for each duplicate
   - **User-Friendly Display**: Color-coded warnings in orange for easy identification
+- **Skipped object numbers** (`SkippedNumbersDetectorService`): When a temporary "New Objects" layer exists, numbering gaps are evaluated on the union of definitive and temporary numbers per recording area; only gaps that are **not** already present in the definitive objects layer alone are reported, so pre-existing holes in project data do not produce import warnings.
 - **Validation and Layer Copying**: Feature validation and copying workflow
   - **Validate Button**: Replaces "OK" button to initiate feature validation process
   - **Automatic Copying**: Copies features from temporary layers to configured definitive layers
@@ -405,6 +407,8 @@ The filtering process ensures field projects contain only relevant data:
   - **Duplicate Reporting**: Shows number of duplicates detected and filtered out during import
   - **Color-coded Interface**: Green for successful imports, orange for duplicates
   - **Conditional Display**: Only shows relevant sections based on imported data
+  - **Out-of-bounds warnings**: When `OutOfBoundsDetectorService` reports features, objects, or small finds outside their recording area (within the configured tolerance), messages and Select and show entities actions appear at the **top** of the summary scroll area, and after Refresh warnings the same block is rebuilt from `ImportSummaryData.out_of_bounds_warnings`. Reopening Import Data while temporary layers are pending **rebuilds** the dock so warnings stay in sync.
+  - **Refresh warnings**: Before re-running detectors, the dock calls the same virtual-field sync from definitive layers onto pending import layers as `ArcheoSyncPlugin._show_import_summary`, so refresh results match the initial summary run.
 - **Enhanced Import Workflow**: Improved import process with better user feedback
   - **Statistics Collection**: Enhanced import services to collect and provide detailed statistics
   - **Automatic Display**: Dialog appears automatically after successful import operations
