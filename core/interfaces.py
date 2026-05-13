@@ -35,6 +35,10 @@ class ValidationResult:
     """Result of a validation operation."""
     is_valid: bool
     message: str
+    #: Optional machine-readable code (e.g. ``CSV_IDENTIFIER_AMBIGUOUS``).
+    code: Optional[str] = None
+    #: Optional structured payload (e.g. ``{'candidates': [...]}``).
+    extras: Optional[Dict[str, Any]] = None
 
 
 class ISettingsManager(ABC):
@@ -547,16 +551,43 @@ class ICSVImportService(ABC):
         pass
     
     @abstractmethod
-    def import_csv_files(self, csv_files: List[str], column_mapping: Optional[Dict[str, List[Optional[str]]]] = None) -> ValidationResult:
+    def check_csv_identifier_column_requirement(
+        self,
+        csv_files: List[str],
+        column_mapping: Dict[str, List[Optional[str]]],
+    ) -> ValidationResult:
+        """
+        Check whether CSV topo import can resolve the ``identifier`` attribute without user input.
+
+        When several non-coordinate text columns exist and there is no ``identifier`` column,
+        returns ``is_valid=False`` with ``code='CSV_IDENTIFIER_AMBIGUOUS'`` and
+        ``extras['candidates']`` unless a valid value is stored in settings
+        (``csv_topo_identifier_column``).
+
+        Returns:
+            ValidationResult with ``is_valid`` True when import can proceed without a choice dialog.
+        """
+        pass
+
+    @abstractmethod
+    def import_csv_files(
+        self,
+        csv_files: List[str],
+        column_mapping: Optional[Dict[str, List[Optional[str]]]] = None,
+        identifier_source_column_key: Optional[str] = None,
+    ) -> ValidationResult:
         """
         Import CSV files into a PointZ vector layer and add to QGIS project.
-        
+
         Args:
             csv_files: List of CSV file paths to import
             column_mapping: Optional column mapping (if None, will be generated automatically)
-            
+            identifier_source_column_key: Optional unified mapping key whose values populate the
+                memory layer ``identifier`` field when there is no ``identifier`` column; when
+                provided, overrides plugin settings for this import only.
+
         Returns:
-            ValidationResult indicating if import was successful and any error messages
+            ValidationResult indicating if import was successful or any error messages
         """
         pass
 

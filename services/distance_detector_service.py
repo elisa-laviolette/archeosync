@@ -7,7 +7,8 @@ when the definitive objects and total station points layers are related.
 
 Key Features:
 - Detects total station points and objects that are too far apart (> 5 cm)
-- Only checks when layers are related via QGIS relations
+- Only checks when layers are related via QGIS relations (direct), or via the shortest
+  multi-hop chain of project relations through intermediate layers when no direct relation exists
 - Uses relation field mappings to identify related features
 - Provides detailed warnings for each distance issue found
 - Integrates with existing layer service and settings
@@ -24,13 +25,13 @@ Usage:
     detector = DistanceDetectorService(
         settings_manager=settings_manager,
         layer_service=layer_service,
-        translation_service=translation_service
     )
     
     warnings = detector.detect_distance_warnings()
 """
 
-from typing import List, Optional, Any, Union, Dict, Tuple
+from collections import defaultdict, deque
+from typing import List, Optional, Any, Union, Dict, Tuple, AbstractSet
 from qgis.core import QgsProject, QgsGeometry, QgsPointXY, QgsDistanceArea, QgsSpatialIndex
 
 try:
@@ -49,6 +50,12 @@ class DistanceDetectorService:
     their related objects (via QGIS relations). It identifies pairs that are too far
     apart (> 5 cm) and not overlapping.
     """
+
+    # Relation field names for which we allow alternate column names on layers (CSV often uses PtID vs identifier).
+    _STANDARD_RELATION_FIELD_NAMES = frozenset({
+        'identifier', 'identifiant', 'id', 'code', 'label', 'label_court', 'label_long',
+        'object_number', 'number', 'numero', 'ptid', 'pt_id', 'num', 'no',
+    })
     
     def __init__(self, settings_manager, layer_service):
         """
@@ -72,6 +79,7 @@ class DistanceDetectorService:
 
         # Check if distance warnings are enabled
         if not self._settings_manager.get_value('enable_distance_warnings', True):
+            print("[DEBUG] Distance detection: feature disabled in settings")
             return warnings
 
         try:
@@ -80,6 +88,7 @@ class DistanceDetectorService:
             objects_layer_id = self._settings_manager.get_value('objects_layer')
 
             if not total_station_points_layer_id or not objects_layer_id:
+                print("[DEBUG] Distance detection: missing points/objects layer ids in settings")
                 return warnings
 
             # Get all possible layers
@@ -87,70 +96,200 @@ class DistanceDetectorService:
             temp_objects_layer = self._layer_service.get_layer_by_name("New Objects")
             definitive_total_station_points_layer = self._layer_service.get_layer_by_id(total_station_points_layer_id)
             definitive_objects_layer = self._layer_service.get_layer_by_id(objects_layer_id)
+            print(
+                "[DEBUG] Distance detection: layer presence "
+                f"(temp_points={bool(temp_total_station_points_layer)}, "
+                f"temp_objects={bool(temp_objects_layer)}, "
+                f"def_points={bool(definitive_total_station_points_layer)}, "
+                f"def_objects={bool(definitive_objects_layer)})"
+            )
 
             # List of (points_layer, objects_layer, points_layer_type, objects_layer_type)
+            # We avoid definitive-definitive checks while temporary import layers exist, because
+            # distance warnings in the import workflow must target pending imported data first.
             layer_combinations = [
                 (temp_total_station_points_layer, temp_objects_layer, 'temp', 'temp'),
                 (temp_total_station_points_layer, definitive_objects_layer, 'temp', 'definitive'),
                 (definitive_total_station_points_layer, temp_objects_layer, 'definitive', 'temp'),
-                # (definitive_total_station_points_layer, definitive_objects_layer, 'definitive', 'definitive'),  # Do NOT check definitive-definitive
             ]
+            if not temp_total_station_points_layer and not temp_objects_layer:
+                layer_combinations.append(
+                    (definitive_total_station_points_layer, definitive_objects_layer, 'definitive', 'definitive')
+                )
+            processed_combinations = 0
 
             for points_layer, objects_layer, points_type, objects_type in layer_combinations:
                 if not points_layer or not objects_layer:
                     continue
-
-                # Always get the relation from the definitive layers
-                relation = self._get_relation_between_layers(definitive_total_station_points_layer, definitive_objects_layer)
-                if not relation:
-                    continue
-                field_pairs = relation.fieldPairs()
-                if not field_pairs:
-                    continue
-
-                # Determine which layer is referencing and which is referenced in the definitive relation
-                if relation.referencingLayer() == definitive_total_station_points_layer:
-                    def_points_field = list(field_pairs.keys())[0]
-                    def_objects_field = list(field_pairs.values())[0]
-                    points_layer_is_referencing = True
-                else:
-                    def_objects_field = list(field_pairs.keys())[0]
-                    def_points_field = list(field_pairs.values())[0]
-                    points_layer_is_referencing = False
-
-                # For each current layer, find the field whose name matches the definitive field (case-insensitive)
-                points_field = self._find_matching_field(points_layer, def_points_field)
-                objects_field = self._find_matching_field(objects_layer, def_objects_field)
-                if points_field is None or objects_field is None:
-                    continue
-
-                # Find field indices in the current points_layer and objects_layer (case-insensitive)
-                points_field_idx = points_layer.fields().indexOf(points_field)
-                if points_field_idx < 0:
-                    for i, field in enumerate(points_layer.fields()):
-                        if field.name().lower() == points_field.lower():
-                            points_field_idx = i
-                            break
-
-                objects_field_idx = objects_layer.fields().indexOf(objects_field)
-                if objects_field_idx < 0:
-                    for i, field in enumerate(objects_layer.fields()):
-                        if field.name().lower() == objects_field.lower():
-                            objects_field_idx = i
-                            break
-
-                if points_field_idx < 0 or objects_field_idx < 0:
-                    continue
-
-                # Detect distance issues for this combination
-                distance_warnings = self._detect_distance_issues(
-                    points_layer, objects_layer,
-                    points_field_idx, objects_field_idx,
-                    points_layer_is_referencing
+                processed_combinations += 1
+                print(
+                    "[DEBUG] Distance detection: evaluating combination "
+                    f"points='{points_layer.name()}' ({points_type}) -> "
+                    f"objects='{objects_layer.name()}' ({objects_type})"
                 )
-                if distance_warnings:
+
+                if not definitive_total_station_points_layer or not definitive_objects_layer:
+                    print("[DEBUG] Distance detection: missing definitive points or objects layer from settings")
+                    continue
+
+                # Direct relations between the two definitive layers, plus a path for multi-hop
+                # detection. BFS skips direct point<->object relations so a useless or CSV-incompatible
+                # direct link does not hide a valid longer path (e.g. points -> mobilier -> objects).
+                relations = self._collect_relations_between_layers(
+                    definitive_total_station_points_layer, definitive_objects_layer
+                )
+                print(f"[DEBUG] Distance detection: direct relations found = {len(relations)}")
+                forbidden_relation_ids: Optional[AbstractSet[str]] = None
+                if relations:
+                    forbidden_relation_ids = frozenset(
+                        self._relation_project_id(r) for r in relations
+                    )
+                    print(
+                        "[DEBUG] Distance detection: direct relation ids ignored for indirect path = "
+                        f"{sorted(forbidden_relation_ids)}"
+                    )
+                indirect_path = self._find_shortest_relation_path(
+                    definitive_total_station_points_layer,
+                    definitive_objects_layer,
+                    forbidden_relation_ids=forbidden_relation_ids,
+                )
+                if indirect_path:
+                    print(f"[DEBUG] Distance detection: indirect path hops = {len(indirect_path)}")
+                else:
+                    print("[DEBUG] Distance detection: no indirect path found")
+
+                if not relations and not indirect_path:
+                    print(
+                        "[DEBUG] Distance detection: no QGIS relation (direct or indirect) "
+                        "between definitive points and objects layers"
+                    )
+                    continue
+
+                ordered_relations = self._ordered_relations_for_distance(
+                    relations, definitive_total_station_points_layer
+                ) if relations else []
+
+                matched_relation = False
+                direct_warnings_count = 0
+                for relation in ordered_relations:
+                    field_pairs = relation.fieldPairs()
+                    if not field_pairs:
+                        print("[DEBUG] Distance detection: skipping relation without field pairs")
+                        continue
+
+                    # Determine which layer is referencing and which is referenced in this relation
+                    if relation.referencingLayer() == definitive_total_station_points_layer:
+                        def_points_field = list(field_pairs.keys())[0]
+                        def_objects_field = list(field_pairs.values())[0]
+                        points_layer_is_referencing = True
+                    else:
+                        def_objects_field = list(field_pairs.keys())[0]
+                        def_points_field = list(field_pairs.values())[0]
+                        points_layer_is_referencing = False
+
+                    points_field = self._find_relation_field_on_layer(
+                        points_layer, def_points_field, is_point_layer=True
+                    )
+                    objects_field = self._find_relation_field_on_layer(
+                        objects_layer, def_objects_field, is_point_layer=False
+                    )
+                    if points_field is None or objects_field is None:
+                        p_names = [f.name() for f in points_layer.fields()]
+                        o_names = [f.name() for f in objects_layer.fields()]
+                        print(
+                            "[DEBUG] Distance detection: relation fields not resolved on current layers "
+                            f"(relation expects points='{def_points_field}', objects='{def_objects_field}'; "
+                            f"resolved points_field={points_field!r}, objects_field={objects_field!r}; "
+                            f"points fields={p_names}; objects fields={o_names}); trying next relation"
+                        )
+                        continue
+
+                    points_field_idx = points_layer.fields().indexOf(points_field)
+                    if points_field_idx < 0:
+                        for i, field in enumerate(points_layer.fields()):
+                            if field.name().lower() == points_field.lower():
+                                points_field_idx = i
+                                break
+
+                    objects_field_idx = objects_layer.fields().indexOf(objects_field)
+                    if objects_field_idx < 0:
+                        for i, field in enumerate(objects_layer.fields()):
+                            if field.name().lower() == objects_field.lower():
+                                objects_field_idx = i
+                                break
+
+                    if points_field_idx < 0 or objects_field_idx < 0:
+                        print(
+                            "[DEBUG] Distance detection: resolved fields but invalid indexes "
+                            f"(points_idx={points_field_idx}, objects_idx={objects_field_idx})"
+                        )
+                        continue
+
+                    matched_relation = True
+                    print(
+                        "[DEBUG] Distance detection: running direct check with fields "
+                        f"points='{points_field}' (idx={points_field_idx}) and "
+                        f"objects='{objects_field}' (idx={objects_field_idx})"
+                    )
+                    distance_warnings = self._detect_distance_issues(
+                        points_layer, objects_layer,
+                        points_field_idx, objects_field_idx,
+                        points_layer_is_referencing
+                    )
+                    direct_warnings_count = len(distance_warnings)
+                    print(
+                        "[DEBUG] Distance detection: direct check completed "
+                        f"(warnings={direct_warnings_count})"
+                    )
                     warnings.extend(distance_warnings)
-                    # Do not break; collect all warnings from all combinations
+                    # Use the first relation whose field mapping exists on both current layers
+                    break
+
+                # If direct mapping was unusable, or usable but yielded no warnings,
+                # try the indirect chain as a fallback.
+                if (not matched_relation or direct_warnings_count == 0) and indirect_path:
+                    print(
+                        "[DEBUG] Distance detection: running indirect fallback "
+                        f"(matched_relation={matched_relation}, direct_warnings={direct_warnings_count})"
+                    )
+                    indirect_result = self._detect_distance_issues_via_relation_path(
+                        points_layer,
+                        objects_layer,
+                        definitive_total_station_points_layer,
+                        definitive_objects_layer,
+                        indirect_path,
+                    )
+                    if indirect_result is not None:
+                        matched_relation = True
+                        print(
+                            "[DEBUG] Distance detection: indirect check completed "
+                            f"(warnings={len(indirect_result)})"
+                        )
+                        warnings.extend(indirect_result)
+                    else:
+                        print("[DEBUG] Distance detection: indirect check could not be applied")
+
+                if not matched_relation:
+                    print(
+                        "[DEBUG] Distance detection: no relation had usable field pairs on "
+                        f"points layer '{points_layer.name()}' and objects layer '{objects_layer.name()}'"
+                    )
+                    if relations and indirect_path is None:
+                        print(
+                            "[DEBUG] Distance detection: hint — a direct points↔objects relation exists "
+                            "but no alternate multi-hop path was found; remove or fix the direct relation "
+                            "if you rely on an intermediate layer."
+                        )
+            if processed_combinations == 0:
+                print(
+                    "[DEBUG] Distance detection: no valid points/objects layer combination available "
+                    "(temporary and definitive layers missing)."
+                )
+            else:
+                print(
+                    "[DEBUG] Distance detection: done "
+                    f"(processed_combinations={processed_combinations}, total_warnings={len(warnings)})"
+                )
 
         except Exception as e:
             print(f"Error in distance detection: {e}")
@@ -189,8 +328,17 @@ class DistanceDetectorService:
                     if relation_value_key not in objects_by_relation:
                         objects_by_relation[relation_value_key] = []
                     objects_by_relation[relation_value_key].append(feature)
-            # Only check common relation values
+            # Only check common relation values (same link attribute on both sides)
             common_relation_values = set(points_by_relation.keys()) & set(objects_by_relation.keys())
+            if not common_relation_values and (points_by_relation or objects_by_relation):
+                pk = set(points_by_relation.keys())
+                ok = set(objects_by_relation.keys())
+                print(
+                    "[DEBUG] Distance detection: no overlapping link values between points and objects "
+                    f"(unique keys on points: {len(pk)}, on objects: {len(ok)}; "
+                    f"sample only-on-points: {sorted(pk - ok)[:8]}; "
+                    f"sample only-on-objects: {sorted(ok - pk)[:8]})"
+                )
             distance_issues = []
             for relation_value in common_relation_values:
                 points_features = points_by_relation[relation_value]
@@ -256,42 +404,426 @@ class DistanceDetectorService:
         
         return warnings
     
-    def _get_relation_between_layers(self, layer1: Any, layer2: Any) -> Optional[Any]:
+    def _collect_relations_between_layers(self, layer1: Any, layer2: Any) -> List[Any]:
         """
-        Get the relation between two layers.
-        
+        Return all QGIS relations that connect layer1 and layer2 (either referencing direction).
+
         Args:
-            layer1: First layer
-            layer2: Second layer
-            
+            layer1: First layer (must not be None)
+            layer2: Second layer (must not be None)
+
         Returns:
-            The relation object if found, None otherwise
+            List of QgsRelation instances (possibly empty).
         """
+        found: List[Any] = []
         try:
-            
-            # Get the relation manager
+            if not layer1 or not layer2:
+                return found
             project = QgsProject.instance()
             relation_manager = project.relationManager()
-            
-            # Find relations between the two layers
             for relation_id, relation in relation_manager.relations().items():
-                
                 referencing_layer = relation.referencingLayer()
                 referenced_layer = relation.referencedLayer()
-                
-                # Check if either layer matches either side of the relation
-                if ((referencing_layer and referenced_layer) and
-                    ((referencing_layer.id() == layer1.id() and referenced_layer.id() == layer2.id()) or
-                     (referencing_layer.id() == layer2.id() and referenced_layer.id() == layer1.id()))):
-                    return relation
-            
-            return None
-            
+                if not (referencing_layer and referenced_layer):
+                    continue
+                if ((referencing_layer.id() == layer1.id() and referenced_layer.id() == layer2.id()) or
+                        (referencing_layer.id() == layer2.id() and referenced_layer.id() == layer1.id())):
+                    found.append(relation)
+            return found
         except Exception as e:
-            print(f"[DEBUG] Error getting relation between layers: {str(e)}")
+            print(f"[DEBUG] Error collecting relations between layers: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return found
+
+    def _ordered_relations_for_distance(self, relations: List[Any], definitive_points_layer: Any) -> List[Any]:
+        """
+        Prefer the relation whose referencing layer is the total station points layer (child / FK side).
+
+        When users create two relations (one in each direction), iteration order alone can pick a
+        relation whose field mapping does not match the temporary import layer; trying the other
+        direction next fixes that. Preferring points-as-referencing matches the usual topo->object link.
+        """
+        if not relations or not definitive_points_layer:
+            return relations or []
+        preferred: List[Any] = []
+        other: List[Any] = []
+        pid = definitive_points_layer.id()
+        for relation in relations:
+            rl = relation.referencingLayer()
+            if rl and rl.id() == pid:
+                preferred.append(relation)
+            else:
+                other.append(relation)
+        return preferred + other
+
+    def _relation_project_id(self, relation: Any, dict_key: Any = None) -> str:
+        """
+        Stable string id for a QgsRelation, for comparing relations across calls.
+
+        Uses :meth:`QgsRelation.id` when available, otherwise the relation manager dict key
+        or Python ``id`` as last resort (tests may use plain mocks).
+        """
+        try:
+            rid = relation.id()
+            if rid:
+                return str(rid)
+        except Exception:
+            pass
+        if dict_key is not None:
+            return str(dict_key)
+        return str(id(relation))
+
+    def _other_layer_in_relation(self, current_layer: Any, relation: Any) -> Optional[Any]:
+        """Return the layer at the other end of ``relation`` from ``current_layer``."""
+        try:
+            ref = relation.referencingLayer()
+            rec = relation.referencedLayer()
+            if not ref or not rec or not current_layer:
+                return None
+            cid = current_layer.id()
+            if ref.id() == cid:
+                return rec
+            if rec.id() == cid:
+                return ref
+        except Exception:
+            return None
+        return None
+
+    def _find_shortest_relation_path(
+        self,
+        layer_start: Any,
+        layer_end: Any,
+        max_hops: int = 8,
+        forbidden_relation_ids: Optional[AbstractSet[str]] = None,
+    ) -> Optional[List[Any]]:
+        """
+        Shortest chain of QgsRelation instances connecting ``layer_start`` to ``layer_end``.
+
+        Used when no direct relation exists between the two layers. Each relation in the list
+        links consecutive layers on the path (BFS on the undirected relation graph).
+
+        Args:
+            layer_start: First endpoint (e.g. definitive total station points layer).
+            layer_end: Second endpoint (e.g. definitive objects layer).
+            max_hops: Maximum number of relations in the path (prevents runaway search).
+            forbidden_relation_ids: Relations whose ids must not appear on the path (typically
+                all direct point↔object relations so a longer path through an intermediate layer
+                can still be found).
+
+        Returns:
+            Ordered list of relations, or None if no path exists within ``max_hops``.
+        """
+        try:
+            if not layer_start or not layer_end or layer_start.id() == layer_end.id():
+                return None
+            queue = deque([(layer_start, [])])
+            visited = {layer_start.id()}
+            project = QgsProject.instance()
+            relation_manager = project.relationManager()
+            while queue:
+                current, path = queue.popleft()
+                if len(path) >= max_hops:
+                    continue
+                for rel_key, relation in relation_manager.relations().items():
+                    if forbidden_relation_ids:
+                        rid = self._relation_project_id(relation, rel_key)
+                        if rid in forbidden_relation_ids:
+                            continue
+                    nxt = self._other_layer_in_relation(current, relation)
+                    if not nxt:
+                        continue
+                    nid = nxt.id()
+                    new_path = path + [relation]
+                    if nid == layer_end.id():
+                        return new_path
+                    if nid in visited:
+                        continue
+                    visited.add(nid)
+                    queue.append((nxt, new_path))
+            return None
+        except Exception as e:
+            print(f"[DEBUG] Error finding indirect relation path: {e}")
             import traceback
             traceback.print_exc()
             return None
+
+    def _ordered_layers_along_path(
+        self,
+        layer_start: Any,
+        relations_path: List[Any],
+    ) -> Optional[List[Any]]:
+        """
+        Reconstruct [L0, L1, ..., Ln] where L0 is ``layer_start`` and each relation connects Li to Li+1.
+        """
+        layers = [layer_start]
+        current = layer_start
+        for relation in relations_path:
+            nxt = self._other_layer_in_relation(current, relation)
+            if not nxt:
+                return None
+            layers.append(nxt)
+            current = nxt
+        return layers
+
+    def _resolve_combo_layer_for_path_node(
+        self,
+        path_node: Any,
+        definitive_points: Any,
+        definitive_objects: Any,
+        points_combo: Any,
+        objects_combo: Any,
+    ) -> Any:
+        """Map a definitive path endpoint to the combo (temp/def) layer used for detection."""
+        if path_node.id() == definitive_points.id():
+            return points_combo
+        if path_node.id() == definitive_objects.id():
+            return objects_combo
+        return path_node
+
+    def _field_names_for_relation_hop(self, relation: Any, from_layer: Any) -> Optional[Tuple[str, str]]:
+        """
+        For a hop from ``from_layer`` to the other layer in ``relation``, return
+        (field_name_on_from, field_name_on_to) using the relation's single field pair.
+        """
+        fp = relation.fieldPairs()
+        if not fp:
+            return None
+        ref_field, rec_field = next(iter(fp.items()))
+        ref_lyr = relation.referencingLayer()
+        rec_lyr = relation.referencedLayer()
+        if not ref_lyr or not rec_lyr:
+            return None
+        if from_layer.id() == ref_lyr.id():
+            return ref_field, rec_field
+        if from_layer.id() == rec_lyr.id():
+            return rec_field, ref_field
+        return None
+
+    def _field_index_on_layer_for_path(
+        self,
+        combo_layer: Any,
+        relation_field_name: str,
+        *,
+        path_def_layer: Any,
+        definitive_points: Any,
+        definitive_objects: Any,
+    ) -> int:
+        """Resolve a relation field name to a field index on ``combo_layer`` for path traversal."""
+        if path_def_layer.id() == definitive_points.id():
+            is_pt = True
+        elif path_def_layer.id() == definitive_objects.id():
+            is_pt = False
+        else:
+            is_pt = False
+        fname = self._find_relation_field_on_layer(
+            combo_layer, relation_field_name, is_point_layer=is_pt
+        )
+        if not fname:
+            return -1
+        idx = combo_layer.fields().indexOf(fname)
+        if idx >= 0:
+            return idx
+        for i, field in enumerate(combo_layer.fields()):
+            if field.name().lower() == fname.lower():
+                return i
+        return -1
+
+    def _detect_distance_issues_via_relation_path(
+        self,
+        points_combo: Any,
+        objects_combo: Any,
+        definitive_points: Any,
+        definitive_objects: Any,
+        relations_path: List[Any],
+    ) -> Optional[List[Union[str, WarningData]]]:
+        """
+        Pair points with objects by following a multi-hop QGIS relation path, then apply the same
+        distance / overlap rules as :meth:`_detect_distance_issues`.
+
+        Returns:
+            ``None`` if the path could not be applied (invalid path, unresolved fields).
+            An empty list if the path applied but no distance warnings were produced.
+            Otherwise the list of warnings.
+        """
+        warnings: List[Union[str, WarningData]] = []
+        try:
+            ordered_def = self._ordered_layers_along_path(definitive_points, relations_path)
+            if (
+                not ordered_def
+                or ordered_def[-1].id() != definitive_objects.id()
+                or ordered_def[0].id() != definitive_points.id()
+            ):
+                print("[DEBUG] Distance detection (indirect): path does not connect points to objects")
+                return None
+
+            combo_layers = [
+                self._resolve_combo_layer_for_path_node(
+                    d, definitive_points, definitive_objects, points_combo, objects_combo
+                )
+                for d in ordered_def
+            ]
+            print(
+                "[DEBUG] Distance detection (indirect): resolved path layers = "
+                f"{[layer.name() if layer else '<none>' for layer in combo_layers]}"
+            )
+
+            hops: List[Tuple[int, int]] = []
+            for i, relation in enumerate(relations_path):
+                from_def = ordered_def[i]
+                to_def = ordered_def[i + 1]
+                names = self._field_names_for_relation_hop(relation, from_def)
+                if not names:
+                    print("[DEBUG] Distance detection (indirect): relation has no field pairs")
+                    return None
+                from_name, to_name = names
+                from_idx = self._field_index_on_layer_for_path(
+                    combo_layers[i],
+                    from_name,
+                    path_def_layer=from_def,
+                    definitive_points=definitive_points,
+                    definitive_objects=definitive_objects,
+                )
+                to_idx = self._field_index_on_layer_for_path(
+                    combo_layers[i + 1],
+                    to_name,
+                    path_def_layer=to_def,
+                    definitive_points=definitive_points,
+                    definitive_objects=definitive_objects,
+                )
+                if from_idx < 0 or to_idx < 0:
+                    print(
+                        "[DEBUG] Distance detection (indirect): could not resolve hop fields "
+                        f"(hop {i}: from_idx={from_idx}, to_idx={to_idx})"
+                    )
+                    return None
+                print(
+                    "[DEBUG] Distance detection (indirect): hop mapping "
+                    f"{i}: '{combo_layers[i].name()}'.'{from_name}'[{from_idx}] -> "
+                    f"'{combo_layers[i + 1].name()}'.'{to_name}'[{to_idx}]"
+                )
+                hops.append((from_idx, to_idx))
+
+            feats = [list(layer.getFeatures()) for layer in combo_layers]
+            print(
+                "[DEBUG] Distance detection (indirect): feature counts by layer = "
+                f"{[len(fset) for fset in feats]}"
+            )
+            if not feats[0] or not feats[-1]:
+                return []
+
+            indices: List[Dict[str, List[Any]]] = []
+            for i in range(len(hops)):
+                to_idx = hops[i][1]
+                bucket: Dict[str, List[Any]] = defaultdict(list)
+                for feature in feats[i + 1]:
+                    val = feature.attribute(to_idx)
+                    if val is None:
+                        continue
+                    bucket[str(val).lower()].append(feature)
+                indices.append(dict(bucket))
+
+            distance_issues: List[Dict[str, Any]] = []
+            for point_feature in feats[0]:
+                v0 = point_feature.attribute(hops[0][0])
+                if v0 is None:
+                    continue
+                current_matches = indices[0].get(str(v0).lower(), [])
+                for hi in range(1, len(hops)):
+                    nxt: List[Any] = []
+                    from_idx = hops[hi][0]
+                    idx_map = indices[hi]
+                    for candidate in current_matches:
+                        vk = candidate.attribute(from_idx)
+                        if vk is None:
+                            continue
+                        nxt.extend(idx_map.get(str(vk).lower(), []))
+                    current_matches = nxt
+                for object_feature in current_matches:
+                    point_geom = point_feature.geometry()
+                    object_geom = object_feature.geometry()
+                    point_identifier = self._get_feature_identifier(point_feature, "Total Station Point")
+                    object_identifier = self._get_feature_identifier(object_feature, "Object")
+                    if point_geom.intersects(object_geom):
+                        continue
+                    distance = point_geom.distance(object_geom)
+                    if distance > self._max_distance_meters:
+                        chain_key = str(v0).lower()
+                        distance_issues.append({
+                            'point_feature': point_feature,
+                            'object_feature': object_feature,
+                            'point_identifier': point_identifier,
+                            'object_identifier': object_identifier,
+                            'distance': distance,
+                            'relation_value': chain_key,
+                        })
+            print(
+                "[DEBUG] Distance detection (indirect): pairing result "
+                f"(distance_issues={len(distance_issues)})"
+            )
+
+            if not distance_issues:
+                return []
+
+            by_relation_value: Dict[str, List[Dict[str, Any]]] = {}
+            for issue in distance_issues:
+                key = issue['relation_value']
+                if key not in by_relation_value:
+                    by_relation_value[key] = []
+                by_relation_value[key].append(issue)
+
+            points_field_idx = hops[0][0]
+            objects_field_idx = hops[-1][1]
+            for relation_value, issues in by_relation_value.items():
+                points_filter_value = issues[0]['point_feature'].attribute(points_field_idx)
+                objects_filter_value = issues[0]['object_feature'].attribute(objects_field_idx)
+                points_filter = (
+                    f'"{points_combo.fields()[points_field_idx].name()}" = \'{points_filter_value}\''
+                )
+                objects_filter = (
+                    f'"{objects_combo.fields()[objects_field_idx].name()}" = \'{objects_filter_value}\''
+                )
+                point_identifiers = [issue['point_identifier'] for issue in issues]
+                object_identifiers = [issue['object_identifier'] for issue in issues]
+                max_distance = max(issue['distance'] for issue in issues)
+                warning_data = WarningData(
+                    message=self._create_distance_warning(
+                        point_identifiers, object_identifiers, max_distance, relation_value
+                    ),
+                    recording_area_name=f"Indirect relation {relation_value}",
+                    layer_name=points_combo.name(),
+                    filter_expression=points_filter,
+                    second_layer_name=objects_combo.name(),
+                    second_filter_expression=objects_filter,
+                    distance_issues=issues,
+                )
+                warnings.append(warning_data)
+
+        except Exception as e:
+            print(f"[DEBUG] Error in _detect_distance_issues_via_relation_path: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+
+        return warnings
+
+    def _get_relation_between_layers(self, layer1: Any, layer2: Any) -> Optional[Any]:
+        """
+        Return one relation between two layers, preferring layer1 as the referencing layer when
+        several relations exist (see _ordered_relations_for_distance).
+
+        Args:
+            layer1: Typically the definitive total station points layer when called from tests/tools
+            layer2: The other definitive layer
+
+        Returns:
+            A relation object if found, None otherwise
+        """
+        relations = self._collect_relations_between_layers(layer1, layer2)
+        if not relations:
+            return None
+        ordered = self._ordered_relations_for_distance(relations, layer1)
+        return ordered[0] if ordered else None
     
     def _get_feature_identifier(self, feature: Any, layer_type: str) -> str:
         """
@@ -385,4 +917,48 @@ class DistanceDetectorService:
         for f in layer.fields():
             if f.name().lower() == target_field_name.lower():
                 return f.name()
-        return None 
+        return None
+
+    def _find_relation_field_on_layer(
+        self,
+        layer: Any,
+        relation_field_name: str,
+        *,
+        is_point_layer: bool,
+    ) -> Optional[str]:
+        """
+        Resolve a relation field on a layer, including common naming mismatches.
+
+        Definitive layers often use ``identifier`` while CSV imports create ``ptid`` / ``pt_id``.
+        Objects may use ``label_court`` or ``identifiant`` instead of ``identifier``. Synonyms are
+        only tried when the relation field name is a known "standard" link name, to avoid mapping
+        an unrelated attribute (e.g. a custom ``ref_site``) to ``id``.
+        """
+        if not relation_field_name or not layer:
+            return None
+        direct = self._find_matching_field(layer, relation_field_name)
+        if direct:
+            return direct
+        key = str(relation_field_name).strip().lower()
+        if key not in self._STANDARD_RELATION_FIELD_NAMES:
+            return None
+        if is_point_layer:
+            alternates = (
+                'ptid', 'pt_id', 'label_court', 'label', 'identifiant', 'identifier',
+                'code', 'numero', 'number', 'object_number', 'id',
+            )
+        else:
+            alternates = (
+                'label_court', 'label', 'object_number', 'number', 'identifiant', 'identifier',
+                'code', 'numero', 'ptid', 'pt_id', 'id',
+            )
+        seen = {key}
+        for alt in alternates:
+            al = alt.lower()
+            if al in seen:
+                continue
+            seen.add(al)
+            match = self._find_matching_field(layer, alt)
+            if match:
+                return match
+        return None

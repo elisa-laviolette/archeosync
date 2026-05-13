@@ -265,7 +265,11 @@ class TestCSVImportService:
         mock_field4.name.return_value = "Description"
         mock_field5 = Mock()
         mock_field5.name.return_value = "Notes"
-        mock_layer_instance.fields.return_value = [mock_field1, mock_field2, mock_field3, mock_field4, mock_field5]
+        mock_field6 = Mock()
+        mock_field6.name.return_value = "identifier"
+        mock_layer_instance.fields.return_value = [
+            mock_field1, mock_field2, mock_field3, mock_field4, mock_field5, mock_field6,
+        ]
         mock_layer_instance.startEditing = Mock()
         mock_layer_instance.addFeature = Mock()
         mock_layer_instance.commitChanges = Mock()
@@ -752,4 +756,46 @@ class TestCSVImportService:
         assert field_types["X"] == "real"  # Required columns are always real
         assert field_types["Y"] == "real"
         assert field_types["Z"] == "real"
-        assert field_types["ID"] == "string" 
+        assert field_types["ID"] == "string"
+
+    def test_check_identifier_ambiguous_without_saved_column(self):
+        """Several text columns without identifier require user choice unless configured."""
+        csv1 = self._create_test_csv(
+            "ambiguous.csv",
+            ["X", "Y", "Z", "Alpha", "Beta"],
+            [["1.0", "2.0", "3.0", "a", "b"]],
+        )
+        mapping = self.csv_service.get_column_mapping([csv1])
+        self.mock_settings_manager.get_value.side_effect = None
+        self.mock_settings_manager.get_value.return_value = ""
+        r = self.csv_service.check_csv_identifier_column_requirement([csv1], mapping)
+        assert r.is_valid is False
+        assert r.code == "CSV_IDENTIFIER_AMBIGUOUS"
+        assert "Alpha" in r.extras["candidates"]
+        assert "Beta" in r.extras["candidates"]
+
+    def test_check_identifier_ok_when_saved_column_configured(self):
+        """Saved csv_topo_identifier_column resolves ambiguity."""
+        csv1 = self._create_test_csv(
+            "ambiguous.csv",
+            ["X", "Y", "Z", "Alpha", "Beta"],
+            [["1.0", "2.0", "3.0", "a", "b"]],
+        )
+        mapping = self.csv_service.get_column_mapping([csv1])
+        self.mock_settings_manager.get_value.side_effect = (
+            lambda key, default=None: "Alpha" if key == "csv_topo_identifier_column" else default
+        )
+        r = self.csv_service.check_csv_identifier_column_requirement([csv1], mapping)
+        assert r.is_valid is True
+
+    def test_check_identifier_single_text_column_unambiguous(self):
+        """A single non-required string column per file does not require a prompt."""
+        csv1 = self._create_test_csv(
+            "one_text.csv",
+            ["X", "Y", "Z", "PtID"],
+            [["1.0", "2.0", "3.0", "US-1"]],
+        )
+        mapping = self.csv_service.get_column_mapping([csv1])
+        self.mock_settings_manager.get_value.return_value = ""
+        r = self.csv_service.check_csv_identifier_column_requirement([csv1], mapping)
+        assert r.is_valid is True

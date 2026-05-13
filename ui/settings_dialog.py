@@ -317,6 +317,15 @@ class SettingsDialog(QtWidgets.QDialog):
             self.tr("Select folder to archive imported CSV files...")
         )
         form_layout.addRow(self.tr("CSV Archive Folder:"), self._csv_archive_widget)
+
+        self._csv_topo_identifier_column = QtWidgets.QLineEdit()
+        self._csv_topo_identifier_column.setPlaceholderText(
+            self.tr('Example: PtID — leave empty if the CSV has an "identifier" column or a single text column')
+        )
+        form_layout.addRow(
+            self.tr("Topo CSV identifier column (mapping key):"),
+            self._csv_topo_identifier_column,
+        )
         
         # Field project archive folder
         self._field_project_archive_widget = self._create_folder_selector(
@@ -1308,7 +1317,10 @@ class SettingsDialog(QtWidgets.QDialog):
             # Load CSV archive folder
             csv_archive_path = self._settings_manager.get_value('csv_archive_folder', '')
             self._csv_archive_widget.input_field.setText(csv_archive_path)
-            
+
+            csv_topo_identifier_column = self._settings_manager.get_value('csv_topo_identifier_column', '')
+            self._csv_topo_identifier_column.setText(csv_topo_identifier_column)
+
             # Load Field Project Archive Folder
             field_project_archive_path = self._settings_manager.get_value('field_project_archive_folder', '')
             self._field_project_archive_widget.input_field.setText(field_project_archive_path)
@@ -1448,6 +1460,7 @@ class SettingsDialog(QtWidgets.QDialog):
                 'total_station_folder': total_station_path,
                 'completed_projects_folder': completed_projects_path,
                 'csv_archive_folder': csv_archive_path,
+                'csv_topo_identifier_column': csv_topo_identifier_column,
                 'field_project_archive_folder': field_project_archive_path,
                 'recording_areas_layer': recording_areas_layer_id,
                 'recording_area_variable_source': recording_area_variable_source,
@@ -1494,6 +1507,7 @@ class SettingsDialog(QtWidgets.QDialog):
                 'total_station_folder': self._total_station_widget.input_field.text(),
                 'completed_projects_folder': self._completed_projects_widget.input_field.text(),
                 'csv_archive_folder': self._csv_archive_widget.input_field.text(),
+                'csv_topo_identifier_column': self._csv_topo_identifier_column.text().strip(),
                 'field_project_archive_folder': self._field_project_archive_widget.input_field.text(),
                 'recording_areas_layer': self._recording_areas_widget.combo_box.currentData(),
                 'recording_area_variable_source': self._recording_area_variable_source_combo.currentData(),
@@ -1570,6 +1584,9 @@ class SettingsDialog(QtWidgets.QDialog):
             )
             self._csv_archive_widget.input_field.setText(
                 self._original_values.get('csv_archive_folder', '')
+            )
+            self._csv_topo_identifier_column.setText(
+                self._original_values.get('csv_topo_identifier_column', '')
             )
             self._field_project_archive_widget.input_field.setText(
                 self._original_values.get('field_project_archive_folder', '')

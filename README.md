@@ -232,7 +232,7 @@ The project includes comprehensive test coverage with robust validation and qual
 - **QGISLayerService**: Layer operations including spatial analysis
 - **QGISProjectCreationService**: Field project creation and packaging with automatic archiving and intelligent filtering
 - **QGISRasterProcessingService**: GDAL-based raster clipping with coordinate system handling
-- **CSVImportService**: CSV import with column mapping, validation, and automatic archiving
+- **CSVImportService**: CSV import with column mapping, validation, ``identifier`` field resolution (settings / prompt when ambiguous), and automatic archiving
 - **ArcheoSyncConfigurationValidator**: Comprehensive validation system including archive folder validation
 
 ## Recent Updates

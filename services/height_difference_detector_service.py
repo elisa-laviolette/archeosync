@@ -288,14 +288,15 @@ class HeightDifferenceDetectorService:
                             identifiers_list = ",".join(unique_identifiers)
                             filter_expression = f'"{identifier_field}" IN ({identifiers_list})'
                     else:
-                        # Use feature IDs as fallback
+                        # Use QGIS internal feature ids ($id). Memory layers like Imported_CSV_Points
+                        # have no "fid" attribute column; selectByExpression on "fid" selects nothing.
                         unique_ids = list(set(feature_ids))
                         
                         if len(unique_ids) == 1:
-                            filter_expression = f'"fid" = {unique_ids[0]}'
+                            filter_expression = f"$id = {unique_ids[0]}"
                         else:
                             id_list = ",".join(str(id) for id in unique_ids)
-                            filter_expression = f'"fid" IN ({id_list})'
+                            filter_expression = f"$id IN ({id_list})"
                     
                     # Get feature identifiers for the warning message
                     feature1_identifiers = [issue['feature1_identifier'] for issue in issues]
@@ -494,7 +495,8 @@ class HeightDifferenceDetectorService:
         """
         Find the field in the temporary total station points layer that matches the referencing field
         in the relation between the definitive total station points layer and the definitive objects layer.
-        If no such relation or field exists, return 'fid'.
+        If no such relation or field exists, return ``'fid'`` as a sentinel meaning
+        "select by internal feature id"; the filter expression then uses ``$id`` (not a ``fid`` column).
         """
         try:
             # Get definitive layer IDs from settings

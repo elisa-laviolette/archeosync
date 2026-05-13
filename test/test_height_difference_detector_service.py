@@ -28,10 +28,6 @@ class TestHeightDifferenceDetectorService(unittest.TestCase):
         """Set up test fixtures."""
         self.settings_manager = Mock()
         self.layer_service = Mock()
-        self.translation_service = Mock()
-        
-        # Mock translation service
-        self.translation_service.translate.return_value = "Test warning message"
         
         # Mock settings values
         self.settings_manager.get_value.side_effect = lambda key, default=None: {
@@ -44,7 +40,6 @@ class TestHeightDifferenceDetectorService(unittest.TestCase):
         self.service = HeightDifferenceDetectorService(
             settings_manager=self.settings_manager,
             layer_service=self.layer_service,
-            translation_service=self.translation_service
         )
     
     def test_init(self):
@@ -53,7 +48,6 @@ class TestHeightDifferenceDetectorService(unittest.TestCase):
         self.assertEqual(self.service._max_height_difference_meters, 0.2)
         self.assertEqual(self.service._settings_manager, self.settings_manager)
         self.assertEqual(self.service._layer_service, self.layer_service)
-        self.assertEqual(self.service._translation_service, self.translation_service)
     
     def test_detect_height_difference_warnings_no_layer_configured(self):
         """Test detection when no layer is configured."""
@@ -398,10 +392,10 @@ class TestHeightDifferenceDetectorService(unittest.TestCase):
             feature1_identifiers, feature2_identifiers, max_distance, max_height_difference
         )
         
-        self.assertEqual(result, "Test warning message")
-        self.translation_service.translate.assert_called_with(
-            "HeightDifferenceDetectorService",
-            "Total Station Point 1 and Total Station Point 2 are separated by 50.0 cm but have a height difference of 25.0 cm (maximum allowed: 20.0 cm)"
+        self.assertEqual(
+            result,
+            "Total Station Point 1 and Total Station Point 2 are separated by 50.0 cm but have a height difference of 25.0 cm "
+            "(maximum allowed: 20.0 cm)",
         )
     
     def test_create_height_difference_warning_multiple_pairs(self):
@@ -415,14 +409,13 @@ class TestHeightDifferenceDetectorService(unittest.TestCase):
             feature1_identifiers, feature2_identifiers, max_distance, max_height_difference
         )
         
-        self.assertEqual(result, "Test warning message")
-        self.translation_service.translate.assert_called_with(
-            "HeightDifferenceDetectorService",
-            "2 point pairs are separated by 50.0 cm but have a height difference of 25.0 cm (maximum allowed: 20.0 cm)"
+        self.assertEqual(
+            result,
+            "2 point pairs are separated by 50.0 cm but have a height difference of 25.0 cm (maximum allowed: 20.0 cm)",
         )
 
-    def test_filter_expression_fallbacks_to_fid(self):
-        """Test that filter expression uses 'fid' if no identifier field exists in the layer."""
+    def test_filter_expression_fallbacks_to_internal_id(self):
+        """Test that filter expression uses $id if no identifier field exists in the layer."""
         # Mock layer with no identifier fields
         layer = Mock()
         layer.name.return_value = "NoIdLayer"
@@ -451,9 +444,9 @@ class TestHeightDifferenceDetectorService(unittest.TestCase):
             mock_distance_area.return_value = mock_calculator
             warnings = self.service.detect_height_difference_warnings()
             self.assertGreater(len(warnings), 0)
-            # The filter_expression should use 'fid' and both feature IDs
+            # The filter_expression should use $id and both feature IDs (not "fid" — no such column on memory CSV layers)
             filter_expr = warnings[0].filter_expression
-            self.assertTrue(filter_expr.startswith('"fid"'))
+            self.assertTrue(filter_expr.startswith("$id"))
             self.assertIn('1', filter_expr)
             self.assertIn('2', filter_expr)
 

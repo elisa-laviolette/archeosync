@@ -1,14 +1,14 @@
 """
 Out of Bounds Detector Service for ArcheoSync plugin.
 
-This module provides a service to detect objects, features, and small finds that are
-located outside their recording areas by more than a specified distance (default 20 cm).
-It analyzes the spatial relationships between features and their associated recording areas
-and identifies those that are positioned outside the expected boundaries.
+This module provides a service to detect objects, features, small finds, and total-station
+(topo) points that are located outside their recording areas by more than a specified
+distance (default 20 cm). It analyzes the spatial relationships between features and their
+associated recording areas and identifies those that are positioned outside the expected boundaries.
 
 Key Features:
 - Detects features located outside recording areas by more than 20 cm
-- Supports objects, features, and small finds layers
+- Supports objects, features, small finds layers, and imported CSV / total-station point layers
 - Uses QGIS relations to determine field mappings
 - Provides detailed warnings about out-of-bounds features
 - Supports translation for warning messages
@@ -46,9 +46,9 @@ class OutOfBoundsDetectorService(QObject):
     """
     Service for detecting features located outside their recording areas.
     
-    This service analyzes the spatial relationships between features (objects, features, 
-    small finds) and their associated recording areas. It identifies features that are 
-    positioned outside the expected boundaries by more than a specified distance.
+    This service analyzes the spatial relationships between features (objects, features,
+    small finds, total-station points) and their associated recording areas. It identifies
+    features that are positioned outside the expected boundaries by more than a specified distance.
     """
     
     def __init__(self, settings_manager, layer_service):
@@ -88,12 +88,14 @@ class OutOfBoundsDetectorService(QObject):
             objects_layer_id = self._settings_manager.get_value('objects_layer')
             features_layer_id = self._settings_manager.get_value('features_layer')
             small_finds_layer_id = self._settings_manager.get_value('small_finds_layer')
+            total_station_points_layer_id = self._settings_manager.get_value('total_station_points_layer')
             
             print(f"[DEBUG] Layer IDs from settings:")
             print(f"[DEBUG]   recording_areas_layer_id: {recording_areas_layer_id}")
             print(f"[DEBUG]   objects_layer_id: {objects_layer_id}")
             print(f"[DEBUG]   features_layer_id: {features_layer_id}")
             print(f"[DEBUG]   small_finds_layer_id: {small_finds_layer_id}")
+            print(f"[DEBUG]   total_station_points_layer_id: {total_station_points_layer_id}")
             
             if not recording_areas_layer_id:
                 print(f"[DEBUG] No recording areas layer configured, returning empty warnings")
@@ -416,9 +418,9 @@ class OutOfBoundsDetectorService(QObject):
                     if feature_labels:
                         filter_expression = f'"Label" IN ({",".join(feature_labels)})'
                     else:
-                        # Fallback to FID if no Label field
+                        # Fallback to internal feature id ($id); temp layers often have no "fid" column.
                         feature_ids = [str(item['feature_id']) for item in items]
-                        filter_expression = f'"fid" IN ({",".join(feature_ids)})'
+                        filter_expression = f"$id IN ({','.join(feature_ids)})"
                     
                     # Debug: Verify filter expression
                     print(f"[DEBUG] Creating filter expression: {filter_expression}")

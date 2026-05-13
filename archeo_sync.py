@@ -670,10 +670,47 @@ class ArcheoSyncPlugin(QObject):
             
             # Get final mapping from dialog
             column_mapping = mapping_dialog.get_final_mapping()
-        
-        # Import CSV files
-        import_result = self._csv_import_service.import_csv_files(csv_files, column_mapping)
-        
+
+        # Topo CSV: resolve which column fills ``identifier`` when ambiguous
+        id_check = self._csv_import_service.check_csv_identifier_column_requirement(
+            csv_files, column_mapping
+        )
+        if not id_check.is_valid:
+            if getattr(id_check, "code", None) == "CSV_IDENTIFIER_AMBIGUOUS":
+                candidates = (id_check.extras or {}).get("candidates") or []
+                if not candidates:
+                    QMessageBox.critical(
+                        self._iface.mainWindow(),
+                        self.tr("CSV Import Error"),
+                        id_check.message,
+                    )
+                    return None
+                from .ui.csv_identifier_column_dialog import CsvIdentifierColumnDialog
+                dlg = CsvIdentifierColumnDialog(
+                    parent=self._iface.mainWindow(),
+                    candidates=candidates,
+                    initial_selection=self._settings_manager.get_value(
+                        "csv_topo_identifier_column", ""
+                    )
+                    or "",
+                )
+                if self._execute_dialog(dlg) != dlg.Accepted:
+                    return None
+                choice = dlg.selected_column_key()
+                self._settings_manager.set_value("csv_topo_identifier_column", choice)
+                import_result = self._csv_import_service.import_csv_files(
+                    csv_files, column_mapping, identifier_source_column_key=choice
+                )
+            else:
+                QMessageBox.critical(
+                    self._iface.mainWindow(),
+                    self.tr("CSV Import Error"),
+                    id_check.message,
+                )
+                return None
+        else:
+            import_result = self._csv_import_service.import_csv_files(csv_files, column_mapping)
+
         if import_result.is_valid:
             # Return the number of imported features
             return self._csv_import_service.get_last_import_count()

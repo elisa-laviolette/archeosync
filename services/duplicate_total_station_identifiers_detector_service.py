@@ -7,7 +7,7 @@ that layer and the definitive total station points layer.
 
 Key Features:
 - Detects duplicate identifiers in total station points
-- Guesses identifier field by looking for "id" in field names and string fields
+- Guesses identifier field by looking for "id" in field names and text-like fields (string, text, varchar, …)
 - Checks within temporary Imported_CSV_points layer
 - Checks between temporary and definitive total station points layers
 - Provides detailed warnings for each duplicate found
@@ -25,14 +25,13 @@ Usage:
     detector = DuplicateTotalStationIdentifiersDetectorService(
         settings_manager=settings_manager,
         layer_service=layer_service,
-        translation_service=translation_service
     )
     
     warnings = detector.detect_duplicate_identifiers_warnings()
 """
 
 from typing import List, Optional, Any, Union, Dict, Tuple
-from qgis.PyQt.QtCore import QObject
+from qgis.PyQt.QtCore import QObject, QVariant
 
 try:
     from ..core.interfaces import ISettingsManager, ILayerService
@@ -63,7 +62,41 @@ class DuplicateTotalStationIdentifiersDetectorService(QObject):
         """
         self._settings_manager = settings_manager
         self._layer_service = layer_service
-    
+
+    def _field_is_text_like(self, field: Any) -> bool:
+        """
+        Return True if a QgsField holds textual values suitable for identifier comparison.
+
+        QGIS / data providers report string columns as ``String``, ``text``, ``varchar``, etc.
+        Relying only on ``typeName() == 'string'`` misses PostgreSQL ``text``, GeoPackage ``TEXT``,
+        or empty type names when ``field.type()`` is already ``QVariant.String``.
+        """
+        try:
+            if field.type() == QVariant.String:
+                return True
+        except Exception:
+            pass
+        tn = (field.typeName() or "").strip().lower()
+        if not tn:
+            return False
+        if tn in (
+            "string",
+            "str",
+            "text",
+            "varchar",
+            "character varying",
+            "char",
+            "nvarchar",
+            "uuid",
+            "json",
+            "jsonb",
+        ):
+            return True
+        # e.g. "String (20)", "text (variable)"
+        if "string" in tn or "text" in tn or "varchar" in tn or "char" in tn:
+            return True
+        return False
+
     def _find_layer_by_name(self, layer_name: str) -> Optional[Any]:
         """
         Find a layer by name in the current QGIS project.
@@ -175,11 +208,11 @@ class DuplicateTotalStationIdentifiersDetectorService(QObject):
             temp_string_fields = []
             
             for field in definitive_layer.fields():
-                if field.typeName().lower() == "string":
+                if self._field_is_text_like(field):
                     definitive_string_fields.append(field.name().lower())
             
             for field in temp_layer.fields():
-                if field.typeName().lower() == "string":
+                if self._field_is_text_like(field):
                     temp_string_fields.append(field.name().lower())
             
             # Find common string fields (case-insensitive)
@@ -256,10 +289,9 @@ class DuplicateTotalStationIdentifiersDetectorService(QObject):
             
             for field in layer.fields():
                 field_name = field.name().lower()
-                field_type = field.typeName().lower()
                 
                 # Check if field name contains "id" and is a string field
-                if "id" in field_name and field_type == "string":
+                if "id" in field_name and self._field_is_text_like(field):
                     candidate_fields.append(field.name())
             
             # If we found candidates, return the first one
@@ -269,16 +301,15 @@ class DuplicateTotalStationIdentifiersDetectorService(QObject):
             # If no candidates found, try to find any string field that might be an identifier
             for field in layer.fields():
                 field_name = field.name().lower()
-                field_type = field.typeName().lower()
                 
                 # Look for common identifier patterns in string fields
-                if (field_type == "string" and 
+                if (self._field_is_text_like(field) and
                     (field_name in ["identifier", "identifiant", "code", "name", "nom"] or
                      field_name.endswith("_id") or field_name.endswith("_code"))):
                     return field.name()
             
             print(f"[DEBUG] Could not guess identifier field for layer: {layer.name()}")
-            print(f"[DEBUG] Available string fields: {[f.name() for f in layer.fields() if f.typeName().lower() == 'string']}")
+            print(f"[DEBUG] Available text-like fields: {[f.name() for f in layer.fields() if self._field_is_text_like(f)]}")
             return None
             
         except Exception as e:

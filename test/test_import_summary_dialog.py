@@ -15,6 +15,7 @@ try:
         ImportSummaryDialog,
         ImportSummaryDockWidget,
         DOCK_WIDGET_AREAS,
+        _qmessagebox_yes_no_dialog_args,
     )
     from core.data_structures import ImportSummaryData, WarningData
 except ImportError:
@@ -23,6 +24,7 @@ except ImportError:
         ImportSummaryDialog,
         ImportSummaryDockWidget,
         DOCK_WIDGET_AREAS,
+        _qmessagebox_yes_no_dialog_args,
     )
     from ..core.data_structures import ImportSummaryData, WarningData
 
@@ -336,12 +338,13 @@ class TestImportSummaryDialog(unittest.TestCase):
     
     def test_cancel_button_confirmation_yes(self):
         """Test that cancel button shows confirmation dialog and proceeds when user clicks Yes."""
+        std_btns, default_no, yes_val, _no_val = _qmessagebox_yes_no_dialog_args()
         with patch('qgis.PyQt.QtWidgets.QMessageBox.question') as mock_question, \
              patch.object(self.dialog, '_delete_temporary_layers') as mock_delete, \
              patch.object(self.dialog, 'deleteLater') as mock_delete_later:
             
             # Configure the mock to return Yes
-            mock_question.return_value = QtWidgets.QMessageBox.Yes
+            mock_question.return_value = yes_val
             
             # Call the cancel method
             self.dialog._handle_cancel()
@@ -351,8 +354,8 @@ class TestImportSummaryDialog(unittest.TestCase):
                 self.dialog,
                 "Cancel Import",
                 "Are you sure you want to cancel the import? This will delete all temporary import layers and cannot be undone.",
-                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
-                QtWidgets.QMessageBox.No
+                std_btns,
+                default_no,
             )
             
             # Verify temporary layers were deleted
@@ -363,12 +366,13 @@ class TestImportSummaryDialog(unittest.TestCase):
     
     def test_cancel_button_confirmation_no(self):
         """Test that cancel button shows confirmation dialog and does nothing when user clicks No."""
+        _std_btns, _default_no, _yes_val, no_val = _qmessagebox_yes_no_dialog_args()
         with patch('qgis.PyQt.QtWidgets.QMessageBox.question') as mock_question, \
              patch.object(self.dialog, '_delete_temporary_layers') as mock_delete, \
              patch.object(self.dialog, 'deleteLater') as mock_delete_later:
             
             # Configure the mock to return No
-            mock_question.return_value = QtWidgets.QMessageBox.No
+            mock_question.return_value = no_val
             
             # Call the cancel method
             self.dialog._handle_cancel()
@@ -562,6 +566,22 @@ class TestImportSummaryDialog(unittest.TestCase):
         
         self.assertFalse(self.dialog._has_warnings())
     
+    def test_qmessagebox_yes_no_helper_matches_runtime(self):
+        """Helper must use the same Yes/No flags as the active PyQt (Qt5 vs QGIS 4 / Qt6)."""
+        std_btns, default_no, yes_val, no_val = _qmessagebox_yes_no_dialog_args()
+        qmb = QtWidgets.QMessageBox
+        if hasattr(qmb, "Yes"):
+            self.assertEqual(std_btns, qmb.Yes | qmb.No)
+            self.assertEqual(default_no, qmb.No)
+            self.assertEqual(yes_val, qmb.Yes)
+            self.assertEqual(no_val, qmb.No)
+        else:
+            std = qmb.StandardButton
+            self.assertEqual(std_btns, std.Yes | std.No)
+            self.assertEqual(default_no, std.No)
+            self.assertEqual(yes_val, std.Yes)
+            self.assertEqual(no_val, std.No)
+    
     def test_confirm_validation_with_warnings_duplicates_only(self):
         """Test confirmation dialog when only duplicate warnings exist."""
         # Set up summary data with only duplicate warnings
@@ -571,8 +591,9 @@ class TestImportSummaryDialog(unittest.TestCase):
         ]
         self.dialog._summary_data.skipped_numbers_warnings = []
         
+        _std_btns, _default_no, yes_val, _no_val = _qmessagebox_yes_no_dialog_args()
         with patch('qgis.PyQt.QtWidgets.QMessageBox.question') as mock_question:
-            mock_question.return_value = QtWidgets.QMessageBox.Yes
+            mock_question.return_value = yes_val
             
             result = self.dialog._confirm_validation_with_warnings()
             
@@ -590,8 +611,9 @@ class TestImportSummaryDialog(unittest.TestCase):
             WarningData("test3", "area3", "layer3", "filter3")
         ]
         
+        _std_btns, _default_no, _yes_val, no_val = _qmessagebox_yes_no_dialog_args()
         with patch('qgis.PyQt.QtWidgets.QMessageBox.question') as mock_question:
-            mock_question.return_value = QtWidgets.QMessageBox.No
+            mock_question.return_value = no_val
             
             result = self.dialog._confirm_validation_with_warnings()
             
@@ -610,8 +632,9 @@ class TestImportSummaryDialog(unittest.TestCase):
             WarningData("test3", "area3", "layer3", "filter3")
         ]
         
+        _std_btns, _default_no, yes_val, _no_val = _qmessagebox_yes_no_dialog_args()
         with patch('qgis.PyQt.QtWidgets.QMessageBox.question') as mock_question:
-            mock_question.return_value = QtWidgets.QMessageBox.Yes
+            mock_question.return_value = yes_val
             
             result = self.dialog._confirm_validation_with_warnings()
             

@@ -27,15 +27,10 @@ class TestDuplicateTotalStationIdentifiersDetectorService(unittest.TestCase):
         """Set up test fixtures."""
         self.settings_manager = Mock()
         self.layer_service = Mock()
-        self.translation_service = Mock()
-        
-        # Set up translation service to return the input string (no translation)
-        self.translation_service.translate = Mock(side_effect=lambda x: x)
         
         self.detector = DuplicateTotalStationIdentifiersDetectorService(
             settings_manager=self.settings_manager,
             layer_service=self.layer_service,
-            translation_service=self.translation_service
         )
     
     def test_find_common_identifier_field_with_id_in_name(self):
@@ -105,6 +100,23 @@ class TestDuplicateTotalStationIdentifiersDetectorService(unittest.TestCase):
         
         # Assert the correct field was found (should preserve definitive layer case)
         self.assertEqual(result, "Point_ID")
+
+    def test_find_common_identifier_field_typename_text_postgresql_style(self):
+        """DB layers often report string columns as typeName 'text', not 'string'."""
+        definitive_layer = Mock()
+        temp_layer = Mock()
+        definitive_field = Mock()
+        definitive_field.name.return_value = "identifier"
+        definitive_field.typeName.return_value = "text"
+        definitive_field.type.return_value = QVariant.Invalid
+        temp_field = Mock()
+        temp_field.name.return_value = "identifier"
+        temp_field.typeName.return_value = "TEXT"
+        temp_field.type.return_value = QVariant.Invalid
+        definitive_layer.fields.return_value = [definitive_field]
+        temp_layer.fields.return_value = [temp_field]
+        result = self.detector._find_common_identifier_field(definitive_layer, temp_layer)
+        self.assertEqual(result, "identifier")
     
     def test_find_common_identifier_field_with_common_patterns(self):
         """Test finding common identifier field using common patterns when no 'id' field exists."""
@@ -530,42 +542,15 @@ class TestDuplicateTotalStationIdentifiersDetectorService(unittest.TestCase):
     
     def test_create_duplicate_warning(self):
         """Test creating a duplicate warning message."""
-        # Test with translation service
-        self.translation_service.translate.return_value = "Translated message"
-        
         result = self.detector._create_duplicate_warning(3, "TS001", "Test Layer")
-        
-        # Assert translation was called
-        self.translation_service.translate.assert_called_once()
-        self.assertEqual(result, "Translated message")
-    
-    def test_create_between_layers_duplicate_warning(self):
-        """Test creating a between-layers duplicate warning message."""
-        # Test with translation service
-        self.translation_service.translate.return_value = "Translated between layers message"
-        
-        result = self.detector._create_between_layers_duplicate_warning("TS001")
-        
-        # Assert translation was called
-        self.translation_service.translate.assert_called_once()
-        self.assertEqual(result, "Translated between layers message")
-    
-    def test_create_warning_without_translation_service(self):
-        """Test creating warnings when no translation service is available."""
-        # Create detector without translation service
-        detector = DuplicateTotalStationIdentifiersDetectorService(
-            settings_manager=self.settings_manager,
-            layer_service=self.layer_service,
-            translation_service=None
-        )
-        
-        # Test creating warning
-        result = detector._create_duplicate_warning(2, "TS001", "Test Layer")
-        
-        # Assert English message was returned
-        self.assertIn("2", result)
+        self.assertIn("3", result)
         self.assertIn("TS001", result)
         self.assertIn("Test Layer", result)
+
+    def test_create_between_layers_duplicate_warning(self):
+        """Test creating a between-layers duplicate warning message."""
+        result = self.detector._create_between_layers_duplicate_warning("TS001")
+        self.assertIn("TS001", result)
 
 
 if __name__ == '__main__':

@@ -63,6 +63,29 @@ def _align_center_flag():
     raise AttributeError("Qt center alignment flag is not available.")
 
 
+def _qmessagebox_yes_no_dialog_args():
+    """
+    Return ``QMessageBox.question`` button flags and reply values for Qt5 and Qt6.
+
+    PyQt6 (QGIS 4) exposes affirmative/negative actions under
+    ``QMessageBox.StandardButton``; PyQt5 keeps ``QMessageBox.Yes`` / ``No`` on the
+    class itself. Using the wrong API raises ``AttributeError`` at dialog build time.
+
+    Returns:
+        tuple: ``(standard_buttons, default_button, yes_reply, no_reply)`` — third and
+        fourth arguments to ``QMessageBox.question``, then values to compare the return
+        value against for Yes vs No.
+    """
+    if hasattr(QMessageBox, "Yes"):
+        yes = QMessageBox.Yes
+        no = QMessageBox.No
+    else:
+        std = QMessageBox.StandardButton
+        yes = std.Yes
+        no = std.No
+    return yes | no, no, yes, no
+
+
 class DockWidgetAreas:
     """
     Qt5 vs Qt6 dock area flags for QDockWidget and QMainWindow.
@@ -750,30 +773,32 @@ class ImportSummaryDockWidget(QDockWidget):
         
         warning_message = "\n".join(warning_summary)
         
-        # Show confirmation dialog
+        # Show confirmation dialog (Qt5 vs Qt6 button enums)
+        std_btns, default_btn, yes_val, _ = _qmessagebox_yes_no_dialog_args()
         reply = QMessageBox.question(
             self,
             self.tr("Validation with Warnings"),
             self.tr(f"The following warnings have been detected:\n\n{warning_message}\n\nDo you want to proceed with validation anyway?"),
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No
+            std_btns,
+            default_btn,
         )
         
-        return reply == QMessageBox.Yes
+        return reply == yes_val
     
     def _handle_cancel(self) -> None:
         """Handle the cancel button click - delete temporary layers and delete the widget."""
         try:
-            # Show confirmation dialog
+            # Show confirmation dialog (Qt5 vs Qt6 button enums)
+            std_btns, default_btn, yes_val, _ = _qmessagebox_yes_no_dialog_args()
             reply = QMessageBox.question(
                 self,
                 self.tr("Cancel Import"),
                 self.tr("Are you sure you want to cancel the import? This will delete all temporary import layers and cannot be undone."),
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No
+                std_btns,
+                default_btn,
             )
             
-            if reply == QMessageBox.Yes:
+            if reply == yes_val:
                 # Delete temporary layers
                 self._delete_temporary_layers()
                 

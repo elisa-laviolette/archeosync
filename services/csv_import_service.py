@@ -5,6 +5,11 @@ This module provides functionality for importing CSV files containing point data
 into QGIS as PointZ vector layers. It handles validation of required columns (X, Y, Z),
 column mapping across multiple files, and layer creation.
 
+The temporary layer ``Imported_CSV_Points`` includes a string field ``identifier`` when the CSV
+has no column named ``identifier`` (case-insensitive): values come from that column when present,
+otherwise from the plugin setting ``csv_topo_identifier_column``, from a single unambiguous text
+column per file, or after user selection when several text columns exist.
+
 Key Features:
 - Validates CSV files have required X, Y, Z columns (case-insensitive)
 - Maps columns across multiple CSV files
@@ -31,7 +36,6 @@ Usage:
 import csv
 import os
 from typing import List, Dict, Optional, Any
-from dataclasses import dataclass
 
 try:
     from qgis.core import QgsVectorLayer, QgsFeature, QgsGeometry, QgsPointXY, QgsFields, QgsField
@@ -69,7 +73,171 @@ class CSVImportService(ICSVImportService):
         self._file_system_service = file_system_service
         self._settings_manager = settings_manager
         self._required_columns = ['X', 'Y', 'Z']
-    
+        # Canonical link field on Imported_CSV_Points (must match definitive topo layer / QGIS relations)
+        self._identifier_field_name = 'identifier'
+
+    def _has_identifier_column_key(self, column_mapping: Dict[str, List[Optional[str]]]) -> bool:
+        """True if the mapping already includes a column whose name is ``identifier`` (case-insensitive)."""
+        return any(k.strip().upper() == 'IDENTIFIER' for k in column_mapping.keys())
+
+    def _max_string_columns_per_file(
+        self,
+        column_mapping: Dict[str, List[Optional[str]]],
+        field_types: Dict[str, str],
+        num_files: int,
+    ) -> int:
+        """Maximum count of non-required string columns present on a single CSV file."""
+        max_n = 0
+        for fi in range(num_files):
+            n = 0
+            for key in column_mapping:
+                if key in self._required_columns:
+                    continue
+                col_list = column_mapping[key]
+                if fi >= len(col_list) or not col_list[fi]:
+                    continue
+                if field_types.get(key, 'string') != 'string':
+                    continue
+                n += 1
+            max_n = max(max_n, n)
+        return max_n
+
+    def _is_valid_saved_identifier_key(
+        self,
+        saved: str,
+        column_mapping: Dict[str, List[Optional[str]]],
+        num_files: int,
+    ) -> bool:
+        """True if ``saved`` is a mapping key present in every CSV file (non-null column ref)."""
+        if not saved or not isinstance(saved, str):
+            return False
+        if saved not in column_mapping or saved in self._required_columns:
+            return False
+        cols = column_mapping[saved]
+        for fi in range(num_files):
+            if fi >= len(cols) or not cols[fi]:
+                return False
+        return True
+
+    def _identifier_choice_candidates(
+        self,
+        column_mapping: Dict[str, List[Optional[str]]],
+        num_files: int,
+    ) -> List[str]:
+        """Non-required mapping keys that appear in at least one file (for user selection)."""
+        keys: List[str] = []
+        for key in column_mapping:
+            if key in self._required_columns:
+                continue
+            col_list = column_mapping[key]
+            lim = min(num_files, len(col_list))
+            if any(col_list[fi] for fi in range(lim)):
+                keys.append(key)
+        return sorted(keys)
+
+    def _resolve_effective_identifier_source_key(
+        self,
+        column_mapping: Dict[str, List[Optional[str]]],
+        num_files: int,
+        has_identifier_column: bool,
+        identifier_source_column_key: Optional[str],
+    ) -> Optional[str]:
+        """
+        Mapping key used to populate the memory ``identifier`` field when there is no CSV
+        ``identifier`` column. None means auto (single string column per file).
+        """
+        if has_identifier_column:
+            return None
+        if identifier_source_column_key and self._is_valid_saved_identifier_key(
+            identifier_source_column_key.strip(), column_mapping, num_files
+        ):
+            return identifier_source_column_key.strip()
+        if self._settings_manager:
+            saved = (self._settings_manager.get_value('csv_topo_identifier_column', '') or '').strip()
+            if saved and self._is_valid_saved_identifier_key(saved, column_mapping, num_files):
+                return saved
+        return None
+
+    def check_csv_identifier_column_requirement(
+        self,
+        csv_files: List[str],
+        column_mapping: Dict[str, List[Optional[str]]],
+    ) -> ValidationResult:
+        """
+        Preflight for topo CSV import: see ``ICSVImportService.check_csv_identifier_column_requirement``.
+        """
+        field_types = self._detect_field_types(csv_files, column_mapping)
+        has_id = self._has_identifier_column_key(column_mapping)
+        if has_id:
+            return ValidationResult(True, '')
+        num_files = len(csv_files)
+        max_strings = self._max_string_columns_per_file(column_mapping, field_types, num_files)
+        if max_strings <= 1:
+            return ValidationResult(True, '')
+        effective = self._resolve_effective_identifier_source_key(
+            column_mapping, num_files, has_id, None
+        )
+        if effective:
+            return ValidationResult(True, '')
+        candidates = self._identifier_choice_candidates(column_mapping, num_files)
+        return ValidationResult(
+            False,
+            "Several text columns are present without an `identifier` column. "
+            "Choose which column should populate the point identifier, or set it in plugin settings.",
+            code='CSV_IDENTIFIER_AMBIGUOUS',
+            extras={'candidates': candidates},
+        )
+
+    def _identifier_attribute_value_for_row(
+        self,
+        column_mapping: Dict[str, List[Optional[str]]],
+        field_types: Dict[str, str],
+        file_index: int,
+        row: Dict[str, str],
+        *,
+        has_identifier_column: bool,
+        configured_source_key: Optional[str],
+    ) -> Optional[str]:
+        """Value for the ``identifier`` field on the memory layer for this row (or None)."""
+
+        def _normalize_cell(value: Any) -> Optional[str]:
+            if value is None:
+                return None
+            s = str(value).strip()
+            return s if s else None
+
+        if has_identifier_column:
+            for key in column_mapping:
+                if key.strip().upper() != 'IDENTIFIER':
+                    continue
+                col = column_mapping[key][file_index]
+                if col and col in row:
+                    return _normalize_cell(row[col])
+            return None
+
+        if configured_source_key:
+            col_list = column_mapping.get(configured_source_key)
+            if not col_list or file_index >= len(col_list):
+                return None
+            col = col_list[file_index]
+            if col and col in row:
+                return _normalize_cell(row[col])
+            return None
+
+        for key in column_mapping:
+            if key in self._required_columns:
+                continue
+            col_list = column_mapping[key]
+            if file_index >= len(col_list):
+                continue
+            col = col_list[file_index]
+            if not col or col not in row:
+                continue
+            if field_types.get(key, 'string') != 'string':
+                continue
+            return _normalize_cell(row[col])
+        return None
+
     def validate_csv_files(self, csv_files: List[str]) -> ValidationResult:
         """
         Validate that all CSV files have required X, Y, Z columns.
@@ -324,133 +492,156 @@ class CSVImportService(ICSVImportService):
         
         return field_types
 
-    def import_csv_files(self, csv_files: List[str], column_mapping: Optional[Dict[str, List[Optional[str]]]] = None) -> ValidationResult:
+    def import_csv_files(
+        self,
+        csv_files: List[str],
+        column_mapping: Optional[Dict[str, List[Optional[str]]]] = None,
+        identifier_source_column_key: Optional[str] = None,
+    ) -> ValidationResult:
         """
         Import CSV files into a PointZ vector layer and add to QGIS project.
-        
+
+        The memory layer always exposes a string field ``identifier`` when the CSV has no column
+        named ``identifier`` (case-insensitive): values come from the configured mapping key
+        (plugin setting ``csv_topo_identifier_column`` or ``identifier_source_column_key``), or
+        from the sole text column per file when unambiguous.
+
         Args:
             csv_files: List of CSV file paths to import
             column_mapping: Optional column mapping (if None, will be generated automatically)
-            
+            identifier_source_column_key: Optional mapping key for this import (overrides settings)
+
         Returns:
-            ValidationResult indicating if import was successful and any error messages
+            ValidationResult indicating if import was successful or any error messages
         """
         # Validate CSV files first
         validation_result = self.validate_csv_files(csv_files)
         if not validation_result.is_valid:
             return validation_result
-        
+
         # Generate column mapping if not provided
         if column_mapping is None:
             column_mapping = self.get_column_mapping(csv_files)
-        
+
         try:
-            # Detect field types from CSV data
             field_types = self._detect_field_types(csv_files, column_mapping)
-            
-            # Create temporary layer
+            has_id = self._has_identifier_column_key(column_mapping)
+            num_files = len(csv_files)
+            max_strings = self._max_string_columns_per_file(column_mapping, field_types, num_files)
+            effective_key = self._resolve_effective_identifier_source_key(
+                column_mapping, num_files, has_id, identifier_source_column_key
+            )
+            if not has_id and max_strings > 1 and effective_key is None:
+                candidates = self._identifier_choice_candidates(column_mapping, num_files)
+                return ValidationResult(
+                    False,
+                    "Could not resolve which CSV column should populate the point identifier.",
+                    code='CSV_IDENTIFIER_AMBIGUOUS',
+                    extras={'candidates': candidates},
+                )
+
             layer_name = "Imported_CSV_Points"
-            
-            # Get project CRS instead of using hardcoded EPSG:4326
+
             from qgis.core import QgsProject
             project_crs = QgsProject.instance().crs()
             project_crs_string = self._get_crs_string(project_crs)
             layer_uri = f"PointZ?crs={project_crs_string}"
-            
-            # Add fields for all columns in mapping with detected types
+
             for column_name in column_mapping.keys():
                 if column_name in self._required_columns:
-                    # X, Y, Z are always numeric
                     layer_uri += f"&field={column_name.lower()}:real"
                 else:
-                    # Use detected field type, default to string
                     field_type = field_types.get(column_name, "string")
                     layer_uri += f"&field={column_name.lower()}:{field_type}"
-            
+
+            if not has_id:
+                layer_uri += f"&field={self._identifier_field_name}:string"
+
             layer = QgsVectorLayer(layer_uri, layer_name, "memory")
-            
+
             if not layer.isValid():
                 return ValidationResult(False, "Failed to create vector layer")
-            
-            # Start editing
+
+            layer_field_names = {f.name() for f in layer.fields()}
+
             layer.startEditing()
-            
-            # Process each CSV file
+
             feature_id = 1
             for file_index, csv_file in enumerate(csv_files):
                 try:
                     with open(csv_file, 'r', newline='', encoding='utf-8') as file:
                         reader = csv.DictReader(file)
-                        
+
                         for row in reader:
-                            # Create feature
                             feature = QgsFeature(layer.fields())
                             feature.setId(feature_id)
-                            
-                            # Set geometry (X, Y, Z coordinates)
+
                             x_col = column_mapping['X'][file_index]
                             y_col = column_mapping['Y'][file_index]
                             z_col = column_mapping['Z'][file_index]
-                            
+
                             try:
                                 x = float(row[x_col])
                                 y = float(row[y_col])
                                 z = float(row[z_col])
-                                
-                                # Create PointZ geometry
+
                                 point = QgsPointXY(x, y)
                                 geometry = QgsGeometry.fromPointXY(point)
                                 feature.setGeometry(geometry)
-                                
-                                # Set all attributes from column mapping
+
                                 for column_name, column_list in column_mapping.items():
                                     col_name = column_list[file_index]
                                     if col_name and col_name in row:
                                         field_name = column_name.lower()
-                                        if field_name in [field.name() for field in layer.fields()]:
-                                            # Convert value to appropriate type
+                                        if field_name in layer_field_names:
                                             value = row[col_name]
                                             field_type = field_types.get(column_name, "string")
-                                            
+
                                             if field_type == "integer" and value:
                                                 try:
                                                     feature.setAttribute(field_name, int(value))
                                                 except (ValueError, TypeError):
-                                                    feature.setAttribute(field_name, value)  # Fallback to string
+                                                    feature.setAttribute(field_name, value)
                                             elif field_type == "real" and value:
                                                 try:
                                                     feature.setAttribute(field_name, float(value))
                                                 except (ValueError, TypeError):
-                                                    feature.setAttribute(field_name, value)  # Fallback to string
+                                                    feature.setAttribute(field_name, value)
                                             else:
                                                 feature.setAttribute(field_name, value)
-                                
-                                # Add feature to layer
+
+                                if not has_id and self._identifier_field_name in layer_field_names:
+                                    id_val = self._identifier_attribute_value_for_row(
+                                        column_mapping,
+                                        field_types,
+                                        file_index,
+                                        row,
+                                        has_identifier_column=False,
+                                        configured_source_key=effective_key,
+                                    )
+                                    feature.setAttribute(self._identifier_field_name, id_val)
+
                                 layer.addFeature(feature)
                                 feature_id += 1
-                                
-                            except (ValueError, KeyError) as e:
-                                # Skip invalid rows but continue processing
+
+                            except (ValueError, KeyError):
                                 continue
-                                
+
                 except Exception as e:
                     return ValidationResult(False, f"Error processing CSV file {csv_file}: {str(e)}")
-            
-            # Commit changes
+
             layer.commitChanges()
-            
-            # Add layer to project
-            from qgis.core import QgsProject
+
             QgsProject.instance().addMapLayer(layer)
-            
-            # Store imported files for later archiving instead of archiving immediately
+
             self._last_imported_files = csv_files
-            
-            # Store the number of imported features for summary
             self._last_import_count = feature_id - 1
-            
-            return ValidationResult(True, f"Successfully imported {feature_id - 1} points from {len(csv_files)} CSV file(s)")
-            
+
+            return ValidationResult(
+                True,
+                f"Successfully imported {feature_id - 1} points from {len(csv_files)} CSV file(s)",
+            )
+
         except Exception as e:
             return ValidationResult(False, f"Error during import: {str(e)}")
     

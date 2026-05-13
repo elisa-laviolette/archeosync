@@ -230,7 +230,8 @@ QGIS-specific implementation for field project creation and packaging including:
 QGIS-specific implementation for CSV import operations including:
 - CSV file validation for required X, Y, Z columns (case-insensitive)
 - Column mapping across multiple CSV files with different structures
-- PointZ vector layer creation with attribute preservation
+- PointZ vector layer creation with attribute preservation; the memory layer includes a string field ``identifier`` when the CSV has no such column, using plugin setting ``csv_topo_identifier_column``, a single unambiguous text column, or a one-time user choice when several text columns exist
+- ``check_csv_identifier_column_requirement`` preflight used by the import workflow before creating features
 - Automatic project integration
 - Comprehensive error handling and validation
 - Interactive column mapping dialog integration
@@ -408,6 +409,7 @@ The filtering process ensures field projects contain only relevant data:
   - **Color-coded Interface**: Green for successful imports, orange for duplicates
   - **Conditional Display**: Only shows relevant sections based on imported data
   - **Out-of-bounds warnings**: When `OutOfBoundsDetectorService` reports features, objects, or small finds outside their recording area (within the configured tolerance), messages and Select and show entities actions appear at the **top** of the summary scroll area, and after Refresh warnings the same block is rebuilt from `ImportSummaryData.out_of_bounds_warnings`. Reopening Import Data while temporary layers are pending **rebuilds** the dock so warnings stay in sync.
+  - **Distance warnings (indirect relations)**: When no QGIS relation directly links the configured total station points layer to the objects layer, `DistanceDetectorService` looks for the shortest multi-hop chain of project relations (for example points → link table → objects) and still pairs features for distance checks using the same field-mapping rules as for direct relations. When direct point↔object relations exist but their fields cannot be matched on the import layers, those direct relations are ignored for path search so a longer path through an intermediate layer can still be used.
   - **Refresh warnings**: Before re-running detectors, the dock calls the same virtual-field sync from definitive layers onto pending import layers as `ArcheoSyncPlugin._show_import_summary`, so refresh results match the initial summary run.
 - **Enhanced Import Workflow**: Improved import process with better user feedback
   - **Statistics Collection**: Enhanced import services to collect and provide detailed statistics
