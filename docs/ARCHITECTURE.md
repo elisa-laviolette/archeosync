@@ -313,6 +313,7 @@ Dialog for displaying comprehensive import statistics after successful data impo
     - "New Small Finds" → configured Small Finds layer
     - "Imported_CSV_Points" → configured Total Station Points layer
   - **Edit Mode Management**: Keeps definitive layers in edit mode for user review
+  - **Default Value Replay**: For missing attributes, evaluates and applies definitive layer default expressions during programmatic feature copy
   - **Feature Selection**: Automatically selects newly copied features for easy identification
   - **User Control**: Allows users to save or cancel changes as needed
 - **User-Friendly Interface**: Clean, organized dialog with intuitive design

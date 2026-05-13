@@ -1447,12 +1447,67 @@ class ImportSummaryDockWidget(QDockWidget):
                 else:
                     # Field doesn't exist in source, set to NULL
                     new_feature[field_name] = None
+
+            self._apply_default_values_from_target_layer(target_layer, new_feature)
             
             return new_feature
             
         except Exception as e:
             print(f"Error creating feature with target structure: {e}")
             return None
+
+    def _apply_default_values_from_target_layer(self, target_layer, feature) -> None:
+        """
+        Apply target-layer default expressions for missing feature attributes.
+
+        During import validation we create features programmatically (without opening
+        QGIS edit forms), so form defaults are not automatically injected. This method
+        mirrors QGIS behavior by evaluating default expressions for empty attributes.
+        """
+        try:
+            if not hasattr(target_layer, "defaultValueDefinition") or not hasattr(target_layer, "defaultValue"):
+                return
+
+            fields = target_layer.fields()
+            for field_index in range(fields.count()):
+                field_name = fields.at(field_index).name()
+                current_value = feature[field_name]
+                if not self._is_missing_attribute_value(current_value):
+                    continue
+
+                default_definition = target_layer.defaultValueDefinition(field_index)
+                expression = ""
+                if default_definition and hasattr(default_definition, "expression"):
+                    expression = (default_definition.expression() or "").strip()
+                if not expression:
+                    continue
+
+                computed_default = None
+                try:
+                    computed_default = target_layer.defaultValue(field_index, feature)
+                except TypeError:
+                    # Compatibility with signatures that only expect field index.
+                    computed_default = target_layer.defaultValue(field_index)
+                except Exception:
+                    computed_default = None
+
+                if self._is_missing_attribute_value(computed_default):
+                    continue
+
+                feature[field_name] = computed_default
+        except Exception as e:
+            # Default evaluation failures should not block validation; keep copied values.
+            print(f"Warning: could not apply layer default values: {e}")
+
+    @staticmethod
+    def _is_missing_attribute_value(value: Any) -> bool:
+        """Return True when a field value should be considered empty for default injection."""
+        if value is None:
+            return True
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped == "" or stripped.lower() == "null"
+        return False
 
     def _open_filtered_attribute_table(self, warning_data: WarningData) -> None:
         """

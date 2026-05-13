@@ -489,6 +489,54 @@ class TestImportSummaryDialog(unittest.TestCase):
             
             # Verify that features were added to the definitive layer
             self.assertEqual(mock_definitive_layer.addFeature.call_count, 2)
+
+    def test_copy_temporary_to_definitive_layers_processes_all_import_layers(self):
+        """Validation copy must process objects, features, small finds, and topo points."""
+        with patch('qgis.core.QgsProject') as mock_project_class, \
+             patch.object(self.dialog, '_copy_features_between_layers', return_value=1) as mock_copy:
+            mock_project = Mock()
+            mock_project_class.instance.return_value = mock_project
+
+            temp_layers = {}
+            definitive_layers = {}
+            mapping = {
+                "New Objects": ("objects_layer", "objects_def_id"),
+                "New Features": ("features_layer", "features_def_id"),
+                "New Small Finds": ("small_finds_layer", "small_finds_def_id"),
+                "Imported_CSV_Points": ("total_station_points_layer", "points_def_id"),
+            }
+
+            for layer_name, (_setting_key, definitive_id) in mapping.items():
+                temp_layer = Mock()
+                temp_layer.name.return_value = layer_name
+                temp_layers[layer_name] = temp_layer
+
+                definitive_layer = Mock()
+                definitive_layer.id.return_value = definitive_id
+                definitive_layer.name.return_value = f"def_{layer_name}"
+                definitive_layers[definitive_id] = definitive_layer
+
+            all_layers = {}
+            i = 0
+            for temp_layer in temp_layers.values():
+                all_layers[f"tmp_{i}"] = temp_layer
+                i += 1
+            for definitive_layer in definitive_layers.values():
+                all_layers[f"def_{i}"] = definitive_layer
+                i += 1
+            mock_project.mapLayers.return_value = all_layers
+
+            def mock_get_value(key, default=None):
+                for _layer_name, (setting_key, definitive_id) in mapping.items():
+                    if key == setting_key:
+                        return definitive_id
+                return default
+
+            self.dialog._settings_manager.get_value = mock_get_value
+
+            self.dialog._copy_temporary_to_definitive_layers()
+
+            self.assertEqual(mock_copy.call_count, 4)
     
     def test_validate_button_exists(self):
         """Test that the validate button is created."""
@@ -747,6 +795,45 @@ class TestImportSummaryDialog(unittest.TestCase):
             isd.QgsFeature = orig_qgsfeature
         # Check that the new feature has the correct value for the definitive field
         assert new_feature['PointID'] == 'TS001'
+
+    def test_apply_layer_default_value_when_source_field_missing(self):
+        """Missing source attributes should be populated from target layer default values."""
+        from qgis.core import QgsFields, QgsField, QgsFeature
+        from qgis.PyQt.QtCore import QVariant
+
+        temp_fields = QgsFields()
+        temp_fields.append(QgsField('pointid', QVariant.String))
+        temp_feature = QgsFeature(temp_fields)
+        temp_feature.setAttribute('pointid', 'TS001')
+
+        def_fields = QgsFields()
+        def_fields.append(QgsField('PointID', QVariant.String))
+        def_fields.append(QgsField('operation_id', QVariant.Int))
+
+        default_definition = Mock()
+        default_definition.expression.return_value = "6"
+        empty_definition = Mock()
+        empty_definition.expression.return_value = ""
+
+        def_layer = Mock()
+        def_layer.fields.return_value = def_fields
+        def_layer.defaultValueDefinition.side_effect = lambda idx: (
+            default_definition if def_fields.at(idx).name() == 'operation_id' else empty_definition
+        )
+        def_layer.defaultValue.side_effect = lambda idx, *_args: (
+            6 if def_fields.at(idx).name() == 'operation_id' else None
+        )
+
+        import ui.import_summary_dialog as isd
+        orig_qgsfeature = isd.QgsFeature
+        isd.QgsFeature = lambda fields: QgsFeature(fields)
+        try:
+            new_feature = self.dialog._create_feature_with_target_structure(temp_feature, def_layer)
+        finally:
+            isd.QgsFeature = orig_qgsfeature
+
+        self.assertEqual(new_feature['PointID'], 'TS001')
+        self.assertEqual(new_feature['operation_id'], 6)
 
 
 if __name__ == '__main__':

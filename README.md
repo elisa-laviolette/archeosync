@@ -170,6 +170,7 @@ When you click the "Validate" button in the import summary dialog:
   - "New Small Finds" → configured Small Finds layer
   - "Imported_CSV_Points" → configured Total Station Points layer
 - **Edit Mode**: The definitive layers are kept in edit mode for review
+- **Layer Default Expressions**: During copy, missing/empty target attributes are filled from the definitive layer default value expressions (same definitions used by QGIS forms)
 - **Feature Selection**: Newly copied features are automatically selected for easy identification
 - **User Control**: You can save or cancel the changes as needed
 - **Validation Button**: "Validate" button to copy features from temporary to definitive layers
