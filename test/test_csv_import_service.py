@@ -540,6 +540,115 @@ class TestCSVImportService:
         assert "crs=EPSG:3857" in layer_uri
         assert "crs=EPSG:4326" not in layer_uri 
 
+    @patch('archeosync.services.csv_import_service.QgsVectorLayer')
+    @patch('archeosync.services.csv_import_service.QgsFeature')
+    @patch('archeosync.services.csv_import_service.QgsGeometry')
+    @patch('qgis.core.QgsProject')
+    def test_import_csv_files_builds_pointz_geometry_from_csv_z(
+        self,
+        mock_project,
+        mock_geometry,
+        mock_feature,
+        mock_layer,
+    ):
+        """Imported geometry must preserve Z from CSV instead of creating 2D points."""
+        csv1 = self._create_test_csv(
+            "test_z_geometry.csv",
+            ["X", "Y", "Z", "Description"],
+            [["100.0", "200.0", "10.5", "Point Z"]],
+        )
+
+        mock_layer_instance = Mock()
+        mock_layer.return_value = mock_layer_instance
+        mock_layer_instance.isValid.return_value = True
+        mock_layer_instance.fields.return_value = []
+        mock_layer_instance.startEditing = Mock()
+        mock_layer_instance.addFeature = Mock()
+        mock_layer_instance.commitChanges = Mock()
+
+        mock_feature_instance = Mock()
+        mock_feature.return_value = mock_feature_instance
+        mock_feature_instance.setId = Mock()
+        mock_feature_instance.setGeometry = Mock()
+        mock_feature_instance.setAttribute = Mock()
+
+        mock_geometry_instance = Mock()
+        mock_geometry.fromWkt = Mock(return_value=mock_geometry_instance)
+
+        mock_project_instance = Mock()
+        mock_project.instance.return_value = mock_project_instance
+        mock_project_instance.addMapLayer = Mock()
+
+        result = self.csv_service.import_csv_files([csv1])
+
+        assert result.is_valid is True
+        mock_geometry.fromWkt.assert_called_once_with("POINT Z (100.0 200.0 10.5)")
+
+    @patch('archeosync.services.csv_import_service.QgsVectorLayer')
+    @patch('archeosync.services.csv_import_service.QgsFeature')
+    @patch('archeosync.services.csv_import_service.QgsGeometry')
+    @patch('archeosync.services.csv_import_service.QgsPointXY')
+    @patch('archeosync.services.csv_import_service.QgsWkbTypes')
+    @patch('qgis.core.QgsProject')
+    def test_import_csv_files_uses_2d_point_when_definitive_layer_is_2d(
+        self,
+        mock_project,
+        mock_wkb_types,
+        mock_point,
+        mock_geometry,
+        mock_feature,
+        mock_layer,
+    ):
+        """Temporary topo layer must be 2D Point when definitive configured layer is 2D."""
+        csv1 = self._create_test_csv(
+            "test_point_geometry.csv",
+            ["X", "Y", "Z", "Description"],
+            [["100.0", "200.0", "10.5", "Point 2D"]],
+        )
+
+        self.mock_settings_manager.get_value.side_effect = (
+            lambda key, default=None: "def_points_layer_id"
+            if key == "total_station_points_layer"
+            else default
+        )
+
+        mock_layer_instance = Mock()
+        mock_layer.return_value = mock_layer_instance
+        mock_layer_instance.isValid.return_value = True
+        mock_layer_instance.fields.return_value = []
+        mock_layer_instance.startEditing = Mock()
+        mock_layer_instance.addFeature = Mock()
+        mock_layer_instance.commitChanges = Mock()
+
+        mock_feature_instance = Mock()
+        mock_feature.return_value = mock_feature_instance
+        mock_feature_instance.setId = Mock()
+        mock_feature_instance.setGeometry = Mock()
+        mock_feature_instance.setAttribute = Mock()
+
+        mock_geometry_instance = Mock()
+        mock_geometry.fromPointXY = Mock(return_value=mock_geometry_instance)
+        mock_geometry.fromWkt = Mock(return_value=mock_geometry_instance)
+
+        mock_point_instance = Mock()
+        mock_point.return_value = mock_point_instance
+
+        mock_definitive_layer = Mock()
+        mock_definitive_layer.wkbType.return_value = 1
+        mock_wkb_types.hasZ.return_value = False
+
+        mock_project_instance = Mock()
+        mock_project.instance.return_value = mock_project_instance
+        mock_project_instance.addMapLayer = Mock()
+        mock_project_instance.mapLayer.return_value = mock_definitive_layer
+
+        result = self.csv_service.import_csv_files([csv1])
+
+        assert result.is_valid is True
+        assert mock_layer.call_args[0][0].startswith("Point?crs=")
+        mock_geometry.fromPointXY.assert_called_once()
+        mock_geometry.fromWkt.assert_not_called()
+
     def test_detect_field_types_integer_fields(self):
         """Test field type detection for integer fields."""
         # Create test CSV with integer data

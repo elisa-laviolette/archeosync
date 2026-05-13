@@ -577,7 +577,7 @@ class ICSVImportService(ABC):
         identifier_source_column_key: Optional[str] = None,
     ) -> ValidationResult:
         """
-        Import CSV files into a PointZ vector layer and add to QGIS project.
+        Import CSV files into a temporary point vector layer and add to QGIS project.
 
         Args:
             csv_files: List of CSV file paths to import

@@ -2,7 +2,7 @@
 CSV Import Service for ArcheoSync plugin.
 
 This module provides functionality for importing CSV files containing point data
-into QGIS as PointZ vector layers. It handles validation of required columns (X, Y, Z),
+into QGIS memory point layers. It handles validation of required columns (X, Y, Z),
 column mapping across multiple files, and layer creation.
 
 The temporary layer ``Imported_CSV_Points`` includes a string field ``identifier`` when the CSV
@@ -13,7 +13,7 @@ column per file, or after user selection when several text columns exist.
 Key Features:
 - Validates CSV files have required X, Y, Z columns (case-insensitive)
 - Maps columns across multiple CSV files
-- Creates PointZ vector layers from CSV data
+- Creates point vector layers from CSV data (Point or PointZ depending on configured definitive layer)
 - Loads layers into QGIS project as temporary layers
 - Handles different column names and data types
 
@@ -38,7 +38,7 @@ import os
 from typing import List, Dict, Optional, Any
 
 try:
-    from qgis.core import QgsVectorLayer, QgsFeature, QgsGeometry, QgsPointXY, QgsFields, QgsField
+    from qgis.core import QgsVectorLayer, QgsFeature, QgsGeometry, QgsPointXY, QgsFields, QgsField, QgsWkbTypes
     from qgis.PyQt.QtCore import QVariant
     from ..core.interfaces import ICSVImportService, ValidationResult
 except ImportError:
@@ -48,13 +48,14 @@ except ImportError:
     QgsGeometry = None
     QgsPointXY = None
     QgsField = None
+    QgsWkbTypes = None
     QVariant = None
     from core.interfaces import ICSVImportService, ValidationResult
 
 
 class CSVImportService(ICSVImportService):
     """
-    Service for importing CSV files into QGIS as PointZ vector layers.
+    Service for importing CSV files into QGIS memory point layers.
     
     This service handles the complete workflow of importing CSV files containing
     point data, including validation, column mapping, and layer creation.
@@ -237,6 +238,58 @@ class CSVImportService(ICSVImportService):
                 continue
             return _normalize_cell(row[col])
         return None
+
+    def _get_configured_total_station_points_layer(self):
+        """
+        Return the configured definitive total station points layer when available.
+
+        The ``total_station_points_layer`` setting stores a layer ID. If the setting is
+        missing, invalid, or the layer no longer exists in the project, returns ``None``.
+        """
+        if not self._settings_manager:
+            return None
+        try:
+            layer_id = self._settings_manager.get_value('total_station_points_layer', '')
+            if not isinstance(layer_id, str) or not layer_id.strip():
+                return None
+            from qgis.core import QgsProject
+            return QgsProject.instance().mapLayer(layer_id.strip())
+        except Exception:
+            return None
+
+    def _should_use_pointz_geometry(self) -> bool:
+        """
+        Decide temporary topo geometry mode from configured definitive points layer.
+
+        Returns ``True`` when the configured definitive layer is 3D (PointZ / has Z),
+        otherwise ``False`` for 2D Point layers. Falls back to ``True`` when the
+        definitive layer cannot be determined.
+        """
+        definitive_layer = self._get_configured_total_station_points_layer()
+        if definitive_layer is None:
+            return True
+        try:
+            return bool(QgsWkbTypes.hasZ(definitive_layer.wkbType()))
+        except Exception:
+            return True
+
+    def _build_point_geometry(self, x: float, y: float, z: float, *, use_pointz: bool):
+        """
+        Build point geometry for temporary topo layer.
+
+        When ``use_pointz`` is True, geometry is built as ``POINT Z`` and preserves
+        CSV altitude in geometry. Otherwise geometry is built as 2D ``Point`` and
+        altitude is carried only by the ``Z`` attribute field.
+        """
+        if not use_pointz:
+            point = QgsPointXY(x, y)
+            return QgsGeometry.fromPointXY(point)
+        try:
+            return QgsGeometry.fromWkt(f"POINT Z ({x} {y} {z})")
+        except Exception:
+            # Defensive fallback for mocked/non-standard runtimes.
+            point = QgsPointXY(x, y)
+            return QgsGeometry.fromPointXY(point)
 
     def validate_csv_files(self, csv_files: List[str]) -> ValidationResult:
         """
@@ -499,7 +552,7 @@ class CSVImportService(ICSVImportService):
         identifier_source_column_key: Optional[str] = None,
     ) -> ValidationResult:
         """
-        Import CSV files into a PointZ vector layer and add to QGIS project.
+        Import CSV files into a temporary point vector layer and add to QGIS project.
 
         The memory layer always exposes a string field ``identifier`` when the CSV has no column
         named ``identifier`` (case-insensitive): values come from the configured mapping key
@@ -541,11 +594,13 @@ class CSVImportService(ICSVImportService):
                 )
 
             layer_name = "Imported_CSV_Points"
+            use_pointz_geometry = self._should_use_pointz_geometry()
 
             from qgis.core import QgsProject
             project_crs = QgsProject.instance().crs()
             project_crs_string = self._get_crs_string(project_crs)
-            layer_uri = f"PointZ?crs={project_crs_string}"
+            geometry_prefix = "PointZ" if use_pointz_geometry else "Point"
+            layer_uri = f"{geometry_prefix}?crs={project_crs_string}"
 
             for column_name in column_mapping.keys():
                 if column_name in self._required_columns:
@@ -585,8 +640,9 @@ class CSVImportService(ICSVImportService):
                                 y = float(row[y_col])
                                 z = float(row[z_col])
 
-                                point = QgsPointXY(x, y)
-                                geometry = QgsGeometry.fromPointXY(point)
+                                geometry = self._build_point_geometry(
+                                    x, y, z, use_pointz=use_pointz_geometry
+                                )
                                 feature.setGeometry(geometry)
 
                                 for column_name, column_list in column_mapping.items():

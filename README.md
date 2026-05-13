@@ -133,7 +133,7 @@ The raster processing service uses GDAL for high-quality clipping operations and
 - **Automatic Validation**: Validates that CSV files contain required X, Y, Z columns (case-insensitive)
 - **Column Mapping**: Automatically maps columns across multiple CSV files with different structures
 - **Interactive Mapping**: If columns differ, shows a dialog to manually map columns
-- **PointZ Layer Creation**: Creates PointZ vector layers with all CSV attributes
+- **Adaptive Point Geometry**: Builds `Imported_CSV_Points` as `PointZ` when the configured definitive topo layer is 3D, or as `Point` (with `Z` attribute) when the definitive layer is 2D
 - **Project Integration**: Automatically adds imported layers to the QGIS project
 - **Automatic Archiving**: Moves imported CSV files to the configured archive folder after successful import
 - **Error Handling**: Comprehensive error handling with user-friendly messages
