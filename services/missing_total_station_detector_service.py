@@ -35,9 +35,11 @@ from qgis.core import QgsProject, QgsGeometry, QgsPointXY, QgsDistanceArea
 try:
     from ..core.interfaces import ISettingsManager, ILayerService
     from ..core.data_structures import WarningData
+    from ..core.ui_responsiveness import maybe_yield_to_ui
 except ImportError:
     from core.interfaces import ISettingsManager, ILayerService
     from core.data_structures import WarningData
+    from core.ui_responsiveness import maybe_yield_to_ui
 
 
 class MissingTotalStationDetectorService:
@@ -295,6 +297,7 @@ class MissingTotalStationDetectorService:
             # Find the feature with the given ID or field value
             target_feature = None
             for feature in recording_areas_layer.getFeatures():
+                maybe_yield_to_ui()
                 if feature.id() == recording_area_id or any(feature[field_idx] == recording_area_id for field_idx in range(feature.fields().count())):
                     target_feature = feature
                     break
@@ -360,6 +363,7 @@ class MissingTotalStationDetectorService:
                 if not layer or field_idx is None:
                     return
                 for feature in layer.getFeatures():
+                    maybe_yield_to_ui()
                     relation_value = feature.attribute(field_idx)
                     if relation_value is not None and relation_value != '':
                         norm_value = str(relation_value).strip().lower()
@@ -385,6 +389,7 @@ class MissingTotalStationDetectorService:
             objects_count = 0
             objects_with_relation = 0
             for feature in objects_layer.getFeatures():
+                maybe_yield_to_ui()
                 objects_count += 1
                 relation_value = feature.attribute(objects_field_idx)
                 if relation_value is not None and relation_value != '':

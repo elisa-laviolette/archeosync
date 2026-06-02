@@ -37,9 +37,11 @@ try:
     from ..core.interfaces import ISettingsManager, ILayerService
     from core.interfaces import ITranslationService
     from ..core.data_structures import WarningData
+    from ..core.ui_responsiveness import maybe_yield_to_ui
 except ImportError:
     from core.interfaces import ISettingsManager, ILayerService
     from core.data_structures import WarningData
+    from core.ui_responsiveness import maybe_yield_to_ui
 
 
 class HeightDifferenceDetectorService:
@@ -167,6 +169,7 @@ class HeightDifferenceDetectorService:
             features = []
             feature_geoms = []
             for feature in total_station_points_layer.getFeatures():
+                maybe_yield_to_ui()
                 if not feature.geometry() or feature.geometry().isEmpty():
                     continue
                 z_value = feature.attribute(z_field_idx)
@@ -190,6 +193,7 @@ class HeightDifferenceDetectorService:
             checked_pairs = set()
             height_difference_issues = []
             for i, f1 in enumerate(features):
+                maybe_yield_to_ui()
                 geom1 = f1['geometry']
                 z1 = f1['z']
                 id1 = f1['feature'].id()

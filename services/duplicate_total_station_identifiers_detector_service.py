@@ -36,9 +36,11 @@ from qgis.PyQt.QtCore import QObject, QVariant
 try:
     from ..core.interfaces import ISettingsManager, ILayerService
     from ..core.data_structures import WarningData
+    from ..core.ui_responsiveness import maybe_yield_to_ui
 except ImportError:
     from core.interfaces import ISettingsManager, ILayerService
     from core.data_structures import WarningData
+    from core.ui_responsiveness import maybe_yield_to_ui
 
 
 class DuplicateTotalStationIdentifiersDetectorService(QObject):
@@ -354,6 +356,7 @@ class DuplicateTotalStationIdentifiersDetectorService(QObject):
             duplicates = {}
             feature_count = 0
             for feature in layer.getFeatures():
+                maybe_yield_to_ui()
                 feature_count += 1
                 identifier = feature[identifier_field_idx]
                 
@@ -417,6 +420,7 @@ class DuplicateTotalStationIdentifiersDetectorService(QObject):
             # First, collect all identifiers from the temporary layer
             temp_identifiers = set()
             for feature in temp_layer.getFeatures():
+                maybe_yield_to_ui()
                 identifier = feature[temp_identifier_field_idx]
                 if identifier:
                     temp_identifiers.add(identifier)
@@ -428,6 +432,7 @@ class DuplicateTotalStationIdentifiersDetectorService(QObject):
             # Now only check entities in the definitive layer that have matching identifiers
             definitive_identifiers = set()
             for feature in definitive_layer.getFeatures():
+                maybe_yield_to_ui()
                 identifier = feature[definitive_identifier_field_idx]
                 if identifier and identifier in temp_identifiers:
                     definitive_identifiers.add(identifier)

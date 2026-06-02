@@ -24,7 +24,7 @@
 import os.path
 from typing import List, Optional, Dict
 
-from qgis.PyQt.QtCore import QSettings, QObject, QCoreApplication, QTranslator, QLocale
+from qgis.PyQt.QtCore import QSettings, QObject, QCoreApplication, QTranslator, QLocale, QTimer
 from qgis.PyQt.QtGui import QIcon
 from qgis.PyQt.QtWidgets import QAction
 from qgis.PyQt.QtWidgets import QDockWidget
@@ -833,7 +833,13 @@ class ArcheoSyncPlugin(QObject):
             return None
     
     def _show_import_summary(self, summary_data: Dict[str, int]) -> None:
-        """Show the import summary dock widget."""
+        """
+        Show the import summary dock widget.
+
+        The dock is created first so users can interact immediately, then warning
+        detectors are triggered asynchronously through the dock refresh pipeline.
+        This avoids long UI freezes before the panel appears on large imports.
+        """
         try:
             from .ui.import_summary_dialog import (
                 ImportSummaryDockWidget,
@@ -848,180 +854,6 @@ class ArcheoSyncPlugin(QObject):
                 existing_summary.deleteLater()
                 QCoreApplication.processEvents()
 
-            from .services.duplicate_objects_detector_service import DuplicateObjectsDetectorService
-            from .services.skipped_numbers_detector_service import SkippedNumbersDetectorService
-            from .services.out_of_bounds_detector_service import OutOfBoundsDetectorService
-            from .services.distance_detector_service import DistanceDetectorService
-            # --- Ensure virtual fields are copied from definitive to temporary layers before running detectors ---
-            # Objects
-            temp_objects_layer = self._layer_service.get_layer_by_name("New Objects")
-            definitive_objects_layer = None
-            objects_layer_id = self._settings_manager.get_value('objects_layer')
-            if objects_layer_id:
-                definitive_objects_layer = self._layer_service.get_layer_by_id(objects_layer_id)
-            if temp_objects_layer and definitive_objects_layer:
-                self._layer_service.copy_virtual_fields(definitive_objects_layer, temp_objects_layer)
-            # Features
-            temp_features_layer = self._layer_service.get_layer_by_name("New Features")
-            definitive_features_layer = None
-            features_layer_id = self._settings_manager.get_value('features_layer')
-            if features_layer_id:
-                definitive_features_layer = self._layer_service.get_layer_by_id(features_layer_id)
-            if temp_features_layer and definitive_features_layer:
-                self._layer_service.copy_virtual_fields(definitive_features_layer, temp_features_layer)
-            # Small Finds
-            temp_small_finds_layer = self._layer_service.get_layer_by_name("New Small Finds")
-            definitive_small_finds_layer = None
-            small_finds_layer_id = self._settings_manager.get_value('small_finds_layer')
-            if small_finds_layer_id:
-                definitive_small_finds_layer = self._layer_service.get_layer_by_id(small_finds_layer_id)
-            if temp_small_finds_layer and definitive_small_finds_layer:
-                self._layer_service.copy_virtual_fields(definitive_small_finds_layer, temp_small_finds_layer)
-            # Total Station Points
-            temp_points_layer = self._layer_service.get_layer_by_name("Imported_CSV_Points")
-            definitive_points_layer = None
-            points_layer_id = self._settings_manager.get_value('total_station_points_layer')
-            if points_layer_id:
-                definitive_points_layer = self._layer_service.get_layer_by_id(points_layer_id)
-            if temp_points_layer and definitive_points_layer:
-                self._layer_service.copy_virtual_fields(definitive_points_layer, temp_points_layer)
-            # --- End virtual field copying ---
-            
-            # Detect duplicate objects if objects were imported
-            duplicate_objects_warnings = []
-            if summary_data.get('objects_count', 0) > 0:
-                detector = DuplicateObjectsDetectorService(
-                    settings_manager=self._settings_manager,
-                    layer_service=self._layer_service
-                )
-                duplicate_objects_warnings = detector.detect_duplicate_objects()
-            
-            # Detect skipped numbers if objects were imported
-            skipped_numbers_warnings = []
-            if summary_data.get('objects_count', 0) > 0:
-                skipped_detector = SkippedNumbersDetectorService(
-                    settings_manager=self._settings_manager,
-                    layer_service=self._layer_service
-                )
-                skipped_numbers_warnings = skipped_detector.detect_skipped_numbers()
-            
-            # Detect out-of-bounds features if any features were imported
-            out_of_bounds_warnings = []
-            if (summary_data.get('objects_count', 0) > 0 or 
-                summary_data.get('features_count', 0) > 0 or 
-                summary_data.get('small_finds_count', 0) > 0):
-                print(f"Running out-of-bounds detection in main plugin")
-                print(f"Summary data: {summary_data}")
-                out_of_bounds_detector = OutOfBoundsDetectorService(
-                    settings_manager=self._settings_manager,
-                    layer_service=self._layer_service
-                )
-                out_of_bounds_warnings = out_of_bounds_detector.detect_out_of_bounds_features()
-                for i, warning in enumerate(out_of_bounds_warnings):
-                    print(f"Out-of-bounds warning {i+1}: {warning}")
-                    if hasattr(warning, 'message'):
-                        print(f"   Message: {warning.message}")
-            else:
-                print(f"Skipping out-of-bounds detection - no features imported")
-            
-            # Detect distance warnings if either total station points or objects were imported
-            distance_warnings = []
-            if (summary_data.get('csv_points_count', 0) > 0 or 
-                summary_data.get('objects_count', 0) > 0):
-                print(f"Running distance detection in main plugin")
-                distance_detector = DistanceDetectorService(
-                    settings_manager=self._settings_manager,
-                    layer_service=self._layer_service
-                )
-                distance_warnings = distance_detector.detect_distance_warnings()
-                for i, warning in enumerate(distance_warnings):
-                    print(f"Distance warning {i+1}: {warning}")
-                    if hasattr(warning, 'message'):
-                        print(f"   Message: {warning.message}")
-            else:
-                print(f"Skipping distance detection - no total station points or objects imported")
-            
-            # Run missing total station detection if both total station points and objects were imported
-            missing_total_station_warnings = []
-            if (summary_data.get('csv_points_count', 0) > 0 and 
-                summary_data.get('objects_count', 0) > 0):
-                print(f"Running missing total station detection in main plugin")
-                try:
-                    from services.missing_total_station_detector_service import MissingTotalStationDetectorService
-                except ImportError:
-                    # Fallback for relative import
-                    import sys
-                    import os
-                    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-                    from services.missing_total_station_detector_service import MissingTotalStationDetectorService
-                
-                missing_total_station_detector = MissingTotalStationDetectorService(
-                    settings_manager=self._settings_manager,
-                    layer_service=self._layer_service
-                )
-                missing_total_station_warnings = missing_total_station_detector.detect_missing_total_station_warnings()
-                for i, warning in enumerate(missing_total_station_warnings):
-                    print(f"Missing total station warning {i+1}: {warning}")
-                    if hasattr(warning, 'message'):
-                        print(f"   Message: {warning.message}")
-            else:
-                print(f"Skipping missing total station detection - missing total station points or objects")
-            
-            # Run duplicate total station identifiers detection if total station points were imported
-            duplicate_total_station_identifiers_warnings = []
-            if summary_data.get('csv_points_count', 0) > 0:
-                print(f"Running duplicate total station identifiers detection in main plugin")
-                try:
-                    # Force reload of the module
-                    import sys
-                    import importlib
-                    if 'services.duplicate_total_station_identifiers_detector_service' in sys.modules:
-                        importlib.reload(sys.modules['services.duplicate_total_station_identifiers_detector_service'])
-                    from services.duplicate_total_station_identifiers_detector_service import DuplicateTotalStationIdentifiersDetectorService
-                except ImportError:
-                    # Fallback for relative import
-                    import sys
-                    import os
-                    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-                    from services.duplicate_total_station_identifiers_detector_service import DuplicateTotalStationIdentifiersDetectorService
-                
-                duplicate_total_station_identifiers_detector = DuplicateTotalStationIdentifiersDetectorService(
-                    settings_manager=self._settings_manager,
-                    layer_service=self._layer_service
-                )
-                duplicate_total_station_identifiers_warnings = duplicate_total_station_identifiers_detector.detect_duplicate_identifiers_warnings()
-                for i, warning in enumerate(duplicate_total_station_identifiers_warnings):
-                    print(f"Duplicate total station identifiers warning {i+1}: {warning}")
-                    if hasattr(warning, 'message'):
-                        print(f"   Message: {warning.message}")
-            else:
-                print(f"Skipping duplicate total station identifiers detection - no total station points imported")
-            
-            # Run height difference detection if total station points were imported
-            height_difference_warnings = []
-            if summary_data.get('csv_points_count', 0) > 0:
-                print(f"Running height difference detection in main plugin")
-                try:
-                    from services.height_difference_detector_service import HeightDifferenceDetectorService
-                except ImportError:
-                    # Fallback for relative import
-                    import sys
-                    import os
-                    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-                    from services.height_difference_detector_service import HeightDifferenceDetectorService
-                
-                height_difference_detector = HeightDifferenceDetectorService(
-                    settings_manager=self._settings_manager,
-                    layer_service=self._layer_service
-                )
-                height_difference_warnings = height_difference_detector.detect_height_difference_warnings()
-                for i, warning in enumerate(height_difference_warnings):
-                    print(f"Height difference warning {i+1}: {warning}")
-                    if hasattr(warning, 'message'):
-                        print(f"   Message: {warning.message}")
-            else:
-                print(f"Skipping height difference detection - no total station points imported")
-            
             # Create summary data
             summary = ImportSummaryData(
                 csv_points_count=summary_data.get('csv_points_count', 0),
@@ -1036,20 +868,16 @@ class ArcheoSyncPlugin(QObject):
                 is_global_project=bool(summary_data.get('is_global_project', False)),
             )
             
-            # Add warnings to summary data
-            summary.duplicate_objects_warnings = duplicate_objects_warnings
-            summary.skipped_numbers_warnings = skipped_numbers_warnings
-            summary.out_of_bounds_warnings = out_of_bounds_warnings
-            summary.distance_warnings = distance_warnings
-            summary.missing_total_station_warnings = missing_total_station_warnings
-            summary.duplicate_total_station_identifiers_warnings = duplicate_total_station_identifiers_warnings
-            summary.height_difference_warnings = height_difference_warnings
-            
-            print(f"Summary data warnings - duplicates: {len(duplicate_objects_warnings)}, skipped: {len(skipped_numbers_warnings)}, out-of-bounds: {len(out_of_bounds_warnings)}")
-            print(f"Summary object attributes: {dir(summary)}")
-            print(f"Summary out_of_bounds_warnings attribute: {hasattr(summary, 'out_of_bounds_warnings')}")
-            if hasattr(summary, 'out_of_bounds_warnings'):
-                print(f"Summary out_of_bounds_warnings value: {summary.out_of_bounds_warnings}")
+            # Preserve any precomputed warnings passed in summary_data.
+            summary.duplicate_objects_warnings = summary_data.get('duplicate_objects_warnings', [])
+            summary.skipped_numbers_warnings = summary_data.get('skipped_numbers_warnings', [])
+            summary.out_of_bounds_warnings = summary_data.get('out_of_bounds_warnings', [])
+            summary.distance_warnings = summary_data.get('distance_warnings', [])
+            summary.missing_total_station_warnings = summary_data.get('missing_total_station_warnings', [])
+            summary.duplicate_total_station_identifiers_warnings = summary_data.get(
+                'duplicate_total_station_identifiers_warnings', []
+            )
+            summary.height_difference_warnings = summary_data.get('height_difference_warnings', [])
             
             # Create and show the dock widget
             dock_widget = ImportSummaryDockWidget(
@@ -1064,6 +892,10 @@ class ArcheoSyncPlugin(QObject):
             
             # Add the dock widget to the main window
             self._iface.addDockWidget(DOCK_WIDGET_AREAS.right, dock_widget)
+
+            # Let Qt paint the dock first, then run warning detectors silently.
+            QCoreApplication.processEvents()
+            QTimer.singleShot(0, dock_widget.refresh_warnings_silently)
             
         except Exception as e:
             print(f"Error showing import summary: {e}")

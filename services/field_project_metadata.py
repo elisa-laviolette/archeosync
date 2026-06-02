@@ -19,11 +19,20 @@ def metadata_path(project_dir: str) -> str:
     return os.path.join(project_dir, METADATA_FILENAME)
 
 
+IMPORT_LAYER_TYPES = (
+    "objects",
+    "features",
+    "small_finds",
+    "alternative_objects",
+)
+
+
 def write_project_metadata(
     project_dir: str,
     project_kind: str,
     extent_wkt: str,
     crs: str,
+    import_layers: Optional[Dict[str, str]] = None,
 ) -> bool:
     """
     Write archeosync_project.json into the field project directory.
@@ -33,6 +42,8 @@ def write_project_metadata(
         project_kind: ``global`` or ``recording_area``
         extent_wkt: WKT geometry describing the project extent (may be empty for zone projects)
         crs: CRS auth id string for the field project
+        import_layers: Optional map of import keys (``objects``, ``features``, …) to the
+            source layer display names used for exported ``.gpkg`` filenames
 
     Returns:
         True if the file was written successfully
@@ -43,6 +54,12 @@ def write_project_metadata(
             "extent_wkt": extent_wkt or "",
             "crs": crs or "",
         }
+        if import_layers:
+            payload["import_layers"] = {
+                key: value
+                for key, value in import_layers.items()
+                if key in IMPORT_LAYER_TYPES and isinstance(value, str) and value
+            }
         path = metadata_path(project_dir)
         with open(path, "w", encoding="utf-8") as handle:
             json.dump(payload, handle, indent=2)
@@ -84,3 +101,22 @@ def get_project_kind(project_dir: str) -> str:
 def is_global_project(project_dir: str) -> bool:
     """Return True when the directory contains metadata for a global field project."""
     return get_project_kind(project_dir) == PROJECT_KIND_GLOBAL
+
+
+def get_import_layer_names(project_dir: str) -> Dict[str, str]:
+    """
+    Return layer display names recorded when the field project was created.
+
+    These names match the original QGIS project layer names used for ``.gpkg`` exports.
+    """
+    metadata = read_project_metadata(project_dir)
+    if not metadata:
+        return {}
+    layers = metadata.get("import_layers")
+    if not isinstance(layers, dict):
+        return {}
+    return {
+        key: value
+        for key, value in layers.items()
+        if key in IMPORT_LAYER_TYPES and isinstance(value, str) and value
+    }

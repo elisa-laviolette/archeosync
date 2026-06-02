@@ -34,9 +34,11 @@ from qgis.PyQt.QtCore import QObject
 try:
     from ..core.interfaces import ISettingsManager, ILayerService
     from ..core.data_structures import WarningData
+    from ..core.ui_responsiveness import maybe_yield_to_ui
 except ImportError:
     from core.interfaces import ISettingsManager, ILayerService
     from core.data_structures import WarningData
+    from core.ui_responsiveness import maybe_yield_to_ui
 
 
 class DuplicateObjectsDetectorService(QObject):
@@ -137,6 +139,8 @@ class DuplicateObjectsDetectorService(QObject):
                     number_field, recording_area_field
                 )
                 warnings.extend(between_warnings)
+
+            warnings = self._deduplicate_warnings_by_object_identity(warnings)
             
         except Exception as e:
             print(f"Error in duplicate objects detection: {e}")
@@ -145,6 +149,32 @@ class DuplicateObjectsDetectorService(QObject):
         
         return warnings
     
+    def _deduplicate_warnings_by_object_identity(
+        self,
+        warnings: List[Union[str, WarningData]],
+    ) -> List[Union[str, WarningData]]:
+        """
+        Keep a single warning per recording area / object number pair.
+
+        Avoids duplicate messages when the same conflict is reported from
+        within-layer and between-layer checks.
+        """
+        deduplicated: List[Union[str, WarningData]] = []
+        seen_keys = set()
+
+        for warning in warnings:
+            if isinstance(warning, WarningData):
+                identity = (
+                    warning.recording_area_name,
+                    warning.object_number,
+                )
+                if identity in seen_keys:
+                    continue
+                seen_keys.add(identity)
+            deduplicated.append(warning)
+
+        return deduplicated
+
     def _detect_duplicates_within_layer(self, 
                                       objects_layer: Any, 
                                       recording_areas_layer: Any, 
@@ -177,6 +207,7 @@ class DuplicateObjectsDetectorService(QObject):
             # Group objects by recording area and number
             duplicates = {}
             for feature in objects_layer.getFeatures():
+                maybe_yield_to_ui()
                 recording_area_id = feature[recording_area_field_idx]
                 number = feature[number_field_idx]
                 
@@ -252,6 +283,7 @@ class DuplicateObjectsDetectorService(QObject):
             # Create lookup dictionaries for original objects
             original_objects = {}
             for feature in original_objects_layer.getFeatures():
+                maybe_yield_to_ui()
                 recording_area_id = feature[original_recording_area_field_idx]
                 number = feature[original_number_field_idx]
                 
@@ -261,14 +293,17 @@ class DuplicateObjectsDetectorService(QObject):
                         original_objects[key] = []
                     original_objects[key].append(feature)
             
-            # Check new objects against original objects
+            # Check new objects against original objects (one warning per zone/number)
+            warned_between_layer_keys = set()
             for feature in new_objects_layer.getFeatures():
+                maybe_yield_to_ui()
                 recording_area_id = feature[new_recording_area_field_idx]
                 number = feature[new_number_field_idx]
                 
                 if recording_area_id and number:
                     key = (recording_area_id, number)
-                    if key in original_objects:
+                    if key in original_objects and key not in warned_between_layer_keys:
+                        warned_between_layer_keys.add(key)
                         # Get recording area name
                         recording_area_name = self._get_recording_area_name(recording_areas_layer, recording_area_id)
                         
@@ -348,6 +383,7 @@ class DuplicateObjectsDetectorService(QObject):
                 if field_idx >= 0:
                     # Find the feature with this ID
                     for feature in recording_areas_layer.getFeatures():
+                        maybe_yield_to_ui()
                         if feature.id() == recording_area_id:
                             name_value = feature[field_idx]
                             if name_value and str(name_value) != 'NULL':

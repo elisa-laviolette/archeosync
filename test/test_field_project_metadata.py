@@ -17,6 +17,7 @@ _SPEC.loader.exec_module(_metadata)
 METADATA_FILENAME = _metadata.METADATA_FILENAME
 PROJECT_KIND_GLOBAL = _metadata.PROJECT_KIND_GLOBAL
 PROJECT_KIND_RECORDING_AREA = _metadata.PROJECT_KIND_RECORDING_AREA
+get_import_layer_names = _metadata.get_import_layer_names
 get_project_kind = _metadata.get_project_kind
 is_global_project = _metadata.is_global_project
 metadata_path = _metadata.metadata_path
@@ -53,6 +54,23 @@ class TestFieldProjectMetadata(unittest.TestCase):
     def test_is_global_project(self):
         write_project_metadata(self.temp_dir, PROJECT_KIND_GLOBAL, "", "EPSG:4326")
         self.assertTrue(is_global_project(self.temp_dir))
+
+    def test_write_and_read_import_layer_names(self):
+        import_layers = {
+            "objects": "Objets relevés",
+            "alternative_objects": "Objets relevés sans géométrie",
+            "features": "Fugaces",
+        }
+        write_project_metadata(
+            self.temp_dir,
+            PROJECT_KIND_GLOBAL,
+            "",
+            "EPSG:4326",
+            import_layers=import_layers,
+        )
+        data = read_project_metadata(self.temp_dir)
+        self.assertEqual(data["import_layers"], import_layers)
+        self.assertEqual(get_import_layer_names(self.temp_dir), import_layers)
 
     def test_invalid_json_returns_none(self):
         path = metadata_path(self.temp_dir)

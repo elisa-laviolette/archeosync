@@ -414,6 +414,8 @@ class QGISProjectCreationService(QObject):
                     offset_meters=raster_offset,
                 )
 
+            import_layer_names: Dict[str, str] = {}
+
             layer_exports = [
                 (recording_areas_layer_id, True),
                 (objects_layer_id, False),
@@ -453,6 +455,12 @@ class QGISProjectCreationService(QObject):
                 if not success:
                     print(f"Warning: Failed to export layer {layer_name} for global project")
                 else:
+                    if layer_id == objects_layer_id:
+                        import_layer_names["objects"] = layer_name
+                    elif layer_id == features_layer_id:
+                        import_layer_names["features"] = layer_name
+                    elif layer_id == small_finds_layer_id:
+                        import_layer_names["small_finds"] = layer_name
                     self._try_register_created_layer_id_mapping(
                         project=project,
                         source_layer_id=layer_id,
@@ -477,6 +485,7 @@ class QGISProjectCreationService(QObject):
                         layer_name=alt_name,
                         project=project,
                     ):
+                        import_layer_names["alternative_objects"] = alt_name
                         self._try_register_created_layer_id_mapping(
                             project=project,
                             source_layer_id=alternative_objects_layer_id,
@@ -564,6 +573,7 @@ class QGISProjectCreationService(QObject):
                 PROJECT_KIND_GLOBAL,
                 extent_geometry_wkt,
                 crs_string,
+                import_layers=import_layer_names,
             )
 
             print(f"Successfully created global field project: {project_path}")

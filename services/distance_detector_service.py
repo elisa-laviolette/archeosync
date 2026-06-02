@@ -37,9 +37,11 @@ from qgis.core import QgsProject, QgsGeometry, QgsPointXY, QgsDistanceArea, QgsS
 try:
     from ..core.interfaces import ISettingsManager, ILayerService
     from ..core.data_structures import WarningData
+    from ..core.ui_responsiveness import maybe_yield_to_ui
 except ImportError:
     from core.interfaces import ISettingsManager, ILayerService
     from core.data_structures import WarningData
+    from core.ui_responsiveness import maybe_yield_to_ui
 
 
 class DistanceDetectorService:
@@ -119,6 +121,7 @@ class DistanceDetectorService:
             processed_combinations = 0
 
             for points_layer, objects_layer, points_type, objects_type in layer_combinations:
+                maybe_yield_to_ui()
                 if not points_layer or not objects_layer:
                     continue
                 processed_combinations += 1
@@ -315,6 +318,7 @@ class DistanceDetectorService:
             points_by_relation = {}
             objects_by_relation = {}
             for feature in total_station_points_layer.getFeatures():
+                maybe_yield_to_ui()
                 relation_value = feature.attribute(points_field_idx)
                 if self._is_valid_relation_value(relation_value):
                     relation_value_key = self._relation_value_key(relation_value)
@@ -322,6 +326,7 @@ class DistanceDetectorService:
                         points_by_relation[relation_value_key] = []
                     points_by_relation[relation_value_key].append(feature)
             for feature in objects_layer.getFeatures():
+                maybe_yield_to_ui()
                 if not self._object_feature_has_point_association(feature, objects_layer):
                     continue
                 relation_value = feature.attribute(objects_field_idx)
@@ -347,6 +352,7 @@ class DistanceDetectorService:
                 objects_features = objects_by_relation[relation_value]
                 for pf in points_features:
                     for of in objects_features:
+                        maybe_yield_to_ui(every=10)
                         point_geom = pf.geometry()
                         object_geom = of.geometry()
                         point_identifier = self._get_feature_identifier(pf, "Total Station Point")
@@ -706,7 +712,13 @@ class DistanceDetectorService:
                 )
                 hops.append((from_idx, to_idx))
 
-            feats = [list(layer.getFeatures()) for layer in combo_layers]
+            feats = []
+            for layer in combo_layers:
+                feature_list = []
+                for feature in layer.getFeatures():
+                    maybe_yield_to_ui()
+                    feature_list.append(feature)
+                feats.append(feature_list)
             print(
                 "[DEBUG] Distance detection (indirect): feature counts by layer = "
                 f"{[len(fset) for fset in feats]}"
@@ -719,6 +731,7 @@ class DistanceDetectorService:
                 to_idx = hops[i][1]
                 bucket: Dict[str, List[Any]] = defaultdict(list)
                 for feature in feats[i + 1]:
+                    maybe_yield_to_ui()
                     if i + 1 == len(feats) - 1 and not self._object_feature_has_point_association(
                         feature, combo_layers[i + 1]
                     ):
@@ -731,6 +744,7 @@ class DistanceDetectorService:
 
             distance_issues: List[Dict[str, Any]] = []
             for point_feature in feats[0]:
+                maybe_yield_to_ui()
                 v0 = point_feature.attribute(hops[0][0])
                 if not self._is_valid_relation_value(v0):
                     continue
@@ -746,6 +760,7 @@ class DistanceDetectorService:
                         nxt.extend(idx_map.get(self._relation_value_key(vk), []))
                     current_matches = nxt
                 for object_feature in current_matches:
+                    maybe_yield_to_ui(every=10)
                     point_geom = point_feature.geometry()
                     object_geom = object_feature.geometry()
                     point_identifier = self._get_feature_identifier(point_feature, "Total Station Point")

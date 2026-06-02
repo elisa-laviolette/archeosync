@@ -730,7 +730,7 @@ class SettingsDialog(QtWidgets.QDialog):
         # Description label
         description_label = QtWidgets.QLabel(
             self.tr("Select additional vector layers to include in field projects. ") +
-            self.tr("The recording areas layer is always included and cannot be modified.")
+            self.tr("The recording areas, objects, features, and small finds layers are always included and cannot be changed.")
         )
         description_label.setWordWrap(True)
         description_label.setStyleSheet("color: gray; font-size: 11px;")
@@ -906,6 +906,7 @@ class SettingsDialog(QtWidgets.QDialog):
         """Update recording-area variable source options when recording layer changes."""
         self._refresh_recording_area_variable_source_options()
         self._refresh_recording_area_field_combos()
+        self._refresh_extra_layers_list()
 
     def _on_recording_area_variable_source_changed(self) -> None:
         """Update recording-area field combos when source selection changes."""
@@ -1103,8 +1104,8 @@ class SettingsDialog(QtWidgets.QDialog):
                 if item.checkState() == checked_state:
                     checked_layer_ids.add(item.data(user_role))
             
-            # Get the current recording areas layer id
-            recording_areas_layer_id = self._recording_areas_widget.combo_box.currentData()
+            # Core layers always included in field projects: checked and not editable here.
+            reserved_layer_ids = self._get_reserved_extra_layer_ids()
             
             # Clear existing items
             self._extra_layers_list.clear()
@@ -1118,8 +1119,7 @@ class SettingsDialog(QtWidgets.QDialog):
                 item.setText(display_text)
                 item.setData(user_role, layer_info['id'])
                 item.setFlags(item.flags() | item_is_user_checkable)
-                # Recording areas layer: always checked and disabled
-                if layer_info['id'] == recording_areas_layer_id:
+                if layer_info['id'] in reserved_layer_ids:
                     item.setCheckState(checked_state)
                     item.setFlags(item.flags() & ~item_is_enabled)
                 else:
@@ -1128,17 +1128,33 @@ class SettingsDialog(QtWidgets.QDialog):
                 self._extra_layers_list.addItem(item)
         except Exception as e:
             self._show_error(self.tr("Layer Error"), self.tr(f"Failed to refresh extra layers list: {str(e)}"))
+
+    def _get_reserved_extra_layer_ids(self) -> set:
+        """
+        Return layer ids reserved by core configuration.
+
+        Reserved layers are excluded from the extra-layers list to prevent users from
+        selecting the same layer twice with incompatible roles.
+        """
+        layer_ids = {
+            self._recording_areas_widget.combo_box.currentData(),
+            self._objects_widget.combo_box.currentData(),
+            self._features_widget.combo_box.currentData(),
+            self._small_finds_widget.combo_box.currentData(),
+        }
+        return {layer_id for layer_id in layer_ids if layer_id}
     
     def _get_selected_extra_layers(self) -> List[str]:
-        """Get the list of checked extra layer IDs (excluding the recording areas layer)."""
+        """Get checked optional extra layer IDs (excluding core configured layers)."""
         user_role = _user_role_item_data_role()
         checked_state = _checked_check_state()
+        reserved_layer_ids = self._get_reserved_extra_layer_ids()
         selected_layers = []
-        recording_areas_layer_id = self._recording_areas_widget.combo_box.currentData()
         for i in range(self._extra_layers_list.count()):
             item = self._extra_layers_list.item(i)
-            if item.checkState() == checked_state and item.data(user_role) != recording_areas_layer_id:
-                selected_layers.append(item.data(user_role))
+            layer_id = item.data(user_role)
+            if item.checkState() == checked_state and layer_id not in reserved_layer_ids:
+                selected_layers.append(layer_id)
         return selected_layers
     
     def _on_objects_layer_changed(self) -> None:
@@ -1152,6 +1168,7 @@ class SettingsDialog(QtWidgets.QDialog):
         else:
             # Hide field selection widgets
             self._objects_fields_widget.setVisible(False)
+        self._refresh_extra_layers_list()
     
     def _populate_objects_fields(self, layer_id: str) -> None:
         """Populate the field selection combo boxes for the objects layer."""
@@ -1212,6 +1229,7 @@ class SettingsDialog(QtWidgets.QDialog):
             self._populate_child_fields(layer_id, self._features_recording_area_field_combo, self._features_level_field_combo)
         else:
             self._features_fields_widget.setVisible(False)
+        self._refresh_extra_layers_list()
 
     def _on_small_finds_layer_changed(self) -> None:
         """Handle changes to the small finds layer selection."""
@@ -1225,6 +1243,7 @@ class SettingsDialog(QtWidgets.QDialog):
             )
         else:
             self._small_finds_fields_widget.setVisible(False)
+        self._refresh_extra_layers_list()
 
     def _on_alternative_objects_layer_changed(self) -> None:
         """Handle changes to the alternative objects layer selection."""

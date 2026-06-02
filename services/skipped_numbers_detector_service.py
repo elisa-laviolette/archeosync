@@ -34,8 +34,10 @@ from typing import List, Dict, Any, Optional, Union
 
 try:
     from ..core.data_structures import WarningData
+    from ..core.ui_responsiveness import maybe_yield_to_ui
 except ImportError:
     from core.data_structures import WarningData
+    from core.ui_responsiveness import maybe_yield_to_ui
 
 from qgis.core import QgsProject
 from qgis.PyQt.QtCore import QObject
@@ -146,6 +148,7 @@ class SkippedNumbersDetectorService(QObject):
             # Group objects by recording area
             recording_area_objects = {}
             for feature in objects_layer.getFeatures():
+                maybe_yield_to_ui()
                 recording_area_id = feature.attribute(recording_area_field_idx)
                 number = feature.attribute(number_field_idx)
                 
@@ -302,6 +305,7 @@ class SkippedNumbersDetectorService(QObject):
             
             # Process original objects
             for feature in original_objects_layer.getFeatures():
+                maybe_yield_to_ui()
                 recording_area_id = feature.attribute(original_recording_area_field_idx)
                 number = feature.attribute(original_number_field_idx)
                 
@@ -317,6 +321,7 @@ class SkippedNumbersDetectorService(QObject):
             
             # Process new objects
             for feature in new_objects_layer.getFeatures():
+                maybe_yield_to_ui()
                 recording_area_id = feature.attribute(new_recording_area_field_idx)
                 number = feature.attribute(new_number_field_idx)
                 
@@ -439,6 +444,7 @@ class SkippedNumbersDetectorService(QObject):
                 if field_idx >= 0:
                     # Find the feature with this ID
                     for feature in recording_areas_layer.getFeatures():
+                        maybe_yield_to_ui()
                         if feature.id() == recording_area_id:
                             name_value = feature[field_idx]
                             if name_value and str(name_value) != 'NULL':

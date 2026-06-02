@@ -10,8 +10,10 @@ from typing import List, Dict, Any
 
 try:
     from services.duplicate_objects_detector_service import DuplicateObjectsDetectorService
+    from core.data_structures import WarningData
 except ImportError:
     from ..services.duplicate_objects_detector_service import DuplicateObjectsDetectorService
+    from ..core.data_structures import WarningData
 
 
 class TestDuplicateObjectsDetectorService(unittest.TestCase):
@@ -57,6 +59,30 @@ class TestDuplicateObjectsDetectorService(unittest.TestCase):
         
         self.assertEqual(warnings, [])
     
+    def test_deduplicate_warnings_by_object_identity(self):
+        """Only one warning per recording area / object number should be kept."""
+        warnings = [
+            WarningData(
+                message="within",
+                recording_area_name="Area A",
+                layer_name="Objects",
+                filter_expression="a",
+                object_number=5,
+            ),
+            WarningData(
+                message="between",
+                recording_area_name="Area A",
+                layer_name="New Objects",
+                filter_expression="b",
+                object_number=5,
+            ),
+        ]
+
+        deduplicated = self.service._deduplicate_warnings_by_object_identity(warnings)
+
+        self.assertEqual(len(deduplicated), 1)
+        self.assertEqual(deduplicated[0].message, "within")
+
     def test_detect_duplicates_within_layer(self):
         """Test detection of duplicates within a single layer."""
         # Setup mocks

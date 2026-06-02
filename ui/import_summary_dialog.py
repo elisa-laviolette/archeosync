@@ -40,17 +40,21 @@ Usage:
     iface.addDockWidget(DOCK_WIDGET_AREAS.right, dock_widget)
 """
 
-from typing import Optional, List, Dict, Any, Union
+from typing import Optional, List, Dict, Any, Union, Callable, Tuple
 from qgis.PyQt import QtWidgets
 from qgis.PyQt.QtWidgets import QMessageBox, QDockWidget
-from qgis.PyQt.QtCore import Qt
+from qgis.PyQt.QtCore import Qt, QTimer
 
 try:
     from ..core.interfaces import ISettingsManager, ILayerService
     from ..core.data_structures import WarningData, ImportSummaryData
+    from ..core.ui_responsiveness import maybe_yield_to_ui, reset_yield_counter
+    from ..core.warning_detection_runner import dispatch_warning_detection_step
 except ImportError:
     from core.interfaces import ISettingsManager, ILayerService
     from core.data_structures import WarningData, ImportSummaryData
+    from core.ui_responsiveness import maybe_yield_to_ui, reset_yield_counter
+    from core.warning_detection_runner import dispatch_warning_detection_step
 
 
 def _align_center_flag():
@@ -238,6 +242,7 @@ class ImportSummaryDockWidget(QDockWidget):
         warnings_label.setStyleSheet("font-weight: bold; color: #A0522D;")
         warnings_layout.addWidget(warnings_label)
         for warning in warnings_list:
+            maybe_yield_to_ui()
             warning_item_layout = QtWidgets.QHBoxLayout()
             if hasattr(warning, "message"):
                 warning_text = warning.message
@@ -293,6 +298,8 @@ class ImportSummaryDockWidget(QDockWidget):
         title_label.setAlignment(_align_center_flag())
         title_label.setStyleSheet("font-size: 14px; font-weight: bold; margin: 5px;")
         main_layout.addWidget(title_label)
+
+        self._create_warnings_analysis_indicator(main_layout)
         
         # Add summary content
         self._create_summary_content(main_layout)
@@ -302,6 +309,68 @@ class ImportSummaryDockWidget(QDockWidget):
         
         # Set size
         self.resize(400, 500)
+
+    def _create_warnings_analysis_indicator(self, parent_layout: QtWidgets.QVBoxLayout) -> None:
+        """Add an indeterminate progress row shown while warning detectors run."""
+        self._warnings_analysis_running = False
+        self._warnings_analysis_container = QtWidgets.QWidget()
+        indicator_layout = QtWidgets.QHBoxLayout(self._warnings_analysis_container)
+        indicator_layout.setContentsMargins(8, 4, 8, 4)
+
+        self._warnings_analysis_progress = QtWidgets.QProgressBar()
+        self._warnings_analysis_progress.setRange(0, 0)
+        self._warnings_analysis_progress.setTextVisible(False)
+        self._warnings_analysis_progress.setFixedHeight(18)
+        self._warnings_analysis_progress.setMinimumWidth(120)
+
+        self._warnings_analysis_label = QtWidgets.QLabel(
+            self.tr("Analyzing warnings...")
+        )
+        self._warnings_analysis_label.setWordWrap(True)
+        self._warnings_analysis_label.setStyleSheet("color: #555; font-style: italic;")
+
+        indicator_layout.addWidget(self._warnings_analysis_progress)
+        indicator_layout.addWidget(self._warnings_analysis_label, 1)
+        self._warnings_analysis_container.setVisible(False)
+        parent_layout.addWidget(self._warnings_analysis_container)
+
+    def _set_warnings_analysis_busy(self, busy: bool, total_steps: int = 0) -> None:
+        """
+        Show or hide the in-panel busy indicator and guard action buttons.
+
+        Args:
+            busy: When True, display the progress bar and disable refresh/validate/cancel
+                until analysis completes.
+            total_steps: When greater than zero, show determinate progress (0..total_steps).
+        """
+        self._warnings_analysis_running = busy
+        if hasattr(self, "_warnings_analysis_container"):
+            self._warnings_analysis_container.setVisible(busy)
+        if hasattr(self, "_warnings_analysis_progress"):
+            if busy and total_steps > 0:
+                self._warnings_analysis_progress.setRange(0, total_steps)
+                self._warnings_analysis_progress.setValue(0)
+                self._warnings_analysis_progress.setTextVisible(True)
+            else:
+                self._warnings_analysis_progress.setRange(0, 0)
+                self._warnings_analysis_progress.setTextVisible(False)
+        if hasattr(self, "_refresh_button"):
+            self._refresh_button.setEnabled(not busy)
+            self._validate_button.setEnabled(not busy)
+            self._cancel_button.setEnabled(not busy)
+        if busy:
+            maybe_yield_to_ui(force=True)
+
+    def _update_warnings_analysis_progress(self, completed_steps: int, status_text: str) -> None:
+        """Update the in-panel progress label and bar between detection steps."""
+        if hasattr(self, "_warnings_analysis_label"):
+            self._warnings_analysis_label.setText(status_text)
+        if (
+            hasattr(self, "_warnings_analysis_progress")
+            and self._warnings_analysis_progress.maximum() > 0
+        ):
+            self._warnings_analysis_progress.setValue(completed_steps)
+        maybe_yield_to_ui(force=True)
     
     def _create_summary_content(self, parent_layout: QtWidgets.QVBoxLayout) -> None:
         """Create the summary content section."""
@@ -590,6 +659,7 @@ class ImportSummaryDockWidget(QDockWidget):
             warnings_layout.addWidget(warnings_label)
             
             for warning in self._summary_data.duplicate_objects_warnings:
+                maybe_yield_to_ui()
                 warning_item_layout = QtWidgets.QHBoxLayout()
                 
                 # Warning text - check if it has the expected attributes
@@ -630,6 +700,7 @@ class ImportSummaryDockWidget(QDockWidget):
             warnings_layout.addWidget(warnings_label)
             
             for warning in self._summary_data.skipped_numbers_warnings:
+                maybe_yield_to_ui()
                 warning_item_layout = QtWidgets.QHBoxLayout()
                 
                 # Warning text - check if it has the expected attributes
@@ -720,6 +791,15 @@ class ImportSummaryDockWidget(QDockWidget):
         self._refresh_button.clicked.connect(self._handle_refresh_warnings)
         self._cancel_button.clicked.connect(self._handle_cancel)
         self._validate_button.clicked.connect(self._handle_validate)
+
+    def refresh_warnings_silently(self) -> None:
+        """
+        Refresh warning sections without blocking dialogs.
+
+        Used by the plugin right after dock creation so the panel appears
+        immediately while detectors run incrementally on the Qt event loop.
+        """
+        self._refresh_warnings(show_feedback=False)
     
     def _handle_validate(self) -> None:
         """Handle the validate button click - copy features from temporary to definitive layers."""
@@ -878,214 +958,319 @@ class ImportSummaryDockWidget(QDockWidget):
             self._layer_service.copy_virtual_fields(definitive_points_layer, temp_points_layer)
 
     def _handle_refresh_warnings(self) -> None:
-        """Handle the refresh warnings button click - re-run detection services to refresh warnings."""
-        try:
-            print("Debug: Starting refresh warnings")
-            # Check if detection services are available
-            if DuplicateObjectsDetectorService is None or SkippedNumbersDetectorService is None:
-                print("Debug: Detection services not available")
+        """Handle explicit refresh button click and notify the user on completion."""
+        self._refresh_warnings(show_feedback=True)
+
+    def _refresh_warnings(self, show_feedback: bool) -> None:
+        """
+        Start incremental warning detection.
+
+        Each detector step is scheduled as a QgsTask so the QGIS UI stays
+        responsive; the virtual-field preparation step remains on the main thread.
+        """
+        if self._warnings_analysis_running:
+            return
+        if DuplicateObjectsDetectorService is None or SkippedNumbersDetectorService is None:
+            if show_feedback:
                 QMessageBox.warning(
                     self,
                     self.tr("Services Not Available"),
-                    self.tr("Detection services are not available. Please ensure the plugin is properly installed.")
+                    self.tr(
+                        "Detection services are not available. Please ensure the plugin is properly installed."
+                    ),
                 )
-                return
+            return
 
-            self._sync_virtual_fields_to_temporary_import_layers()
+        self._warning_refresh_show_feedback = show_feedback
+        self._warning_refresh_plan = self._build_warning_refresh_plan()
+        self._warning_refresh_index = 0
+        self._warning_refresh_results: Dict[str, List[Any]] = {}
+        self._active_warning_detection_task = None
 
-            # Re-run duplicate objects detection if objects were imported
-            duplicate_objects_warnings = []
-            if self._summary_data.objects_count > 0:
-                print(f"Debug: Running duplicate detection for {self._summary_data.objects_count} objects")
-                detector = DuplicateObjectsDetectorService(
-                    settings_manager=self._settings_manager,
-                    layer_service=self._layer_service
+        total_steps = len(self._warning_refresh_plan)
+        self._set_warnings_analysis_busy(True, total_steps=total_steps)
+        self._update_warnings_analysis_progress(
+            0,
+            self.tr("Analyzing warnings... (0/{total})").format(total=total_steps),
+        )
+        QTimer.singleShot(1, self._run_next_warning_refresh_step)
+
+    def _build_warning_refresh_plan(self) -> List[Tuple[Optional[str], str, Callable[[], List[Any]]]]:
+        """
+        Build ordered warning-detection steps for incremental execution.
+
+        Returns:
+            List of (summary_data attribute name or None, status label, runner).
+        """
+        steps: List[Tuple[Optional[str], str, Callable[[], List[Any]]]] = [
+            (
+                None,
+                self.tr("Preparing layers..."),
+                self._run_prepare_layers_for_warning_detection,
+            ),
+        ]
+        if self._summary_data.objects_count > 0:
+            steps.append(
+                (
+                    "duplicate_objects_warnings",
+                    self.tr("Checking duplicate objects..."),
+                    self._detect_duplicate_objects_warnings,
                 )
-                duplicate_objects_warnings = detector.detect_duplicate_objects()
-                print(f"Debug: Detected {len(duplicate_objects_warnings)} duplicate warnings")
-                for warning in duplicate_objects_warnings:
-                    print(f"Debug: Duplicate warning: {warning}")
-            
-            # Re-run skipped numbers detection if objects were imported
-            skipped_numbers_warnings = []
-            if self._summary_data.objects_count > 0:
-                print(f"Debug: Running skipped numbers detection for {self._summary_data.objects_count} objects")
-                skipped_detector = SkippedNumbersDetectorService(
-                    settings_manager=self._settings_manager,
-                    layer_service=self._layer_service
-                )
-                skipped_numbers_warnings = skipped_detector.detect_skipped_numbers()
-                print(f"Debug: Detected {len(skipped_numbers_warnings)} skipped warnings")
-                for warning in skipped_numbers_warnings:
-                    print(f"Debug: Skipped warning: {warning}")
-            
-            # Re-run out-of-bounds detection if any features were imported
-            out_of_bounds_warnings = []
-            if (self._summary_data.objects_count > 0 or 
-                self._summary_data.features_count > 0 or 
-                self._summary_data.small_finds_count > 0):
-                print(f"[DEBUG] Running out-of-bounds detection")
-                try:
-                    from services.out_of_bounds_detector_service import OutOfBoundsDetectorService
-                except ImportError:
-                    # Fallback for relative import
-                    import sys
-                    import os
-                    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-                    from services.out_of_bounds_detector_service import OutOfBoundsDetectorService
-                
-                out_of_bounds_detector = OutOfBoundsDetectorService(
-                    settings_manager=self._settings_manager,
-                    layer_service=self._layer_service
-                )
-                out_of_bounds_warnings = out_of_bounds_detector.detect_out_of_bounds_features()
-                print(f"[DEBUG] Detected {len(out_of_bounds_warnings)} out-of-bounds warnings")
-                for i, warning in enumerate(out_of_bounds_warnings):
-                    print(f"[DEBUG] Out-of-bounds warning {i+1}: {warning}")
-                    if hasattr(warning, 'message'):
-                        print(f"[DEBUG]   Message: {warning.message}")
-            else:
-                print(f"[DEBUG] Skipping out-of-bounds detection - no features imported")
-            
-            # Re-run distance detection if either total station points or objects were imported
-            distance_warnings = []
-            if (self._summary_data.csv_points_count > 0 or 
-                self._summary_data.objects_count > 0):
-                print(f"[DEBUG] Running distance detection")
-                try:
-                    from services.distance_detector_service import DistanceDetectorService
-                except ImportError:
-                    # Fallback for relative import
-                    import sys
-                    import os
-                    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-                    from services.distance_detector_service import DistanceDetectorService
-                
-                distance_detector = DistanceDetectorService(
-                    settings_manager=self._settings_manager,
-                    layer_service=self._layer_service
-                )
-                distance_warnings = distance_detector.detect_distance_warnings()
-                print(f"[DEBUG] Detected {len(distance_warnings)} distance warnings")
-                for i, warning in enumerate(distance_warnings):
-                    print(f"[DEBUG] Distance warning {i+1}: {warning}")
-                    if hasattr(warning, 'message'):
-                        print(f"[DEBUG]   Message: {warning.message}")
-            else:
-                print(f"[DEBUG] Skipping distance detection - no total station points or objects")
-            
-            # Re-run missing total station detection if both total station points and objects were imported
-            missing_total_station_warnings = []
-            if (self._summary_data.csv_points_count > 0 and 
-                self._summary_data.objects_count > 0):
-                print(f"[DEBUG] Running missing total station detection")
-                try:
-                    from services.missing_total_station_detector_service import MissingTotalStationDetectorService
-                except ImportError:
-                    # Fallback for relative import
-                    import sys
-                    import os
-                    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-                    from services.missing_total_station_detector_service import MissingTotalStationDetectorService
-                
-                missing_total_station_detector = MissingTotalStationDetectorService(
-                    settings_manager=self._settings_manager,
-                    layer_service=self._layer_service
-                )
-                missing_total_station_warnings = missing_total_station_detector.detect_missing_total_station_warnings()
-                print(f"[DEBUG] Detected {len(missing_total_station_warnings)} missing total station warnings")
-                for i, warning in enumerate(missing_total_station_warnings):
-                    print(f"[DEBUG] Missing total station warning {i+1}: {warning}")
-                    if hasattr(warning, 'message'):
-                        print(f"[DEBUG]   Message: {warning.message}")
-            else:
-                print(f"[DEBUG] Skipping missing total station detection - missing total station points or objects")
-            
-            # Run duplicate total station identifiers detection if total station points were imported
-            duplicate_total_station_identifiers_warnings = []
-            if self._summary_data.csv_points_count > 0:
-                print(f"[DEBUG] Running duplicate total station identifiers detection")
-                try:
-                    from services.duplicate_total_station_identifiers_detector_service import DuplicateTotalStationIdentifiersDetectorService
-                except ImportError:
-                    # Fallback for relative import
-                    import sys
-                    import os
-                    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-                    from services.duplicate_total_station_identifiers_detector_service import DuplicateTotalStationIdentifiersDetectorService
-                
-                duplicate_total_station_identifiers_detector = DuplicateTotalStationIdentifiersDetectorService(
-                    settings_manager=self._settings_manager,
-                    layer_service=self._layer_service
-                )
-                duplicate_total_station_identifiers_warnings = duplicate_total_station_identifiers_detector.detect_duplicate_identifiers_warnings()
-                print(f"[DEBUG] Detected {len(duplicate_total_station_identifiers_warnings)} duplicate total station identifiers warnings")
-                for i, warning in enumerate(duplicate_total_station_identifiers_warnings):
-                    print(f"[DEBUG] Duplicate total station identifiers warning {i+1}: {warning}")
-                    if hasattr(warning, 'message'):
-                        print(f"[DEBUG]   Message: {warning.message}")
-            else:
-                print(f"[DEBUG] Skipping duplicate total station identifiers detection - no total station points imported")
-            
-            # Run height difference detection if total station points were imported
-            height_difference_warnings = []
-            if self._summary_data.csv_points_count > 0:
-                print(f"[DEBUG] Running height difference detection")
-                try:
-                    from services.height_difference_detector_service import HeightDifferenceDetectorService
-                except ImportError:
-                    # Fallback for relative import
-                    import sys
-                    import os
-                    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-                    from services.height_difference_detector_service import HeightDifferenceDetectorService
-                
-                height_difference_detector = HeightDifferenceDetectorService(
-                    settings_manager=self._settings_manager,
-                    layer_service=self._layer_service
-                )
-                height_difference_warnings = height_difference_detector.detect_height_difference_warnings()
-                print(f"[DEBUG] Detected {len(height_difference_warnings)} height difference warnings")
-                for i, warning in enumerate(height_difference_warnings):
-                    print(f"[DEBUG] Height difference warning {i+1}: {warning}")
-                    if hasattr(warning, 'message'):
-                        print(f"[DEBUG]   Message: {warning.message}")
-            else:
-                print(f"[DEBUG] Skipping height difference detection - no total station points imported")
-            
-            # Update the summary data with new warnings
-            print(f"[DEBUG] Updating summary data with {len(duplicate_objects_warnings)} duplicates, {len(skipped_numbers_warnings)} skipped, {len(out_of_bounds_warnings)} out-of-bounds, {len(distance_warnings)} distance, {len(missing_total_station_warnings)} missing total station, {len(duplicate_total_station_identifiers_warnings)} duplicate total station identifiers, and {len(height_difference_warnings)} height difference warnings")
-            self._summary_data.duplicate_objects_warnings = duplicate_objects_warnings
-            self._summary_data.skipped_numbers_warnings = skipped_numbers_warnings
-            self._summary_data.out_of_bounds_warnings = out_of_bounds_warnings
-            self._summary_data.distance_warnings = distance_warnings
-            self._summary_data.missing_total_station_warnings = missing_total_station_warnings
-            self._summary_data.duplicate_total_station_identifiers_warnings = duplicate_total_station_identifiers_warnings
-            self._summary_data.height_difference_warnings = height_difference_warnings
-            print(f"[DEBUG] Summary data now has {len(self._summary_data.duplicate_objects_warnings)} duplicates, {len(self._summary_data.skipped_numbers_warnings)} skipped, {len(self._summary_data.out_of_bounds_warnings)} out-of-bounds, {len(self._summary_data.distance_warnings)} distance, {len(self._summary_data.missing_total_station_warnings)} missing total station, {len(self._summary_data.duplicate_total_station_identifiers_warnings)} duplicate total station identifiers, and {len(self._summary_data.height_difference_warnings)} height difference warnings")
-            
-            # Recreate the UI to show updated warnings
-            print("[DEBUG] Recreating summary content")
-            self._recreate_summary_content()
-            
-            # Show success message
-            QMessageBox.information(
-                self,
-                self.tr("Warnings Refreshed"),
-                self.tr("Warnings have been refreshed successfully.")
             )
-            
-        except Exception as e:
-            print(f"Error refreshing warnings: {e}")
-            import traceback
-            traceback.print_exc()
-            
-            # Show error message to user
+            steps.append(
+                (
+                    "skipped_numbers_warnings",
+                    self.tr("Checking skipped numbers..."),
+                    self._detect_skipped_numbers_warnings,
+                )
+            )
+        if (
+            self._summary_data.objects_count > 0
+            or self._summary_data.features_count > 0
+            or self._summary_data.small_finds_count > 0
+        ):
+            steps.append(
+                (
+                    "out_of_bounds_warnings",
+                    self.tr("Checking out-of-bounds features..."),
+                    self._detect_out_of_bounds_warnings,
+                )
+            )
+        if self._summary_data.csv_points_count > 0 or self._summary_data.objects_count > 0:
+            steps.append(
+                (
+                    "distance_warnings",
+                    self.tr("Checking distances..."),
+                    self._detect_distance_warnings,
+                )
+            )
+        if self._summary_data.csv_points_count > 0 and self._summary_data.objects_count > 0:
+            steps.append(
+                (
+                    "missing_total_station_warnings",
+                    self.tr("Checking missing total station points..."),
+                    self._detect_missing_total_station_warnings,
+                )
+            )
+        if self._summary_data.csv_points_count > 0:
+            steps.append(
+                (
+                    "duplicate_total_station_identifiers_warnings",
+                    self.tr("Checking duplicate total station identifiers..."),
+                    self._detect_duplicate_total_station_identifiers_warnings,
+                )
+            )
+            steps.append(
+                (
+                    "height_difference_warnings",
+                    self.tr("Checking height differences..."),
+                    self._detect_height_difference_warnings,
+                )
+            )
+        return steps
+
+    def _run_prepare_layers_for_warning_detection(self) -> List[Any]:
+        """Sync virtual fields before running detectors."""
+        self._sync_virtual_fields_to_temporary_import_layers()
+        return []
+
+    def _dispatch_warning_detection_step(
+        self,
+        description: str,
+        runner: Callable[[], List[Any]],
+        on_success: Callable[[List[Any]], None],
+        on_error: Callable[[Exception], None],
+    ) -> None:
+        """Schedule one detector step; overridable in tests for synchronous execution."""
+        self._active_warning_detection_task = dispatch_warning_detection_step(
+            description,
+            runner,
+            on_success,
+            on_error,
+        )
+
+    def _run_next_warning_refresh_step(self) -> None:
+        """Schedule a single warning-detection step off the main thread when possible."""
+        if not self._warnings_analysis_running:
+            return
+
+        total_steps = len(self._warning_refresh_plan)
+        if self._warning_refresh_index >= total_steps:
+            self._finalize_warning_refresh()
+            return
+
+        result_key, status_label, runner = self._warning_refresh_plan[self._warning_refresh_index]
+        step_number = self._warning_refresh_index + 1
+        reset_yield_counter()
+        self._update_warnings_analysis_progress(
+            self._warning_refresh_index,
+            self.tr("{task} ({current}/{total})").format(
+                task=status_label,
+                current=step_number,
+                total=total_steps,
+            ),
+        )
+
+        def on_success(warnings: List[Any]) -> None:
+            if not self._warnings_analysis_running:
+                return
+            if result_key is not None:
+                self._warning_refresh_results[result_key] = warnings
+            self._warning_refresh_index += 1
+            self._update_warnings_analysis_progress(
+                self._warning_refresh_index,
+                self.tr("Analyzing warnings... ({current}/{total})").format(
+                    current=self._warning_refresh_index,
+                    total=total_steps,
+                ),
+            )
+            QTimer.singleShot(1, self._run_next_warning_refresh_step)
+
+        def on_error(exc: Exception) -> None:
+            self._handle_warning_refresh_error(exc)
+
+        # Virtual-field sync mutates layers and must stay on the Qt main thread.
+        if result_key is None:
+            try:
+                on_success(runner())
+            except Exception as exc:
+                on_error(exc)
+            return
+
+        self._dispatch_warning_detection_step(status_label, runner, on_success, on_error)
+
+    def _finalize_warning_refresh(self) -> None:
+        """Apply collected warnings and rebuild the summary panel on the next event-loop tick."""
+        try:
+            for result_key, warnings in self._warning_refresh_results.items():
+                setattr(self._summary_data, result_key, warnings)
+            for result_key in (
+                "duplicate_objects_warnings",
+                "skipped_numbers_warnings",
+                "out_of_bounds_warnings",
+                "distance_warnings",
+                "missing_total_station_warnings",
+                "duplicate_total_station_identifiers_warnings",
+                "height_difference_warnings",
+            ):
+                if result_key not in self._warning_refresh_results:
+                    setattr(self._summary_data, result_key, [])
+
+            QTimer.singleShot(1, self._complete_warning_refresh_ui)
+        except Exception as exc:
+            self._handle_warning_refresh_error(exc)
+
+    def _complete_warning_refresh_ui(self) -> None:
+        """Rebuild summary widgets and clear the busy indicator."""
+        try:
+            self._recreate_summary_content()
+
+            if self._warning_refresh_show_feedback:
+                QMessageBox.information(
+                    self,
+                    self.tr("Warnings Refreshed"),
+                    self.tr("Warnings have been refreshed successfully."),
+                )
+        except Exception as exc:
+            self._handle_warning_refresh_error(exc)
+        finally:
+            self._set_warnings_analysis_busy(False)
+
+    def _handle_warning_refresh_error(self, error: Exception) -> None:
+        """Abort incremental refresh and surface errors to the user."""
+        print(f"Error refreshing warnings: {error}")
+        import traceback
+        traceback.print_exc()
+        self._set_warnings_analysis_busy(False)
+        if self._warning_refresh_show_feedback:
             QMessageBox.critical(
                 self,
                 self.tr("Refresh Error"),
-                self.tr(f"An error occurred while refreshing warnings: {str(e)}")
+                self.tr("An error occurred while refreshing warnings: {error}").format(
+                    error=str(error)
+                ),
             )
+
+    def _load_detector_service(self, module_name: str, class_name: str):
+        """Import a detector service class from the services package."""
+        try:
+            module = __import__(f"services.{module_name}", fromlist=[class_name])
+        except ImportError:
+            import sys
+            import os
+
+            sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            module = __import__(f"services.{module_name}", fromlist=[class_name])
+        return getattr(module, class_name)
+
+    def _detect_duplicate_objects_warnings(self) -> List[Any]:
+        detector = DuplicateObjectsDetectorService(
+            settings_manager=self._settings_manager,
+            layer_service=self._layer_service,
+        )
+        return detector.detect_duplicate_objects()
+
+    def _detect_skipped_numbers_warnings(self) -> List[Any]:
+        detector = SkippedNumbersDetectorService(
+            settings_manager=self._settings_manager,
+            layer_service=self._layer_service,
+        )
+        return detector.detect_skipped_numbers()
+
+    def _detect_out_of_bounds_warnings(self) -> List[Any]:
+        service_class = self._load_detector_service(
+            "out_of_bounds_detector_service",
+            "OutOfBoundsDetectorService",
+        )
+        detector = service_class(
+            settings_manager=self._settings_manager,
+            layer_service=self._layer_service,
+        )
+        return detector.detect_out_of_bounds_features()
+
+    def _detect_distance_warnings(self) -> List[Any]:
+        service_class = self._load_detector_service(
+            "distance_detector_service",
+            "DistanceDetectorService",
+        )
+        detector = service_class(
+            settings_manager=self._settings_manager,
+            layer_service=self._layer_service,
+        )
+        return detector.detect_distance_warnings()
+
+    def _detect_missing_total_station_warnings(self) -> List[Any]:
+        service_class = self._load_detector_service(
+            "missing_total_station_detector_service",
+            "MissingTotalStationDetectorService",
+        )
+        detector = service_class(
+            settings_manager=self._settings_manager,
+            layer_service=self._layer_service,
+        )
+        return detector.detect_missing_total_station_warnings()
+
+    def _detect_duplicate_total_station_identifiers_warnings(self) -> List[Any]:
+        service_class = self._load_detector_service(
+            "duplicate_total_station_identifiers_detector_service",
+            "DuplicateTotalStationIdentifiersDetectorService",
+        )
+        detector = service_class(
+            settings_manager=self._settings_manager,
+            layer_service=self._layer_service,
+        )
+        return detector.detect_duplicate_identifiers_warnings()
+
+    def _detect_height_difference_warnings(self) -> List[Any]:
+        service_class = self._load_detector_service(
+            "height_difference_detector_service",
+            "HeightDifferenceDetectorService",
+        )
+        detector = service_class(
+            settings_manager=self._settings_manager,
+            layer_service=self._layer_service,
+        )
+        return detector.detect_height_difference_warnings()
     
     def _recreate_summary_content(self) -> None:
         """Recreate the summary content to show updated warnings."""

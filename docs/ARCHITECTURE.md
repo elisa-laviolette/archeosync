@@ -185,7 +185,7 @@ QGIS-specific implementation for layer operations including:
 - Layer structure copying with styling preservation
 
 ### Field project metadata (`services/field_project_metadata.py`)
-- **`archeosync_project.json`**: Written beside each generated `.qgs` with `project_kind` (`global` | `recording_area`), extent WKT, and CRS
+- **`archeosync_project.json`**: Written beside each generated `.qgs` with `project_kind` (`global` | `recording_area`), extent WKT, CRS, and (for global projects) `import_layers` mapping import keys to the source project's layer display names
 - Legacy projects without metadata are treated as per-recording-area imports
 
 ### Global field projects
@@ -204,6 +204,12 @@ QGIS-specific implementation for field project import and processing including:
 - **Geopackage import**: Processes per-layer `.gpkg` files matching configured layer names
 - **Layer Merging**: Merges Objects, Features, and Small Finds layers from multiple projects
 - **Duplicate Detection**: Automatically filters out features that already exist in the current project's Objects, Features, and Small Finds layers
+- **Duplicate-only imports**: When projects contain only entities already present in definitive layers, import now returns a successful result with an explicit "all duplicates" message instead of a hard error.
+- **Alternative objects robustness**: Case-insensitive field mapping is applied when converting alternative-object rows to Objects schema. At import, only **no-geometry vs no-geometry** rows with the same recording area + number are excluded, using identity keys from the definitive **Objects** layer only (not the alternative-objects layer, which often mirrors the same data). A no-geometry row is **kept** when only a **polygon** with the same attributes exists in definitive data (the duplicate-objects warning still applies, once per object identity). Rows without zone/number remain ambiguous and are kept. Alternative-object GeoPackages are merged whenever present (not only when global metadata exists).
+- **GeoPackage loading**: Import tries configured layer names, file basenames, every OGR sublayer (picking the one with the most features), and accepts attribute-only tables for polygon-configured layers.
+- **Scan precedence**: Objects/Features/Small Finds/Alternative files are classified before read-only context layers, so an objects layer listed as an extra field layer is still imported.
+- **Layer name matching**: GeoPackage filenames are matched to configured layer names using Unicode-normalized, accent-insensitive comparison (longest name first, e.g. alternative objects before objects).
+- **Global project metadata**: When a global field project is created, `archeosync_project.json` stores `import_layers` with the original QGIS layer display names used for each exported `.gpkg`. Import uses those names so completed global projects stay aligned with the source project even if plugin settings change later.
 - **Smart Feature Comparison**: Uses unique signatures based on attributes and geometry to identify duplicates (excluding layer-specific feature IDs)
 - **Layer Creation**: Creates new "New Objects", "New Features", and "New Small Finds" layers in the project
 - **Feature Collection**: Collects all features from completed field recordings
@@ -268,7 +274,7 @@ Dialog for managing plugin configuration with:
   - **Features Layer**: Polygon/multipolygon layer for archaeological features
   - **Small Finds Layer**: Point/multipoint or no geometry layer for small finds
   - **Total Station Points Layer**: Point/multipoint layer for total station survey points
-  - **Extra Layers**: Additional vector layers to include in field projects
+  - **Extra Layers**: Additional vector layers to include in field projects; recording areas, objects, features, and small finds appear checked and disabled in the list (always included in generated projects, not stored as optional extras)
 - Archive folder configuration for CSV files and QField projects
 - Folder selection widgets with browse functionality
 - Real-time validation of archive folder paths
@@ -345,6 +351,7 @@ Dialog for displaying comprehensive import statistics after successful data impo
   - **Trigger Conditions**: Displays after CSV, field project, or mixed imports
   - **Data Validation**: Only displays when data is actually imported (counts > 0)
   - **Seamless Integration**: Integrates with existing import workflow
+  - **Deferred warning detection**: The dock is shown first and each warning detector runs as its own **QgsTask** step so the main Qt thread stays free for map navigation and other QGIS widgets. When the task manager is unavailable (unit tests), steps fall back to synchronous execution with cooperative ``maybe_yield_to_ui()`` calls inside feature scans. While detectors run, a determinate progress bar and status label (current task and step count) are shown and dock action buttons are disabled.
 - **SOLID Design**: Follows clean architecture principles
   - **Single Responsibility**: Focused solely on summary display
   - **Dependency Injection**: Translation service injected through interface

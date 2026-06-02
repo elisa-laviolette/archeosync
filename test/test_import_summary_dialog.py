@@ -132,6 +132,28 @@ class TestImportSummaryDialog(unittest.TestCase):
         self.assertIsNotNone(self.dialog._refresh_button)
         self.assertEqual(self.dialog._refresh_button.text(), "Refresh Warnings")
     
+    def _run_warning_refresh_pipeline_immediately(self, dialog, trigger=None):
+        """Execute the incremental warning refresh synchronously in tests."""
+
+        def sync_dispatch(_description, runner, on_success, on_error):
+            try:
+                on_success(runner())
+            except Exception as exc:
+                on_error(exc)
+
+        if trigger is None:
+            trigger = dialog._handle_refresh_warnings
+
+        with patch(
+            "ui.import_summary_dialog.QTimer.singleShot",
+            side_effect=lambda _delay, callback: callback(),
+        ), patch.object(
+            dialog,
+            "_dispatch_warning_detection_step",
+            side_effect=sync_dispatch,
+        ):
+            trigger()
+
     def test_refresh_warnings_calls_virtual_field_sync_before_detectors(self):
         """Refresh must sync virtual fields like the initial summary so detectors stay consistent."""
         with patch.object(
@@ -146,7 +168,7 @@ class TestImportSummaryDialog(unittest.TestCase):
             self.dialog, "_recreate_summary_content"
         ):
             self.dialog._summary_data.objects_count = 2
-            self.dialog._handle_refresh_warnings()
+            self._run_warning_refresh_pipeline_immediately(self.dialog)
         mock_sync.assert_called_once()
 
     def test_refresh_warnings_success(self):
@@ -197,8 +219,7 @@ class TestImportSummaryDialog(unittest.TestCase):
             # Set up summary data with objects
             self.dialog._summary_data.objects_count = 5
             
-            # Call the method
-            self.dialog._handle_refresh_warnings()
+            self._run_warning_refresh_pipeline_immediately(self.dialog)
             
             # Verify the services were called
             mock_duplicate_detector.detect_duplicate_objects.assert_called_once()
@@ -214,13 +235,10 @@ class TestImportSummaryDialog(unittest.TestCase):
     def test_refresh_warnings_error_handling(self):
         """Test that refresh warnings handles errors gracefully."""
         # Mock the detection services to raise an exception
+        self.dialog._summary_data.objects_count = 1
         with patch('ui.import_summary_dialog.DuplicateObjectsDetectorService', side_effect=Exception("Test error")), \
              patch('qgis.PyQt.QtWidgets.QMessageBox') as mock_message_box:
-            
-            # Call the refresh method
-            self.dialog._handle_refresh_warnings()
-            
-            # Verify that error message was shown
+            self._run_warning_refresh_pipeline_immediately(self.dialog)
             mock_message_box.critical.assert_called_once()
     
     def test_refresh_warnings_no_objects(self):
@@ -250,14 +268,97 @@ class TestImportSummaryDialog(unittest.TestCase):
             # Configure the mock QMessageBox
             mock_qmessagebox.information = Mock()
             
-            # Call the refresh method
-            dialog._handle_refresh_warnings()
+            self._run_warning_refresh_pipeline_immediately(dialog)
             
             # Verify that UI was recreated (even with no warnings)
             mock_recreate.assert_called_once()
             
             # Verify that success message was shown
             mock_qmessagebox.information.assert_called_once()
+
+    def test_warnings_analysis_indicator_hidden_by_default(self):
+        """Busy indicator is hidden until warning analysis starts."""
+        self.assertFalse(self.dialog._warnings_analysis_container.isVisible())
+
+    def test_set_warnings_analysis_busy_toggles_indicator_and_buttons(self):
+        """Busy state shows progress bar and disables import actions."""
+        self.dialog._set_warnings_analysis_busy(True)
+        self.assertTrue(self.dialog._warnings_analysis_container.isVisible())
+        self.assertEqual(self.dialog._warnings_analysis_progress.minimum(), 0)
+        self.assertEqual(self.dialog._warnings_analysis_progress.maximum(), 0)
+        self.assertFalse(self.dialog._refresh_button.isEnabled())
+        self.assertFalse(self.dialog._validate_button.isEnabled())
+        self.assertFalse(self.dialog._cancel_button.isEnabled())
+
+        self.dialog._set_warnings_analysis_busy(False)
+        self.assertFalse(self.dialog._warnings_analysis_container.isVisible())
+        self.assertTrue(self.dialog._refresh_button.isEnabled())
+        self.assertTrue(self.dialog._validate_button.isEnabled())
+        self.assertTrue(self.dialog._cancel_button.isEnabled())
+
+    def test_set_warnings_analysis_busy_supports_determinate_progress(self):
+        """When steps are known, the progress bar uses a determinate range."""
+        self.dialog._set_warnings_analysis_busy(True, total_steps=5)
+        self.assertEqual(self.dialog._warnings_analysis_progress.maximum(), 5)
+        self.assertEqual(self.dialog._warnings_analysis_progress.value(), 0)
+        self.assertFalse(self.dialog._refresh_button.isEnabled())
+        self.assertFalse(self.dialog._validate_button.isEnabled())
+        self.assertFalse(self.dialog._cancel_button.isEnabled())
+
+        self.dialog._set_warnings_analysis_busy(False)
+        self.assertFalse(self.dialog._warnings_analysis_container.isVisible())
+        self.assertTrue(self.dialog._refresh_button.isEnabled())
+        self.assertTrue(self.dialog._validate_button.isEnabled())
+        self.assertTrue(self.dialog._cancel_button.isEnabled())
+
+    def test_build_warning_refresh_plan_includes_object_checks(self):
+        """Warning refresh plan should include object-related detectors when objects were imported."""
+        self.dialog._summary_data.objects_count = 3
+        self.dialog._summary_data.features_count = 0
+        self.dialog._summary_data.csv_points_count = 0
+
+        plan = self.dialog._build_warning_refresh_plan()
+        result_keys = [step[0] for step in plan]
+
+        self.assertIsNone(result_keys[0])
+        self.assertIn("duplicate_objects_warnings", result_keys)
+        self.assertIn("skipped_numbers_warnings", result_keys)
+
+    def test_refresh_warnings_silently_does_not_show_success_dialog(self):
+        """Automatic background refresh must not show modal success popups."""
+        mock_duplicate_detector = Mock()
+        mock_duplicate_detector.detect_duplicate_objects.return_value = []
+        mock_skipped_detector = Mock()
+        mock_skipped_detector.detect_skipped_numbers.return_value = []
+        mock_oob = Mock()
+        mock_oob.detect_out_of_bounds_features.return_value = []
+        mock_distance = Mock()
+        mock_distance.detect_distance_warnings.return_value = []
+        mock_missing_ts = Mock()
+        mock_missing_ts.detect_missing_total_station_warnings.return_value = []
+        mock_dup_ts = Mock()
+        mock_dup_ts.detect_duplicate_identifiers_warnings.return_value = []
+        mock_height = Mock()
+        mock_height.detect_height_difference_warnings.return_value = []
+
+        self.dialog._summary_data.objects_count = 1
+
+        with patch('ui.import_summary_dialog.DuplicateObjectsDetectorService', return_value=mock_duplicate_detector), \
+             patch('ui.import_summary_dialog.SkippedNumbersDetectorService', return_value=mock_skipped_detector), \
+             patch('services.out_of_bounds_detector_service.OutOfBoundsDetectorService', return_value=mock_oob), \
+             patch('services.distance_detector_service.DistanceDetectorService', return_value=mock_distance), \
+             patch('services.missing_total_station_detector_service.MissingTotalStationDetectorService', return_value=mock_missing_ts), \
+             patch('services.duplicate_total_station_identifiers_detector_service.DuplicateTotalStationIdentifiersDetectorService', return_value=mock_dup_ts), \
+             patch('services.height_difference_detector_service.HeightDifferenceDetectorService', return_value=mock_height), \
+             patch('qgis.PyQt.QtWidgets.QMessageBox') as mock_qmessagebox, \
+             patch.object(self.dialog, '_recreate_summary_content'):
+            self._run_warning_refresh_pipeline_immediately(
+                self.dialog,
+                trigger=self.dialog.refresh_warnings_silently,
+            )
+
+        mock_qmessagebox.information.assert_not_called()
+        self.assertFalse(self.dialog._warnings_analysis_container.isVisible())
     
     def test_recreate_summary_content(self):
         """Test that the summary content recreation works correctly."""

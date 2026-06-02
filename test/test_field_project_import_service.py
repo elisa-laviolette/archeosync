@@ -150,7 +150,313 @@ class TestFieldProjectImportService:
         result = self.field_import_service.import_field_projects([project_path])
         
         assert result.is_valid is False
-        assert "No Objects or Features layers found" in result.message
+        assert "No Objects, Features, or Small Finds layers found" in result.message
+
+    @patch.object(FieldProjectImportService, "_create_merged_layer")
+    @patch.object(FieldProjectImportService, "_filter_duplicates")
+    @patch.object(FieldProjectImportService, "_process_individual_layers_with_matching")
+    @patch.object(FieldProjectImportService, "_scan_project_layers")
+    def test_import_field_projects_all_detected_entities_are_duplicates(
+        self,
+        mock_scan_layers,
+        mock_process_layers,
+        mock_filter_duplicates,
+        mock_create_merged_layer,
+    ):
+        """When all imported entities are duplicates, import should be valid with an explicit message."""
+        project_path = "/test/project1"
+        fake_feature = create_iterable_mock_feature()
+
+        mock_scan_layers.return_value = {
+            "objects": ["Objects.gpkg"],
+            "features": [],
+            "small_finds": [],
+            "alternative_objects": [],
+        }
+        mock_process_layers.return_value = {
+            "objects": [fake_feature],
+            "features": [],
+            "small_finds": [],
+        }
+        mock_filter_duplicates.side_effect = [[], [], []]
+        mock_create_merged_layer.return_value = None
+
+        result = self.field_import_service.import_field_projects([project_path])
+
+        assert result.is_valid is True
+        assert "all detected entities are duplicates" in result.message
+
+    @patch.object(FieldProjectImportService, "_create_merged_layer")
+    @patch.object(FieldProjectImportService, "_filter_duplicates")
+    @patch.object(FieldProjectImportService, "_convert_alternative_features_to_objects")
+    @patch.object(FieldProjectImportService, "_process_alternative_objects_layers")
+    @patch.object(FieldProjectImportService, "_process_individual_layers_with_matching")
+    @patch.object(FieldProjectImportService, "_scan_project_layers")
+    @patch.object(FieldProjectImportService, "_get_configured_layer_info")
+    def test_import_merges_alternative_objects_without_global_metadata(
+        self,
+        mock_configured_layers,
+        mock_scan_layers,
+        mock_process_layers,
+        mock_process_alt_layers,
+        mock_convert_alt,
+        mock_filter_duplicates,
+        mock_create_merged_layer,
+    ):
+        """Alternative-object GeoPackages are merged even without archeosync global metadata."""
+        project_path = "/test/legacy_global_project"
+        fake_feature = create_iterable_mock_feature()
+        alt_feature = create_iterable_mock_feature()
+
+        mock_configured_layers.return_value = {
+            'objects': {'name': 'Objects', 'geometry_type': 2, 'field_types': {}},
+            'features': {'name': None, 'geometry_type': None, 'field_types': {}},
+            'small_finds': {'name': None, 'geometry_type': None, 'field_types': {}},
+        }
+        mock_scan_layers.return_value = {
+            "objects": [],
+            "features": [],
+            "small_finds": [],
+            "alternative_objects": [os.path.join(project_path, "AltTable.gpkg")],
+        }
+        mock_process_layers.return_value = {
+            "objects": [],
+            "features": [],
+            "small_finds": [],
+        }
+        mock_process_alt_layers.return_value = [alt_feature]
+        mock_convert_alt.return_value = [fake_feature]
+        mock_filter_duplicates.side_effect = lambda features, *_args: features
+        mock_create_merged_layer.return_value = create_mock_layer_with_fields()
+
+        with patch(
+            "services.field_project_import_service.QgsProject"
+        ) as mock_project, patch(
+            "services.field_project_import_service.is_global_project",
+            return_value=False,
+        ):
+            mock_project.instance.return_value.addMapLayer = Mock()
+            result = self.field_import_service.import_field_projects([project_path])
+
+        assert result.is_valid is True
+        mock_process_alt_layers.assert_called_once()
+        mock_convert_alt.assert_called_once_with([alt_feature])
+
+    @patch("services.field_project_import_service.QgsVectorLayer")
+    def test_collect_features_prefers_populated_sublayer(self, mock_vector_layer):
+        """When the first OGR layer is empty, read from the sublayer that has features."""
+        file_path = "/tmp/Objects.gpkg"
+        feature_a = create_iterable_mock_feature()
+        feature_b = create_iterable_mock_feature()
+
+        def make_layer(is_valid, features):
+            layer = Mock()
+            layer.isValid.return_value = is_valid
+            layer.featureCount.return_value = len(features)
+            layer.getFeatures.return_value = features
+            layer.geometryType.return_value = 2
+            return layer
+
+        def vector_layer_side_effect(uri, name, provider):
+            if uri == f"{file_path}|layername=Objects":
+                return make_layer(True, [])
+            if uri == f"{file_path}|layername=objects_data":
+                return make_layer(True, [feature_a, feature_b])
+            return make_layer(False, [])
+
+        mock_vector_layer.side_effect = vector_layer_side_effect
+
+        with patch.object(
+            self.field_import_service,
+            "_ogr_sub_layer_names",
+            return_value=["objects_data"],
+        ):
+            features = self.field_import_service._collect_features_from_geopackage(
+                file_path,
+                "Objects",
+                2,
+            )
+
+        assert len(features) == 2
+
+    @patch("services.field_project_import_service.QgsVectorLayer")
+    def test_collect_features_imports_despite_geometry_mismatch_when_non_empty(self, mock_vector_layer):
+        """Attribute-only tables must still be imported for polygon-configured objects."""
+        file_path = "/tmp/Objects.gpkg"
+        feature = create_iterable_mock_feature()
+
+        layer = Mock()
+        layer.isValid.return_value = True
+        layer.featureCount.return_value = 1
+        layer.getFeatures.return_value = [feature]
+        layer.geometryType.return_value = 4  # NullGeometry / no geom table
+
+        mock_vector_layer.return_value = layer
+
+        features = self.field_import_service._collect_features_from_geopackage(
+            file_path,
+            "Objects",
+            2,
+        )
+        assert len(features) == 1
+
+    def test_is_valid_geometry_type_accepts_null_geometry_for_polygon_layers(self):
+        layer = Mock()
+        layer.geometryType.return_value = 4
+        assert self.field_import_service._is_valid_geometry_type(layer, 2) is True
+
+    @patch("services.field_project_import_service.QgsVectorLayer")
+    def test_load_geopackage_layer_falls_back_to_basename(self, mock_vector_layer):
+        """When configured layer name fails, loading should retry using the file basename."""
+        file_path = "/tmp/MyObjects.gpkg"
+
+        def make_layer(is_valid):
+            layer = Mock()
+            layer.isValid.return_value = is_valid
+            layer.lastError.return_value = Mock(message=lambda: "invalid")
+            return layer
+
+        def vector_layer_side_effect(uri, name, provider):
+            if uri == f"{file_path}|layername=ConfiguredName":
+                return make_layer(False)
+            if uri == f"{file_path}|layername=MyObjects":
+                return make_layer(True)
+            return make_layer(False)
+
+        mock_vector_layer.side_effect = vector_layer_side_effect
+
+        loaded = self.field_import_service._load_geopackage_layer(
+            file_path,
+            ["ConfiguredName", "MyObjects"],
+        )
+        assert loaded is not None
+        assert loaded.isValid() is True
+
+    def test_filter_duplicates_keeps_ambiguous_no_geometry_rows(self):
+        """Rows with no geometry and no comparable attributes must not be dropped as duplicates."""
+        existing_layer = Mock()
+        existing_layer.getFeatures.return_value = [create_iterable_mock_feature()]
+        feature = create_iterable_mock_feature()
+        feature.geometry.return_value.isEmpty.return_value = True
+
+        with patch.object(
+            self.field_import_service,
+            "_get_object_identity_key",
+            return_value=None,
+        ), patch.object(
+            self.field_import_service,
+            "_create_feature_signature",
+            side_effect=["name:test||POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))", "||NO_GEOM"],
+        ):
+            filtered = self.field_import_service._filter_duplicates(
+                [feature], existing_layer, "Objects"
+            )
+
+        assert filtered == [feature]
+
+    def test_filter_duplicates_excludes_no_geometry_objects_with_same_identity(self):
+        """Two no-geometry rows with the same zone/number: the import duplicate is excluded."""
+        existing_feature = create_iterable_mock_feature()
+        existing_feature.geometry.return_value.isEmpty.return_value = True
+        import_feature = create_iterable_mock_feature()
+        import_feature.geometry.return_value.isEmpty.return_value = True
+
+        existing_layer = Mock()
+        existing_layer.getFeatures.return_value = [existing_feature]
+        existing_layer.fields.return_value = existing_feature.fields.return_value
+
+        identity_key = (42, 7)
+        with patch.object(
+            self.field_import_service,
+            "_get_object_identity_key",
+            side_effect=[identity_key, identity_key],
+        ):
+            filtered = self.field_import_service._filter_duplicates(
+                [import_feature], existing_layer, "Objects"
+            )
+
+        assert filtered == []
+
+    def test_filter_duplicates_keeps_no_geometry_when_only_geometric_match_exists(self):
+        """No-geometry import is kept when definitive data has only a polygon with same identity."""
+        existing_feature = create_iterable_mock_feature()
+        existing_feature.geometry.return_value.isEmpty.return_value = False
+        import_feature = create_iterable_mock_feature()
+        import_feature.geometry.return_value.isEmpty.return_value = True
+
+        existing_layer = Mock()
+        existing_layer.getFeatures.return_value = [existing_feature]
+        existing_layer.fields.return_value = existing_feature.fields.return_value
+
+        identity_key = (42, 7)
+        with patch.object(
+            self.field_import_service,
+            "_get_object_identity_key",
+            return_value=identity_key,
+        ):
+            filtered = self.field_import_service._filter_duplicates(
+                [import_feature], existing_layer, "Objects"
+            )
+
+        assert filtered == [import_feature]
+
+    def test_filter_duplicates_excludes_duplicate_no_geometry_within_import_batch(self):
+        """Two imported alternative rows with the same zone/number must not both be kept."""
+        feature_one = create_iterable_mock_feature()
+        feature_two = create_iterable_mock_feature()
+        for feature in (feature_one, feature_two):
+            feature.geometry.return_value.isEmpty.return_value = True
+
+        existing_layer = Mock()
+        existing_layer.getFeatures.return_value = []
+        existing_layer.fields.return_value = feature_one.fields.return_value
+
+        identity_key = ("zone-a", 3)
+        with patch.object(
+            self.field_import_service,
+            "_get_object_identity_key",
+            return_value=identity_key,
+        ):
+            filtered = self.field_import_service._filter_duplicates(
+                [feature_one, feature_two], existing_layer, "Objects"
+            )
+
+        assert filtered == [feature_one]
+
+    @patch("services.field_project_import_service.QgsFeature")
+    @patch("services.field_project_import_service.QgsGeometry")
+    def test_convert_alternative_features_to_objects_maps_case_insensitive_fields(
+        self, mock_qgs_geometry, mock_qgs_feature
+    ):
+        """Alternative-object conversion must map source fields ignoring case differences."""
+        target_fields = Mock()
+        target_field = Mock()
+        target_field.name.return_value = "Number"
+        target_fields.count.return_value = 1
+        target_fields.at.return_value = target_field
+        target_fields.indexOf.side_effect = lambda name: 0 if name in ("Number",) else -1
+
+        target_layer = Mock()
+        target_layer.fields.return_value = target_fields
+        self.field_import_service._get_existing_layer = Mock(return_value=target_layer)
+
+        source_field = Mock()
+        source_field.name.return_value = "number"
+        source_feature = Mock()
+        source_feature.fields.return_value = [source_field]
+        source_feature.attribute.side_effect = lambda name: 42 if name == "number" else None
+
+        new_feature = Mock()
+        new_feature.attribute.return_value = None
+        mock_qgs_feature.return_value = new_feature
+        mock_qgs_geometry.return_value = Mock()
+
+        converted = self.field_import_service._convert_alternative_features_to_objects(
+            [source_feature]
+        )
+
+        assert len(converted) == 1
+        new_feature.setAttribute.assert_any_call(0, 42)
     
     @patch('services.field_project_import_service.QgsFeature')
     @patch('os.path.exists')
@@ -329,10 +635,66 @@ class TestFieldProjectImportService:
             assert result.is_valid is True
             assert "Successfully imported 1 layer(s)" in result.message
 
+    def test_classify_prefers_metadata_layer_names(self):
+        """Metadata layer names from the source project override plugin settings."""
+        metadata_layers = {
+            "objects": "Objets relevés",
+            "alternative_objects": "Objets relevés sans géométrie",
+            "features": "Fugaces",
+        }
+        self.settings_manager.get_value.side_effect = lambda key, default="": {
+            "objects_layer": "obj_id",
+            "alternative_objects_layer": "alt_id",
+            "features_layer": "feat_id",
+        }.get(key, default)
+        self.layer_service.get_layer_info.side_effect = lambda layer_id: {
+            "obj_id": {"name": "Different"},
+            "alt_id": {"name": "Different Alt"},
+            "feat_id": {"name": "Different Features"},
+        }.get(layer_id)
+
+        assert (
+            self.field_import_service._classify_import_gpkg_filename(
+                "Objets relevés.gpkg",
+                project_import_layers=metadata_layers,
+            )
+            == "objects"
+        )
+
+    def test_classify_objets_releves_gpkg_files(self):
+        """French layer names with accents must match configured import layers."""
+        self.settings_manager.get_value.side_effect = lambda key, default="": {
+            "objects_layer": "obj_id",
+            "alternative_objects_layer": "alt_id",
+            "features_layer": "feat_id",
+            "small_finds_layer": "",
+        }.get(key, default)
+        self.layer_service.get_layer_info.side_effect = lambda layer_id: {
+            "obj_id": {"name": "Objets relevés"},
+            "alt_id": {"name": "Objets relevés sans géométrie"},
+            "feat_id": {"name": "Fugaces"},
+        }.get(layer_id)
+
+        assert (
+            self.field_import_service._classify_import_gpkg_filename("Objets relevés.gpkg")
+            == "objects"
+        )
+        assert (
+            self.field_import_service._classify_import_gpkg_filename(
+                "Objets relevés sans géométrie.gpkg"
+            )
+            == "alternative_objects"
+        )
+        assert (
+            self.field_import_service._classify_import_gpkg_filename("Fugaces.gpkg")
+            == "features"
+        )
+
     def test_is_objects_layer_file(self):
         """Test detection of Objects layer files."""
-        # Mock configured layer info
-        self.settings_manager.get_value.return_value = "objects_layer_id"
+        self.settings_manager.get_value.side_effect = lambda key, default="": {
+            "objects_layer": "objects_layer_id",
+        }.get(key, default)
         mock_layer_info = {"name": "Objects"}
         self.layer_service.get_layer_info.return_value = mock_layer_info
         

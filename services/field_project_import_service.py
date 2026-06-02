@@ -33,16 +33,18 @@ Usage:
         print(f"Import failed: {result.message}")
 """
 
+import copy
 import os
 import re
-from typing import List, Dict, Optional, Any
+import unicodedata
+from typing import List, Dict, Optional, Any, Iterable, Tuple
 from dataclasses import dataclass
 
 try:
     from qgis.core import QgsVectorLayer, QgsFeature, QgsProject, QgsVectorFileWriter, QgsGeometry, QgsWkbTypes
     from qgis.PyQt.QtCore import QVariant, QObject
     from ..core.interfaces import IFieldProjectImportService, ISettingsManager, ILayerService, IFileSystemService, ValidationResult
-    from .field_project_metadata import get_project_kind, is_global_project
+    from .field_project_metadata import get_import_layer_names, get_project_kind, is_global_project
 except ImportError:
     # For testing without QGIS
     QgsVectorLayer = None
@@ -52,7 +54,12 @@ except ImportError:
     QgsGeometry = None
     QVariant = None
     from core.interfaces import IFieldProjectImportService, ISettingsManager, ILayerService, IFileSystemService, ValidationResult
-    from services.field_project_metadata import get_project_kind, is_global_project, PROJECT_KIND_GLOBAL
+    from services.field_project_metadata import (
+        get_import_layer_names,
+        get_project_kind,
+        is_global_project,
+        PROJECT_KIND_GLOBAL,
+    )
 
 
 class FieldProjectImportService(QObject):
@@ -112,27 +119,46 @@ class FieldProjectImportService(QObject):
             all_features_features = []
             all_small_finds_features = []
             alternative_objects_merged_count = 0
+            alternative_objects_raw_count = 0
             global_projects_count = 0
+            source_layer_files_count = 0
             processed_projects = 0
             failed_projects = 0
             
             for project_path in project_paths:
                 try:
+                    project_import_layers = get_import_layer_names(project_path)
+                    project_configured_layers = self._configured_layers_for_project(
+                        configured_layers,
+                        project_import_layers,
+                    )
+
                     # Scan for layer files in the project
-                    layer_files = self._scan_project_layers(project_path)
+                    layer_files = self._scan_project_layers(
+                        project_path,
+                        project_import_layers=project_import_layers,
+                    )
+                    source_layer_files_count += sum(len(paths) for paths in layer_files.values())
                     
                     # Process individual layer files that match configured layers
-                    individual_features = self._process_individual_layers_with_matching(layer_files, configured_layers)
+                    individual_features = self._process_individual_layers_with_matching(
+                        layer_files,
+                        project_configured_layers,
+                    )
                     all_objects_features.extend(individual_features.get('objects', []))
                     all_features_features.extend(individual_features.get('features', []))
                     all_small_finds_features.extend(individual_features.get('small_finds', []))
 
                     if is_global_project(project_path):
                         global_projects_count += 1
+
+                    alt_paths = layer_files.get('alternative_objects', [])
+                    if alt_paths:
                         alt_features = self._process_alternative_objects_layers(
-                            layer_files.get('alternative_objects', []),
-                            configured_layers,
+                            alt_paths,
+                            project_import_layers,
                         )
+                        alternative_objects_raw_count += len(alt_features)
                         converted = self._convert_alternative_features_to_objects(alt_features)
                         alternative_objects_merged_count += len(converted)
                         all_objects_features.extend(converted)
@@ -184,16 +210,48 @@ class FieldProjectImportService(QObject):
                 'alternative_objects_merged_count': alternative_objects_merged_count,
                 'global_projects_count': global_projects_count,
                 'is_global_project': global_projects_count > 0,
+                'source_layer_files_count': source_layer_files_count,
             }
             
+            total_detected_features = (
+                len(all_objects_features)
+                + len(all_features_features)
+                + len(all_small_finds_features)
+            )
+            total_remaining_features = (
+                len(filtered_objects_features)
+                + len(filtered_features_features)
+                + len(filtered_small_finds_features)
+            )
+
             # Prepare result message
             if layers_created > 0:
                 message = f"Successfully imported {layers_created} layer(s) from {processed_projects} project(s)"
                 if failed_projects > 0:
                     message += f" ({failed_projects} project(s) failed)"
                 return ValidationResult(True, message)
-            else:
-                return ValidationResult(False, "No Objects or Features layers found in any project")
+            if total_detected_features > 0 and total_remaining_features == 0:
+                return ValidationResult(
+                    True,
+                    "No new entities imported: all detected entities are duplicates of existing project data",
+                )
+            if total_detected_features > 0:
+                return ValidationResult(
+                    False,
+                    "Import layers were detected but could not be created (check geometry/type compatibility)",
+                )
+            if source_layer_files_count > 0:
+                message = (
+                    "Layer files were found but no features could be read "
+                    "(check GeoPackage layer names and geometry types; see the QGIS message log for details)"
+                )
+                if alternative_objects_raw_count > 0:
+                    message += (
+                        ". Alternative-object rows were read but could not be mapped "
+                        "onto the configured Objects layer in this project"
+                    )
+                return ValidationResult(False, message)
+            return ValidationResult(False, "No Objects, Features, or Small Finds layers found in any project")
                 
         except Exception as e:
             return ValidationResult(False, f"Error during import: {str(e)}")
@@ -227,7 +285,31 @@ class FieldProjectImportService(QObject):
             # Clear the stored projects after archiving
             self._last_imported_projects = []
     
-    def _scan_project_layers(self, project_path: str) -> Dict[str, List[str]]:
+    def _configured_layers_for_project(
+        self,
+        base_configured_layers: Dict[str, Any],
+        project_import_layers: Dict[str, str],
+    ) -> Dict[str, Any]:
+        """
+        Overlay source-project layer names from field metadata onto configured layer info.
+
+        Used for global projects so OGR layer names match the original project export.
+        """
+        if not project_import_layers:
+            return base_configured_layers
+
+        configured_layers = copy.deepcopy(base_configured_layers)
+        for layer_type in ("objects", "features", "small_finds"):
+            layer_name = project_import_layers.get(layer_type)
+            if layer_name:
+                configured_layers[layer_type]["name"] = layer_name
+        return configured_layers
+
+    def _scan_project_layers(
+        self,
+        project_path: str,
+        project_import_layers: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, List[str]]:
         """
         Scan a field project directory for layer files.
         
@@ -253,21 +335,21 @@ class FieldProjectImportService(QObject):
             if not os.path.isfile(file_path):
                 continue
 
-            if self._is_readonly_context_layer_file(filename):
+            if not filename.lower().endswith(".gpkg"):
                 continue
-            
-            # Check for Objects layer files
-            if self._is_objects_layer_file(filename):
-                layer_files['objects'].append(file_path)
-            
-            # Check for Features layer files
-            elif self._is_features_layer_file(filename):
-                layer_files['features'].append(file_path)
-            # Check for Small Finds layer files
-            elif self._is_small_finds_layer_file(filename):
-                layer_files['small_finds'].append(file_path)
-            elif self._is_alternative_objects_layer_file(filename):
-                layer_files['alternative_objects'].append(file_path)
+
+            layer_type = self._classify_import_gpkg_filename(
+                filename,
+                project_import_layers=project_import_layers,
+            )
+            if layer_type:
+                layer_files[layer_type].append(file_path)
+                print(f"[DEBUG] Classified {filename} as {layer_type}")
+            elif self._is_readonly_context_layer_file(filename):
+                print(f"[DEBUG] Skipping read-only context layer file {filename}")
+                continue
+            else:
+                print(f"[DEBUG] Unrecognized GeoPackage in field project: {filename}")
         
         return layer_files
 
@@ -365,33 +447,33 @@ class FieldProjectImportService(QObject):
         
         # Process Objects layer files
         for file_path in layer_files['objects']:
-            expected_name = configured_layers['objects']['name']
-            layer = self._load_layer(f"{file_path}|layername={expected_name}", expected_name)
-            if not layer:
-                continue
-            if not self._is_valid_geometry_type(layer, configured_layers['objects']['geometry_type']):
-                continue
-            features['objects'].extend(list(layer.getFeatures()))
+            features['objects'].extend(
+                self._collect_features_from_geopackage(
+                    file_path,
+                    configured_layers['objects']['name'],
+                    configured_layers['objects']['geometry_type'],
+                )
+            )
         
         # Process Features layer files
         for file_path in layer_files['features']:
-            expected_name = configured_layers['features']['name']
-            layer = self._load_layer(f"{file_path}|layername={expected_name}", expected_name)
-            if not layer:
-                continue
-            if not self._is_valid_geometry_type(layer, configured_layers['features']['geometry_type']):
-                continue
-            features['features'].extend(list(layer.getFeatures()))
+            features['features'].extend(
+                self._collect_features_from_geopackage(
+                    file_path,
+                    configured_layers['features']['name'],
+                    configured_layers['features']['geometry_type'],
+                )
+            )
         
         # Process Small Finds layer files
         for file_path in layer_files['small_finds']:
-            expected_name = configured_layers['small_finds']['name']
-            layer = self._load_layer(f"{file_path}|layername={expected_name}", expected_name)
-            if not layer:
-                continue
-            if not self._is_valid_geometry_type(layer, configured_layers['small_finds']['geometry_type']):
-                continue
-            features['small_finds'].extend(list(layer.getFeatures()))
+            features['small_finds'].extend(
+                self._collect_features_from_geopackage(
+                    file_path,
+                    configured_layers['small_finds']['name'],
+                    configured_layers['small_finds']['geometry_type'],
+                )
+            )
         
         return features
 
@@ -706,35 +788,111 @@ class FieldProjectImportService(QObject):
                 return True
         return False
 
+    def _normalize_layer_name_for_match(self, name: str) -> str:
+        """
+        Normalize a layer or filename stem for comparison.
+
+        Applies Unicode compatibility, strips accents, lowercases, and collapses whitespace.
+        """
+        if not name:
+            return ""
+        normalized = unicodedata.normalize("NFC", name)
+        without_accents = "".join(
+            character
+            for character in unicodedata.normalize("NFKD", normalized)
+            if not unicodedata.combining(character)
+        )
+        return " ".join(without_accents.lower().strip().split())
+
+    def _classify_import_gpkg_filename(
+        self,
+        filename: str,
+        project_import_layers: Optional[Dict[str, str]] = None,
+    ) -> Optional[str]:
+        """
+        Map a GeoPackage filename to an import layer type using layer names.
+
+        For global projects, names recorded in ``archeosync_project.json`` at export time
+        (from the original QGIS project) take precedence over current plugin settings.
+
+        Longer names are checked first so
+        ``Objets relevés sans géométrie.gpkg`` is not mistaken for ``Objets relevés.gpkg``.
+        """
+        if not filename.lower().endswith(".gpkg"):
+            return None
+
+        stem = self._normalize_layer_name_for_match(os.path.splitext(filename)[0])
+        if not stem:
+            return None
+
+        configured_matches: List[tuple] = []
+        metadata_types = set()
+        if project_import_layers:
+            for layer_type in (
+                "alternative_objects",
+                "objects",
+                "features",
+                "small_finds",
+            ):
+                layer_name = project_import_layers.get(layer_type)
+                if not layer_name:
+                    continue
+                normalized_name = self._normalize_layer_name_for_match(layer_name)
+                configured_matches.append((len(normalized_name), layer_type, normalized_name))
+                metadata_types.add(layer_type)
+
+        for layer_type, setting_key in (
+            ("alternative_objects", "alternative_objects_layer"),
+            ("objects", "objects_layer"),
+            ("features", "features_layer"),
+            ("small_finds", "small_finds_layer"),
+        ):
+            if layer_type in metadata_types:
+                continue
+            layer_id = self._settings_manager.get_value(setting_key, "")
+            if not layer_id:
+                continue
+            layer_info = self._layer_service.get_layer_info(layer_id)
+            if not layer_info or not layer_info.get("name"):
+                continue
+            normalized_name = self._normalize_layer_name_for_match(layer_info["name"])
+            configured_matches.append((len(normalized_name), layer_type, normalized_name))
+
+        configured_matches.sort(key=lambda item: item[0], reverse=True)
+        for _, layer_type, normalized_name in configured_matches:
+            if stem == normalized_name:
+                return layer_type
+
+        if stem in ("objects", "objets", "obj"):
+            return "objects"
+        if stem in ("features", "feat", "fugaces"):
+            return "features"
+        if stem in ("small_finds", "smallfinds", "esquilles"):
+            return "small_finds"
+        return None
+
     def _is_alternative_objects_layer_file(self, filename: str) -> bool:
         """Check if a filename represents the alternative objects layer file."""
-        filename_lower = filename.lower()
-        if not filename_lower.endswith('.gpkg'):
-            return False
-        name_without_ext = filename_lower[:-5]
-        alternative_layer_id = self._settings_manager.get_value('alternative_objects_layer', '')
-        if alternative_layer_id:
-            layer_info = self._layer_service.get_layer_info(alternative_layer_id)
-            if layer_info and layer_info['name'].lower() == name_without_ext:
-                return True
-        return False
+        return self._classify_import_gpkg_filename(filename) == "alternative_objects"
 
     def _process_alternative_objects_layers(
         self,
         file_paths: List[str],
-        configured_layers: Dict[str, Any],
+        project_import_layers: Optional[Dict[str, str]] = None,
     ) -> List[Any]:
         """Load features from alternative objects Geopackage files."""
         features: List[Any] = []
-        alt_layer_id = self._settings_manager.get_value('alternative_objects_layer', '')
-        alt_info = self._layer_service.get_layer_info(alt_layer_id) if alt_layer_id else None
-        expected_name = alt_info['name'] if alt_info else None
+        configured_name = None
+        if project_import_layers and project_import_layers.get("alternative_objects"):
+            configured_name = project_import_layers["alternative_objects"]
+        else:
+            alt_layer_id = self._settings_manager.get_value('alternative_objects_layer', '')
+            alt_info = self._layer_service.get_layer_info(alt_layer_id) if alt_layer_id else None
+            configured_name = alt_info['name'] if alt_info else None
         for file_path in file_paths:
-            if not expected_name:
-                continue
-            layer = self._load_layer(f"{file_path}|layername={expected_name}", expected_name)
-            if layer:
-                features.extend(list(layer.getFeatures()))
+            features.extend(
+                self._collect_features_from_geopackage(file_path, configured_name, None)
+            )
         return features
 
     def _convert_alternative_features_to_objects(self, source_features: List[Any]) -> List[Any]:
@@ -744,13 +902,24 @@ class FieldProjectImportService(QObject):
         Returned features have no geometry so they can be merged into New Objects.
         """
         target_layer = self._get_existing_layer('objects_layer')
-        if not target_layer or not source_features:
+        if not target_layer:
+            if source_features:
+                print(
+                    "Warning: configured Objects layer is not loaded in the current QGIS project; "
+                    "alternative-object rows cannot be converted"
+                )
+            return []
+        if not source_features:
             return []
 
         converted = []
         target_fields = target_layer.fields()
         for source_feature in source_features:
             new_feature = QgsFeature(target_fields)
+            source_fields_by_lower_name = {
+                field.name().lower(): field.name()
+                for field in source_feature.fields()
+            }
             for field in source_feature.fields():
                 field_name = field.name()
                 if field_name.lower() in ('fid', 'ogc_fid'):
@@ -758,6 +927,17 @@ class FieldProjectImportService(QObject):
                 target_idx = target_fields.indexOf(field_name)
                 if target_idx >= 0:
                     new_feature.setAttribute(target_idx, source_feature.attribute(field.name()))
+            # Complete mapping for case-only differences between schemas.
+            for target_idx in range(target_fields.count()):
+                target_name = target_fields.at(target_idx).name()
+                if target_name.lower() in ('fid', 'ogc_fid'):
+                    continue
+                current_value = new_feature.attribute(target_idx)
+                if current_value is not None:
+                    continue
+                source_name = source_fields_by_lower_name.get(target_name.lower())
+                if source_name is not None:
+                    new_feature.setAttribute(target_idx, source_feature.attribute(source_name))
             empty_geometry = QgsGeometry()
             new_feature.setGeometry(empty_geometry)
             converted.append(new_feature)
@@ -765,72 +945,15 @@ class FieldProjectImportService(QObject):
 
     def _is_objects_layer_file(self, filename: str) -> bool:
         """Check if a filename represents an Objects layer file."""
-        filename_lower = filename.lower()
-        
-        # Check if it's a .gpkg file
-        if not filename_lower.endswith('.gpkg'):
-            return False
-        
-        # Remove .gpkg extension for name comparison
-        name_without_ext = filename_lower[:-5]  # Remove '.gpkg'
-        
-        # First, check against configured objects layer name
-        objects_layer_id = self._settings_manager.get_value('objects_layer', '')
-        if objects_layer_id:
-            layer_info = self._layer_service.get_layer_info(objects_layer_id)
-            if layer_info and layer_info['name'].lower() == name_without_ext:
-                return True
-        
-        # Fallback to common patterns (but be more specific)
-        return (name_without_ext == 'objects' or 
-                name_without_ext == 'objets' or 
-                name_without_ext == 'obj')
-    
+        return self._classify_import_gpkg_filename(filename) == "objects"
+
     def _is_features_layer_file(self, filename: str) -> bool:
         """Check if a filename represents a Features layer file."""
-        filename_lower = filename.lower()
-        
-        # Check if it's a .gpkg file
-        if not filename_lower.endswith('.gpkg'):
-            return False
-        
-        # Remove .gpkg extension for name comparison
-        name_without_ext = filename_lower[:-5]  # Remove '.gpkg'
-        
-        # First, check against configured features layer name
-        features_layer_id = self._settings_manager.get_value('features_layer', '')
-        if features_layer_id:
-            layer_info = self._layer_service.get_layer_info(features_layer_id)
-            if layer_info and layer_info['name'].lower() == name_without_ext:
-                return True
-        
-        # Fallback to common patterns (but be more specific)
-        return (name_without_ext == 'features' or 
-                name_without_ext == 'feat' or
-                name_without_ext == 'fugaces')
-    
+        return self._classify_import_gpkg_filename(filename) == "features"
+
     def _is_small_finds_layer_file(self, filename: str) -> bool:
         """Check if a filename represents a Small Finds layer file."""
-        filename_lower = filename.lower()
-        
-        # Check if it's a .gpkg file
-        if not filename_lower.endswith('.gpkg'):
-            return False
-        
-        # Remove .gpkg extension for name comparison
-        name_without_ext = filename_lower[:-5]  # Remove '.gpkg'
-        
-        # First, check against configured small finds layer name
-        small_finds_layer_id = self._settings_manager.get_value('small_finds_layer', '')
-        if small_finds_layer_id:
-            layer_info = self._layer_service.get_layer_info(small_finds_layer_id)
-            if layer_info and layer_info['name'].lower() == name_without_ext:
-                return True
-        
-        # Fallback to common patterns (but be more specific)
-        return (name_without_ext == 'small_finds' or 
-                name_without_ext == 'smallfinds' or
-                name_without_ext == 'esquilles')
+        return self._classify_import_gpkg_filename(filename) == "small_finds"
     
     def _is_objects_layer_name(self, layer_name: str) -> bool:
         """Check if a layer name represents an Objects layer."""
@@ -957,21 +1080,253 @@ class FieldProjectImportService(QObject):
         
         # Create a set of existing feature signatures for fast lookup
         existing_signatures = set()
-        for i, existing_feature in enumerate(existing_features):
+        for existing_feature in existing_features:
             signature = self._create_feature_signature(existing_feature, existing_layer)
             existing_signatures.add(signature)
+
+        existing_no_geometry_object_identity_keys: set = set()
+        imported_no_geometry_object_identity_keys: set = set()
+        if layer_type == "Objects":
+            existing_no_geometry_object_identity_keys = (
+                self._build_existing_no_geometry_object_identity_keys(
+                    existing_layer,
+                    existing_features,
+                )
+            )
         
         # Filter out duplicates
         filtered_features = []
         duplicates_count = 0
-        for i, feature in enumerate(features):
+        for feature in features:
+            if layer_type == "Objects" and self._feature_has_empty_geometry(feature):
+                identity_key = self._get_object_identity_key(feature, existing_layer)
+                if identity_key is not None:
+                    if identity_key in existing_no_geometry_object_identity_keys:
+                        print(
+                            f"[DEBUG] Excluding no-geometry object duplicate "
+                            f"(identity={identity_key}) already in definitive data"
+                        )
+                        duplicates_count += 1
+                        continue
+                    if identity_key in imported_no_geometry_object_identity_keys:
+                        print(
+                            f"[DEBUG] Excluding no-geometry object duplicate "
+                            f"(identity={identity_key}) already in this import batch"
+                        )
+                        duplicates_count += 1
+                        continue
+                    imported_no_geometry_object_identity_keys.add(identity_key)
+                    filtered_features.append(feature)
+                    continue
+
             signature = self._create_feature_signature(feature, existing_layer)
+            # Ambiguous rows without zone/number (or other layers) cannot be matched safely.
+            if signature == "||NO_GEOM":
+                filtered_features.append(feature)
+                continue
             if signature not in existing_signatures:
                 filtered_features.append(feature)
             else:
                 duplicates_count += 1
         print(f"[DEBUG] {duplicates_count} duplicates found and ignored for {layer_type}")
         return filtered_features
+
+    def _feature_has_empty_geometry(self, feature: Any) -> bool:
+        """Return True when a feature has no geometry or an empty geometry."""
+        try:
+            if hasattr(feature, "hasGeometry"):
+                return not feature.hasGeometry()
+        except Exception:
+            pass
+
+        geometry = feature.geometry()
+        if geometry is None:
+            return True
+        try:
+            if geometry.isNull() or geometry.isEmpty():
+                return True
+            if hasattr(QgsWkbTypes, "NullGeometry") and geometry.type() == QgsWkbTypes.NullGeometry:
+                return True
+            if geometry.type() == 4:
+                return True
+        except Exception:
+            return True
+        return False
+
+    def _build_existing_no_geometry_object_identity_keys(
+        self,
+        objects_layer: Optional[Any],
+        objects_features: List[Any],
+    ) -> set:
+        """
+        Identity keys for definitive no-geometry rows in the main Objects layer.
+
+        Only the configured Objects layer is used (not alternative-objects), because
+        both layers often mirror the same data and would double-count identities.
+        """
+        if not objects_layer or not objects_features:
+            return set()
+
+        keys = self._collect_object_identity_keys(
+            objects_features,
+            objects_layer,
+            only_empty_geometry=True,
+        )
+        print(
+            f"[DEBUG] Loaded {len(keys)} no-geometry object identity key(s) "
+            f"from definitive Objects layer"
+        )
+        return keys
+
+    def _normalize_object_identity_value(self, value: Any) -> Any:
+        """Normalize attribute values used in object duplicate identity keys."""
+        if value is None:
+            return None
+        try:
+            if isinstance(value, float) and value.is_integer():
+                return int(value)
+        except (TypeError, ValueError):
+            pass
+        return value
+
+    def _get_objects_recording_area_field(self, objects_layer: Any) -> Optional[str]:
+        """
+        Resolve the recording-area foreign-key field on the objects layer.
+
+        Uses QGIS relations first, then the alternative-objects field setting.
+        """
+        recording_areas_layer_id = self._settings_manager.get_value("recording_areas_layer", "")
+        if recording_areas_layer_id and objects_layer:
+            recording_areas_layer = self._layer_service.get_layer_by_id(recording_areas_layer_id)
+            if recording_areas_layer:
+                relation_field = self._get_recording_area_field_from_relation(
+                    objects_layer,
+                    recording_areas_layer,
+                )
+                if relation_field:
+                    return relation_field
+
+        configured_field = self._settings_manager.get_value(
+            "alternative_objects_recording_area_field",
+            "",
+        )
+        return configured_field or None
+
+    def _get_recording_area_field_from_relation(
+        self,
+        objects_layer: Any,
+        recording_areas_layer: Any,
+    ) -> Optional[str]:
+        """Return the objects-layer field that references recording areas via project relations."""
+        try:
+            from qgis.core import QgsProject
+
+            relation_manager = QgsProject.instance().relationManager()
+            for relation in relation_manager.relations().values():
+                if (
+                    relation.referencingLayer() == objects_layer
+                    and relation.referencedLayer() == recording_areas_layer
+                ):
+                    field_pairs = relation.fieldPairs()
+                    if field_pairs:
+                        return list(field_pairs.keys())[0]
+        except Exception as exc:
+            print(f"Error resolving recording-area relation field: {exc}")
+        return None
+
+    def _get_field_index_case_insensitive(self, layer: Any, field_name: str) -> int:
+        """Return a field index, matching field names case-insensitively when needed."""
+        field_idx = layer.fields().indexOf(field_name)
+        if field_idx >= 0:
+            return field_idx
+        target = field_name.lower()
+        for field in layer.fields():
+            if field.name().lower() == target:
+                return layer.fields().indexOf(field.name())
+        return -1
+
+    def _get_object_identity_key(
+        self,
+        feature: Any,
+        reference_layer: Any,
+        recording_area_field: Optional[str] = None,
+    ) -> Optional[Tuple[Any, Any]]:
+        """
+        Build a duplicate identity for objects without geometry (alternative-object rows).
+
+        Matches the duplicate-objects detector: recording area + object number.
+        """
+        number_field = self._settings_manager.get_value("objects_number_field", "")
+        if not number_field or reference_layer is None:
+            return None
+
+        number_idx = self._get_field_index_case_insensitive(reference_layer, number_field)
+        if number_idx < 0:
+            return None
+
+        object_number = self._normalize_object_identity_value(feature.attribute(number_idx))
+        if object_number is None or object_number == "":
+            return None
+
+        candidate_recording_fields: List[str] = []
+        if recording_area_field:
+            candidate_recording_fields.append(recording_area_field)
+        relation_field = self._get_objects_recording_area_field(reference_layer)
+        if relation_field and relation_field not in candidate_recording_fields:
+            candidate_recording_fields.append(relation_field)
+        alternative_field = self._settings_manager.get_value(
+            "alternative_objects_recording_area_field",
+            "",
+        )
+        if alternative_field and alternative_field not in candidate_recording_fields:
+            candidate_recording_fields.append(alternative_field)
+
+        recording_area_id = None
+        for field_name in candidate_recording_fields:
+            recording_area_idx = self._get_field_index_case_insensitive(
+                reference_layer,
+                field_name,
+            )
+            if recording_area_idx < 0:
+                continue
+            recording_area_id = self._normalize_object_identity_value(
+                feature.attribute(recording_area_idx)
+            )
+            if recording_area_id is not None and recording_area_id != "":
+                break
+            recording_area_id = None
+
+        if recording_area_id is None or recording_area_id == "":
+            return None
+
+        return (recording_area_id, object_number)
+
+    def _collect_object_identity_keys(
+        self,
+        features: List[Any],
+        reference_layer: Any,
+        only_empty_geometry: bool = False,
+        recording_area_field: Optional[str] = None,
+    ) -> set:
+        """
+        Collect recording-area/number identity keys for a list of object features.
+
+        When ``only_empty_geometry`` is True, geometric definitive objects are ignored
+        so a no-geometry import is not excluded solely because a polygon with the same
+        zone/number already exists (that case is handled by duplicate warnings).
+        """
+        keys = set()
+        for feature in features:
+            if only_empty_geometry and not self._feature_has_empty_geometry(feature):
+                continue
+            identity_key = self._get_object_identity_key(
+                feature,
+                reference_layer,
+                recording_area_field=recording_area_field,
+            )
+            if identity_key is not None:
+                keys.add(identity_key)
+        return keys
     
     def _create_feature_signature(self, feature: Any, layer: Any) -> str:
         """
@@ -1079,24 +1434,226 @@ class FieldProjectImportService(QObject):
         except Exception as e:
             return {}
 
+    def _geopackage_basename(self, file_path: str) -> str:
+        """Return the filename stem for a GeoPackage path."""
+        return os.path.splitext(os.path.basename(file_path))[0]
+
+    def _expand_layer_name_candidates(self, names: Iterable[str]) -> List[str]:
+        """Return OGR layer name variants (spaces, underscores, accent folding)."""
+        expanded: List[str] = []
+        for name in names:
+            if not name:
+                continue
+            variants = [name]
+            variants.append(name.replace(" ", "_"))
+            variants.append(name.replace(" ", ""))
+            folded = self._normalize_layer_name_for_match(name)
+            if folded and folded != name.lower():
+                variants.append(folded)
+                variants.append(folded.replace(" ", "_"))
+            for variant in variants:
+                if variant and variant not in expanded:
+                    expanded.append(variant)
+        return expanded
+
+    def _preferred_layer_names(
+        self,
+        file_path: str,
+        configured_name: Optional[str],
+    ) -> List[str]:
+        """Build an ordered list of OGR layer names to try for a GeoPackage file."""
+        raw_names: List[str] = []
+        if configured_name:
+            raw_names.append(configured_name)
+        basename = self._geopackage_basename(file_path)
+        if basename:
+            raw_names.append(basename)
+        return self._expand_layer_name_candidates(raw_names)
+
+    def _ogr_sub_layer_names(self, file_path: str) -> List[str]:
+        """List OGR layer names contained in a GeoPackage file."""
+        names: List[str] = []
+
+        def _append_name(layer_name: Optional[str]) -> None:
+            if layer_name and layer_name not in names:
+                names.append(layer_name)
+
+        try:
+            from qgis.core import QgsProviderRegistry
+
+            metadata = QgsProviderRegistry.instance().providerMetadata("ogr")
+            if metadata and hasattr(metadata, "querySublayers"):
+                for entry in metadata.querySublayers(file_path):
+                    if not isinstance(entry, str):
+                        continue
+                    if "layername=" in entry:
+                        _append_name(self._parse_ogr_layer_name(entry))
+                    else:
+                        _append_name(entry.strip())
+        except Exception as exc:
+            print(f"Error querying GeoPackage sublayers for {file_path}: {exc}")
+
+        try:
+            probe = QgsVectorLayer(file_path, "probe", "ogr")
+            if not probe.isValid():
+                return names
+            sub_layers = probe.subLayers() if hasattr(probe, "subLayers") else []
+            if not sub_layers and hasattr(probe.dataProvider(), "subLayers"):
+                sub_layers = probe.dataProvider().subLayers()
+            for entry in sub_layers:
+                _append_name(self._parse_ogr_layer_name(entry))
+        except Exception as exc:
+            print(f"Error listing GeoPackage sublayers for {file_path}: {exc}")
+        return names
+
+    def _parse_ogr_layer_name(self, entry: str) -> Optional[str]:
+        """Extract the OGR layer name from a sublayer descriptor string."""
+        if "layername=" not in entry:
+            return None
+        layer_name = entry.split("layername=", 1)[1]
+        if "(" in layer_name:
+            layer_name = layer_name.split("(", 1)[0]
+        layer_name = layer_name.strip().strip("|")
+        return layer_name or None
+
+    def _collect_features_from_geopackage(
+        self,
+        file_path: str,
+        configured_name: Optional[str],
+        expected_geometry_type: Optional[Any],
+    ) -> List[Any]:
+        """
+        Read features from the GeoPackage sublayer that yields the most rows.
+
+        Tries configured layer names, the file basename, and every OGR sublayer.
+        Geometry mismatches are ignored when the candidate layer contains features.
+        """
+        if not file_path or not os.path.isfile(file_path):
+            return []
+
+        candidate_names = self._expand_layer_name_candidates(
+            self._preferred_layer_names(file_path, configured_name)
+            + self._ogr_sub_layer_names(file_path)
+        )
+
+        best_features: List[Any] = []
+        best_layer_name: Optional[str] = None
+
+        for layer_name in candidate_names:
+            uri = f"{file_path}|layername={layer_name}"
+            layer = QgsVectorLayer(uri, layer_name, "ogr")
+            if not layer.isValid():
+                continue
+            layer_features = list(layer.getFeatures())
+            if not layer_features:
+                continue
+            if (
+                expected_geometry_type is not None
+                and not self._is_valid_geometry_type(layer, expected_geometry_type)
+            ):
+                print(
+                    f"Warning: geometry type mismatch for {file_path} ({layer_name}), "
+                    f"importing {len(layer_features)} feature(s) anyway"
+                )
+            if len(layer_features) > len(best_features):
+                best_features = layer_features
+                best_layer_name = layer_name
+
+        if not best_features:
+            fallback = QgsVectorLayer(
+                file_path,
+                self._geopackage_basename(file_path) or "layer",
+                "ogr",
+            )
+            if fallback.isValid():
+                layer_features = list(fallback.getFeatures())
+                if layer_features:
+                    best_features = layer_features
+                    best_layer_name = self._geopackage_basename(file_path)
+
+        if best_features:
+            print(
+                f"Read {len(best_features)} feature(s) from {file_path}"
+                f"{f' (layer: {best_layer_name})' if best_layer_name else ''}"
+            )
+        elif candidate_names:
+            print(f"No features read from {file_path} (tried: {', '.join(candidate_names)})")
+
+        return best_features
+
+    def _load_geopackage_layer(
+        self,
+        file_path: str,
+        preferred_layer_names: Optional[List[str]] = None,
+    ) -> Optional[QgsVectorLayer]:
+        """
+        Load a vector layer from a GeoPackage, trying several OGR layer name candidates.
+
+        Args:
+            file_path: Path to the .gpkg file
+            preferred_layer_names: Ordered layer names to try (configured name, basename, …)
+
+        Returns:
+            A valid QgsVectorLayer, or None if every attempt failed
+        """
+        if not file_path or not os.path.isfile(file_path):
+            return None
+
+        candidates: List[str] = []
+        for name in preferred_layer_names or []:
+            if name and name not in candidates:
+                candidates.append(name)
+
+        best_layer: Optional[QgsVectorLayer] = None
+        best_count = -1
+
+        def _consider(layer: QgsVectorLayer) -> None:
+            nonlocal best_layer, best_count
+            if not layer.isValid():
+                return
+            count = layer.featureCount()
+            if count < 0:
+                count = len(list(layer.getFeatures()))
+            if count > best_count:
+                best_layer = layer
+                best_count = count
+
+        for layer_name in candidates:
+            uri = f"{file_path}|layername={layer_name}"
+            _consider(QgsVectorLayer(uri, layer_name, "ogr"))
+
+        _consider(QgsVectorLayer(file_path, self._geopackage_basename(file_path) or "layer", "ogr"))
+
+        for layer_name in self._ogr_sub_layer_names(file_path):
+            if layer_name in candidates:
+                continue
+            uri = f"{file_path}|layername={layer_name}"
+            _consider(QgsVectorLayer(uri, layer_name, "ogr"))
+
+        if best_layer is not None:
+            return best_layer
+
+        print(
+            f"Failed to load GeoPackage {file_path} "
+            f"(tried: {', '.join(candidates) or 'no candidates'})"
+        )
+        return None
+
     def _load_layer(self, file_path: str, layer_name: str) -> Optional[QgsVectorLayer]:
         """
-        Load a layer from a file path.
-        
-        Args:
-            file_path: Path to the layer file (e.g., 'Objects.gpkg')
-            layer_name: Name to give to the loaded layer in QGIS
-            
-        Returns:
-            QGIS VectorLayer object, or None if loading failed
+        Load a layer from a file path (legacy helper).
+
+        Accepts either a plain .gpkg path or a full OGR URI containing ``|layername=``.
         """
         try:
-            layer = QgsVectorLayer(file_path, layer_name, "ogr")
-            if layer.isValid():
-                return layer
-            else:
-                print(f"Failed to load layer {layer_name} from {file_path}: {layer.lastError().message()}")
-                return None
+            if "|layername=" in file_path:
+                base_path, _, embedded_name = file_path.partition("|layername=")
+                preferred = [embedded_name, layer_name] if layer_name else [embedded_name]
+                return self._load_geopackage_layer(base_path, [n for n in preferred if n])
+            return self._load_geopackage_layer(
+                file_path,
+                [layer_name] if layer_name else None,
+            )
         except Exception as e:
             print(f"Error loading layer {layer_name} from {file_path}: {str(e)}")
             return None
@@ -1106,15 +1663,23 @@ class FieldProjectImportService(QObject):
         Check if the layer's geometry type matches the expected type(s).
         Accepts both string and integer representations for backward compatibility.
         """
+        if expected_type is None:
+            return True
+
         geom_type = layer.geometryType()
         
         # Accept both string and int for expected_type
         if isinstance(expected_type, str):
             expected_type = expected_type.lower()
         
-        # Objects and Features: Polygon or MultiPolygon
+        # Objects and Features: Polygon layers and attribute-only tables (NullGeometry)
         if expected_type in ("polygon", QgsWkbTypes.PolygonGeometry, 2):
-            return geom_type in (QgsWkbTypes.PolygonGeometry, 2)
+            return geom_type in (
+                QgsWkbTypes.PolygonGeometry,
+                2,
+                QgsWkbTypes.NullGeometry,
+                4,
+            )
         # Small Finds: Point, MultiPoint, or NoGeometry
         elif expected_type in ("point", QgsWkbTypes.PointGeometry, 0):
             return geom_type in (QgsWkbTypes.PointGeometry, QgsWkbTypes.NoGeometry, 0, 4)

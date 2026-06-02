@@ -72,7 +72,7 @@ A QGIS plugin for archaeologists to prepare data for field work and import it ba
    - **Objects Field Configuration**: Configure number, level, and recording-area identifier fields for the objects layer
    - **Features Field Configuration**: Configure level and recording-area identifier fields for the features layer
    - **Small Finds Field Configuration**: Configure level and recording-area identifier fields for the small finds layer
-   - **Extra Layers for Field Projects**: Select additional vector layers to include in field projects
+   - **Extra Layers for Field Projects**: Select additional vector layers to include in field projects (recording areas, objects, features, and small finds appear checked and greyed out because they are always included)
 
    **Raster Tab:**
    - **Raster Clipping Offset**: Configure the offset (in meters) for clipping background images to recording areas

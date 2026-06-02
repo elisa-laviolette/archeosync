@@ -35,8 +35,10 @@ from typing import List, Dict, Any, Optional, Union, Tuple
 
 try:
     from ..core.data_structures import WarningData
+    from ..core.ui_responsiveness import maybe_yield_to_ui
 except ImportError:
     from core.data_structures import WarningData
+    from core.ui_responsiveness import maybe_yield_to_ui
 
 from qgis.core import QgsProject, QgsGeometry, QgsPointXY
 from qgis.PyQt.QtCore import QObject
@@ -299,8 +301,12 @@ class OutOfBoundsDetectorService(QObject):
             
             print(f"[DEBUG] Recording area lookup field: {referenced_field_name} (index: {referenced_field_idx})")
             
-            # We don't need to pre-load all recording area geometries
-            # We'll get them on-demand when needed
+            recording_areas_by_value = {}
+            for ra_feature in recording_areas_layer.getFeatures():
+                maybe_yield_to_ui()
+                ra_value = ra_feature.attribute(referenced_field_idx)
+                if ra_value is not None and ra_value != "":
+                    recording_areas_by_value[ra_value] = ra_feature
             
             # Check each feature in the layer
             out_of_bounds_features = []
@@ -314,6 +320,7 @@ class OutOfBoundsDetectorService(QObject):
             print(f"[DEBUG] Starting feature processing...")
             
             for feature in layer.getFeatures():
+                maybe_yield_to_ui()
                 feature_count += 1
                 if feature_count > max_features:
                     print(f"[DEBUG] Warning: Too many features ({feature_count}), limiting to {max_features}")
@@ -332,17 +339,17 @@ class OutOfBoundsDetectorService(QObject):
                 features_with_recording_area += 1
                 
                 # Find the recording area feature that matches this value
-                recording_area_feature = None
-                recording_area_geometry = None
-                
-                # Use the stored field mapping to find the recording area feature
-                for ra_feature in recording_areas_layer.getFeatures():
-                    ra_value = ra_feature.attribute(referenced_field_idx)
-                    if ra_value == recording_area_value:
-                        recording_area_feature = ra_feature
-                        recording_area_geometry = ra_feature.geometry()
-                        print(f"[DEBUG] Found recording area feature: {recording_area_value} -> {ra_value}")
-                        break
+                recording_area_feature = recording_areas_by_value.get(recording_area_value)
+                recording_area_geometry = (
+                    recording_area_feature.geometry()
+                    if recording_area_feature is not None
+                    else None
+                )
+                if recording_area_feature is not None:
+                    print(
+                        f"[DEBUG] Found recording area feature: {recording_area_value} -> "
+                        f"{recording_area_feature.attribute(referenced_field_idx)}"
+                    )
                 
                 if not recording_area_geometry or recording_area_geometry.isEmpty():
                     print(f"[DEBUG] No recording area geometry found for value: {recording_area_value}")
@@ -355,6 +362,7 @@ class OutOfBoundsDetectorService(QObject):
                     features_outside += 1
                     # Calculate the distance to the recording area boundary
                     distance = recording_area_geometry.distance(feature_geometry)
+                    maybe_yield_to_ui(force=True)
                     
                     print(f"[DEBUG] Feature outside recording area: distance = {distance:.3f}m")
                     
@@ -431,6 +439,7 @@ class OutOfBoundsDetectorService(QObject):
                     label_field_idx = layer.fields().indexOf('Label')
                     if label_field_idx >= 0:
                         for feature in layer.getFeatures():
+                            maybe_yield_to_ui()
                             label_value = feature.attribute(label_field_idx)
                             if label_value:
                                 actual_labels.append(str(label_value))

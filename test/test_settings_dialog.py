@@ -487,6 +487,77 @@ class TestSettingsDialog:
         assert "field:id" in all_values
         assert "field:display_code" in all_values
 
+    def test_refresh_extra_layers_disables_selected_main_layers(self):
+        """Core layers should be checked and disabled in the extra layers list."""
+        import ui.settings_dialog as settings_dialog_module
+
+        self.mock_layer_service.get_vector_layers.return_value = [
+            {"id": "recording", "name": "Recording", "feature_count": 10},
+            {"id": "objects", "name": "Objects", "feature_count": 12},
+            {"id": "features", "name": "Features", "feature_count": 8},
+            {"id": "small", "name": "Small finds", "feature_count": 6},
+            {"id": "extra", "name": "Extra layer", "feature_count": 2},
+        ]
+
+        self.dialog._recording_areas_widget.combo_box.clear()
+        self.dialog._recording_areas_widget.combo_box.addItem("Recording", "recording")
+        self.dialog._recording_areas_widget.combo_box.setCurrentIndex(0)
+
+        self.dialog._objects_widget.combo_box.clear()
+        self.dialog._objects_widget.combo_box.addItem("Objects", "objects")
+        self.dialog._objects_widget.combo_box.setCurrentIndex(0)
+
+        self.dialog._features_widget.combo_box.clear()
+        self.dialog._features_widget.combo_box.addItem("Features", "features")
+        self.dialog._features_widget.combo_box.setCurrentIndex(0)
+
+        self.dialog._small_finds_widget.combo_box.clear()
+        self.dialog._small_finds_widget.combo_box.addItem("Small finds", "small")
+        self.dialog._small_finds_widget.combo_box.setCurrentIndex(0)
+
+        self.dialog._refresh_extra_layers_list()
+
+        items_by_id = {}
+        for idx in range(self.dialog._extra_layers_list.count()):
+            item = self.dialog._extra_layers_list.item(idx)
+            items_by_id[item.data(settings_dialog_module._user_role_item_data_role())] = item
+
+        enabled_flag = settings_dialog_module._item_is_enabled_flag()
+        checked_state = settings_dialog_module._checked_check_state()
+        for layer_id in ("recording", "objects", "features", "small"):
+            assert items_by_id[layer_id].checkState() == checked_state
+            assert items_by_id[layer_id].flags() & enabled_flag == 0
+        assert items_by_id["extra"].flags() & enabled_flag != 0
+
+    def test_get_selected_extra_layers_excludes_core_layers(self):
+        """Saving should not persist core layers as optional extras."""
+        import ui.settings_dialog as settings_dialog_module
+
+        self.mock_layer_service.get_vector_layers.return_value = [
+            {"id": "recording", "name": "Recording", "feature_count": 10},
+            {"id": "objects", "name": "Objects", "feature_count": 12},
+            {"id": "extra", "name": "Extra layer", "feature_count": 2},
+        ]
+        self.dialog._recording_areas_widget.combo_box.clear()
+        self.dialog._recording_areas_widget.combo_box.addItem("Recording", "recording")
+        self.dialog._recording_areas_widget.combo_box.setCurrentIndex(0)
+        self.dialog._objects_widget.combo_box.clear()
+        self.dialog._objects_widget.combo_box.addItem("Objects", "objects")
+        self.dialog._objects_widget.combo_box.setCurrentIndex(0)
+        self.dialog._refresh_extra_layers_list()
+
+        checked_state = settings_dialog_module._checked_check_state()
+        extra_item = None
+        for idx in range(self.dialog._extra_layers_list.count()):
+            item = self.dialog._extra_layers_list.item(idx)
+            if item.data(settings_dialog_module._user_role_item_data_role()) == "extra":
+                extra_item = item
+                break
+        assert extra_item is not None
+        extra_item.setCheckState(checked_state)
+
+        assert self.dialog._get_selected_extra_layers() == ["extra"]
+
 
 @pytest.mark.qgis
 @pytest.mark.skipif(not QGIS_AVAILABLE, reason="QGIS not available")
