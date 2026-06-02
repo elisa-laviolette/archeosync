@@ -32,7 +32,11 @@ from qgis.PyQt.QtWidgets import QDockWidget
 # Initialize Qt resources from file resources.py
 from .resources import *
 from .ui.settings_dialog import SettingsDialog
-from .ui.prepare_recording_dialog import PrepareRecordingDialog
+from .ui.prepare_recording_dialog import (
+    PrepareRecordingDialog,
+    PREPARATION_MODE_GLOBAL,
+    EXTENT_SOURCE_LAYER,
+)
 from .ui.import_data_dialog import ImportDataDialog
 from .ui.column_mapping_dialog import ColumnMappingDialog
 from .services import (
@@ -308,27 +312,33 @@ class ArcheoSyncPlugin(QObject):
     def _handle_prepare_recording_accepted(self, dialog) -> None:
         """Handle the case when prepare recording dialog is accepted."""
         try:
-            
-            # Get configuration
+            from qgis.PyQt.QtWidgets import QMessageBox
+
             recording_areas_layer_id = self._settings_manager.get_value('recording_areas_layer', '')
             objects_layer_id = self._settings_manager.get_value('objects_layer', '')
             features_layer_id = self._settings_manager.get_value('features_layer', '')
             small_finds_layer_id = self._settings_manager.get_value('small_finds_layer', '')
             destination_folder = self._settings_manager.get_value('field_projects_folder', '')
-            
+
             if not recording_areas_layer_id or not objects_layer_id or not destination_folder:
-                from qgis.PyQt.QtWidgets import QMessageBox
                 QMessageBox.warning(
                     self._iface.mainWindow(),
                     self.tr("Configuration Error"),
                     self.tr("Required configuration is missing. Please check your settings.")
                 )
                 return
-            
+
+            if dialog.get_preparation_mode() == PREPARATION_MODE_GLOBAL:
+                self._handle_global_prepare_recording_accepted(
+                    dialog=dialog,
+                    destination_folder=destination_folder,
+                    recording_areas_layer_id=recording_areas_layer_id,
+                )
+                return
+
             # Get selected features and extract their data early to avoid QGIS object deletion issues
             recording_layer = self._layer_service.get_layer_by_id(recording_areas_layer_id)
             if not recording_layer:
-                from qgis.PyQt.QtWidgets import QMessageBox
                 QMessageBox.warning(
                     self._iface.mainWindow(),
                     self.tr("Layer Error"),
@@ -488,6 +498,88 @@ class ArcheoSyncPlugin(QObject):
                 self._iface.mainWindow(),
                 self.tr("Error"),
                 self.tr(f"An error occurred during field project preparation:\n{str(e)}")
+            )
+
+    def _handle_global_prepare_recording_accepted(
+        self,
+        dialog,
+        destination_folder: str,
+        recording_areas_layer_id: str,
+    ) -> None:
+        """Create a single global field project from dialog options."""
+        from qgis.PyQt.QtWidgets import QMessageBox
+
+        try:
+            options = dialog.get_global_project_options()
+            project_name = options.get('project_name', '').strip()
+            if not project_name:
+                QMessageBox.warning(
+                    self._iface.mainWindow(),
+                    self.tr("Validation Error"),
+                    self.tr("A project name is required for a global project."),
+                )
+                return
+
+            import re
+            project_name = re.sub(r'[^\w\-_\.]', '_', project_name)
+
+            recording_layer = self._layer_service.get_layer_by_id(recording_areas_layer_id)
+            extent_geometry = None
+            extent_crs_authid = None
+            if options.get('extent_source') == EXTENT_SOURCE_LAYER:
+                layer_id = options.get('extent_layer_id', '')
+                extent_layer = self._layer_service.get_layer_by_id(layer_id)
+                extent_geometry = self._layer_service.resolve_extent_geometry_from_layer(layer_id)
+                if extent_layer and extent_layer.crs().isValid():
+                    extent_crs_authid = extent_layer.crs().authid()
+            else:
+                bounds = options.get('manual_bounds') or {}
+                crs = recording_layer.crs() if recording_layer else None
+                extent_geometry = self._layer_service.resolve_extent_geometry_from_rectangle(
+                    bounds.get('xmin', 0),
+                    bounds.get('ymin', 0),
+                    bounds.get('xmax', 0),
+                    bounds.get('ymax', 0),
+                    crs=crs,
+                )
+                if crs and crs.isValid():
+                    extent_crs_authid = crs.authid()
+
+            if not extent_geometry or extent_geometry.isNull() or extent_geometry.isEmpty():
+                QMessageBox.warning(
+                    self._iface.mainWindow(),
+                    self.tr("Extent Error"),
+                    self.tr("Could not build a valid extent for the global project."),
+                )
+                return
+
+            success = self._project_creation_service.create_global_field_project(
+                extent_geometry_wkt=extent_geometry.asWkt(),
+                destination_folder=destination_folder,
+                project_name=project_name,
+                background_layer_id=None,
+                extent_crs_authid=extent_crs_authid,
+            )
+
+            if success:
+                QMessageBox.information(
+                    self._iface.mainWindow(),
+                    self.tr("Field Project Preparation Complete"),
+                    self.tr(
+                        "Successfully created global field project:\n{folder}/{name}"
+                    ).format(folder=destination_folder, name=project_name),
+                )
+            else:
+                QMessageBox.warning(
+                    self._iface.mainWindow(),
+                    self.tr("Field Project Preparation Failed"),
+                    self.tr("Failed to create the global field project. Check the console for details."),
+                )
+        except Exception as e:
+            QMessageBox.critical(
+                self._iface.mainWindow(),
+                self.tr("Error"),
+                self.tr(f"An error occurred during global project preparation:\n{str(e)}"),
             )
 
     def _resolve_recording_area_variable_value(self, source: str, feature, feature_id: Optional[int], display_name: str) -> str:
@@ -939,7 +1031,9 @@ class ArcheoSyncPlugin(QObject):
                 csv_duplicates=summary_data.get('csv_duplicates', 0),
                 features_duplicates=summary_data.get('features_duplicates', 0),
                 objects_duplicates=summary_data.get('objects_duplicates', 0),
-                small_finds_duplicates=summary_data.get('small_finds_duplicates', 0)
+                small_finds_duplicates=summary_data.get('small_finds_duplicates', 0),
+                alternative_objects_merged_count=summary_data.get('alternative_objects_merged_count', 0),
+                is_global_project=bool(summary_data.get('is_global_project', False)),
             )
             
             # Add warnings to summary data

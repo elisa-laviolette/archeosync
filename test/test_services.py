@@ -332,6 +332,84 @@ class TestQGISLayerService(unittest.TestCase):
     def test_implements_interface(self):
         """Test that QGISLayerService implements ILayerService."""
         self.assertIsInstance(self.layer_service, ILayerService)
+
+    @patch('services.layer_service.QgsGeometry')
+    @patch('services.layer_service.isinstance')
+    @patch.object(QGISLayerService, 'get_layer_by_id')
+    def test_resolve_extent_geometry_without_selection_uses_geometry_union(
+        self, mock_get_layer, mock_isinstance, mock_qgs_geometry
+    ):
+        """Without selection, extent must be the union of features, not the layer bbox."""
+        mock_layer = Mock()
+        mock_layer.isValid.return_value = True
+        mock_layer.selectedFeatureIds.return_value = []
+
+        geom1, geom2 = Mock(), Mock()
+        for geom in (geom1, geom2):
+            geom.isNull.return_value = False
+            geom.isEmpty.return_value = False
+
+        mock_feature1 = Mock()
+        mock_feature1.geometry.return_value = geom1
+        mock_feature2 = Mock()
+        mock_feature2.geometry.return_value = geom2
+        mock_layer.getFeatures.return_value = [mock_feature1, mock_feature2]
+
+        union_result = Mock()
+        union_result.isNull.return_value = False
+        union_result.isEmpty.return_value = False
+        mock_qgs_geometry.unaryUnion.return_value = union_result
+
+        mock_get_layer.return_value = mock_layer
+        mock_isinstance.return_value = True
+
+        result = self.layer_service.resolve_extent_geometry_from_layer("extent_layer")
+
+        mock_qgs_geometry.unaryUnion.assert_called_once_with([geom1, geom2])
+        mock_qgs_geometry.fromRect.assert_not_called()
+        self.assertEqual(result, union_result)
+
+    @patch('services.layer_service.QgsGeometry')
+    @patch('services.layer_service.isinstance')
+    @patch.object(QGISLayerService, 'get_layer_by_id')
+    def test_resolve_extent_geometry_with_selection_uses_selected_only(
+        self, mock_get_layer, mock_isinstance, mock_qgs_geometry
+    ):
+        """With a selection, extent is the union of selected geometries only."""
+        mock_layer = Mock()
+        mock_layer.isValid.return_value = True
+        mock_layer.selectedFeatureIds.return_value = [5]
+
+        geom_selected = Mock()
+        geom_selected.isNull.return_value = False
+        geom_selected.isEmpty.return_value = False
+        geom_other = Mock()
+        geom_other.isNull.return_value = False
+        geom_other.isEmpty.return_value = False
+
+        mock_feature_selected = Mock()
+        mock_feature_selected.id.return_value = 5
+        mock_feature_selected.geometry.return_value = geom_selected
+        mock_feature_other = Mock()
+        mock_feature_other.id.return_value = 99
+        mock_feature_other.geometry.return_value = geom_other
+        mock_layer.getFeatures.return_value = [
+            mock_feature_selected,
+            mock_feature_other,
+        ]
+
+        union_result = Mock()
+        union_result.isNull.return_value = False
+        union_result.isEmpty.return_value = False
+        mock_qgs_geometry.unaryUnion.return_value = union_result
+
+        mock_get_layer.return_value = mock_layer
+        mock_isinstance.return_value = True
+
+        result = self.layer_service.resolve_extent_geometry_from_layer("extent_layer")
+
+        mock_qgs_geometry.unaryUnion.assert_called_once_with([geom_selected])
+        self.assertEqual(result, union_result)
     
     @patch('services.layer_service.QgsProject')
     def test_get_polygon_layers_empty_project(self, mock_project):

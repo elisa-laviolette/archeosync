@@ -335,6 +335,37 @@ class ArcheoSyncConfigurationValidator(IConfigurationValidator):
         
         return errors
 
+    def validate_alternative_objects_layer(self, layer_id: str) -> List[str]:
+        """
+        Validate alternative objects layer configuration (no geometry only).
+
+        Args:
+            layer_id: Layer ID to validate
+
+        Returns:
+            List of validation error messages (empty if valid)
+        """
+        errors = []
+        if not layer_id:
+            return errors
+
+        if not self._layer_service:
+            errors.append("Layer service not available for validation")
+            return errors
+
+        if not self._layer_service.is_valid_no_geometry_layer(layer_id):
+            errors.append(
+                f"Selected alternative objects layer is not a no geometry layer: {layer_id}"
+            )
+
+        layer_info = self._layer_service.get_layer_info(layer_id)
+        if not layer_info:
+            errors.append(f"Layer not found in current project: {layer_id}")
+        elif not layer_info.get('is_valid', False):
+            errors.append(f"Selected layer is not valid: {layer_info.get('name', layer_id)}")
+
+        return errors
+
     def validate_total_station_points_layer(self, layer_id: str) -> List[str]:
         """
         Validate total station points layer configuration.
@@ -712,6 +743,19 @@ class ArcheoSyncConfigurationValidator(IConfigurationValidator):
 
                 if small_finds_field_errors:
                     validation_results['small_finds_layer_fields'] = small_finds_field_errors
+
+        if 'alternative_objects_layer' in settings:
+            validation_results['alternative_objects_layer'] = self.validate_alternative_objects_layer(
+                settings['alternative_objects_layer']
+            )
+            if settings['alternative_objects_layer']:
+                alt_field_validation = self.validate_layer_field_exists(
+                    settings['alternative_objects_layer'],
+                    settings.get('alternative_objects_recording_area_field', ''),
+                    "Alternative objects recording area field",
+                )
+                if not alt_field_validation.is_valid:
+                    validation_results['alternative_objects_layer_fields'] = [alt_field_validation.message]
         
         if 'total_station_points_layer' in settings:
             validation_results['total_station_points_layer'] = self.validate_total_station_points_layer(

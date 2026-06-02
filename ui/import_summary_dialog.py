@@ -274,7 +274,10 @@ class ImportSummaryDockWidget(QDockWidget):
     
     def _setup_ui(self) -> None:
         """Set up the user interface components."""
-        self.setWindowTitle(self.tr("Import Summary"))
+        title_text = self.tr("Import Summary")
+        if getattr(self._summary_data, 'is_global_project', False):
+            title_text = self.tr("Global Project Import Summary")
+        self.setWindowTitle(title_text)
         self.setAllowedAreas(DOCK_WIDGET_AREAS.all_sides)
         self.setFeatures(_default_qdockwidget_features())
         
@@ -286,7 +289,7 @@ class ImportSummaryDockWidget(QDockWidget):
         main_layout = QtWidgets.QVBoxLayout(main_widget)
         
         # Add title
-        title_label = QtWidgets.QLabel(self.tr("Import Summary"))
+        title_label = QtWidgets.QLabel(title_text)
         title_label.setAlignment(_align_center_flag())
         title_label.setStyleSheet("font-size: 14px; font-weight: bold; margin: 5px;")
         main_layout.addWidget(title_label)
@@ -557,6 +560,16 @@ class ImportSummaryDockWidget(QDockWidget):
         objects_layout.addStretch()
         objects_layout.addWidget(objects_count)
         layout.addLayout(objects_layout)
+
+        if getattr(self._summary_data, 'alternative_objects_merged_count', 0) > 0:
+            alt_layout = QtWidgets.QHBoxLayout()
+            alt_label = QtWidgets.QLabel(self.tr("Alternative objects merged (no geometry):"))
+            alt_count = QtWidgets.QLabel(str(self._summary_data.alternative_objects_merged_count))
+            alt_count.setStyleSheet("font-weight: bold; color: #2E8B57;")
+            alt_layout.addWidget(alt_label)
+            alt_layout.addStretch()
+            alt_layout.addWidget(alt_count)
+            layout.addLayout(alt_layout)
         
         # Duplicates count
         if self._summary_data.objects_duplicates > 0:

@@ -340,9 +340,11 @@ class TestLayerService(unittest.TestCase):
 
     def test_is_valid_no_geometry_layer_valid(self):
         """Test validation of valid no geometry layer."""
-        # Create mock layer with no geometry
         mock_layer = Mock()
-        mock_layer.geometryType.return_value = 0  # NoGeometry type
+        mock_layer.isValid.return_value = True
+        mock_layer.isSpatial.return_value = False
+        mock_layer.geometryType.return_value = 4  # QgsWkbTypes.NullGeometry in QGIS 3
+        mock_layer.wkbType.return_value = 100  # QgsWkbTypes.NoGeometry
         
         with patch.object(self.layer_service, 'get_layer_by_id', return_value=mock_layer):
             result = self.layer_service.is_valid_no_geometry_layer("test_layer")
@@ -350,9 +352,11 @@ class TestLayerService(unittest.TestCase):
 
     def test_is_valid_no_geometry_layer_invalid(self):
         """Test validation of invalid no geometry layer."""
-        # Create mock layer with point geometry
         mock_layer = Mock()
+        mock_layer.isValid.return_value = True
+        mock_layer.isSpatial.return_value = True
         mock_layer.geometryType.return_value = 1  # Point geometry type
+        mock_layer.wkbType.return_value = 1
         
         with patch.object(self.layer_service, 'get_layer_by_id', return_value=mock_layer):
             result = self.layer_service.is_valid_no_geometry_layer("test_layer")
@@ -425,7 +429,9 @@ class TestLayerService(unittest.TestCase):
         mock_crs.authid.return_value = "EPSG:4326"
         mock_no_geom_layer.crs.return_value = mock_crs
         mock_no_geom_layer.featureCount.return_value = 10
-        mock_no_geom_layer.geometryType.return_value = 0  # NoGeometry type
+        mock_no_geom_layer.geometryType.return_value = 4  # NullGeometry
+        mock_no_geom_layer.wkbType.return_value = 100  # NoGeometry
+        mock_no_geom_layer.isSpatial.return_value = False
         mock_no_geom_layer.isValid.return_value = True
 
         # Prepare the layers dict

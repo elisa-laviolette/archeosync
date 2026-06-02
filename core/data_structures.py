@@ -39,6 +39,8 @@ class ImportSummaryData:
     features_duplicates: int = 0
     objects_duplicates: int = 0
     small_finds_duplicates: int = 0
+    alternative_objects_merged_count: int = 0
+    is_global_project: bool = False
     duplicate_objects_warnings: List[Union[str, WarningData]] = None
     skipped_numbers_warnings: List[Union[str, WarningData]] = None
     out_of_bounds_warnings: List[Union[str, WarningData]] = None

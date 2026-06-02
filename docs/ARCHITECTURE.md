@@ -184,9 +184,24 @@ QGIS-specific implementation for layer operations including:
 - Empty layer creation for QField offline editing
 - Layer structure copying with styling preservation
 
+### Field project metadata (`services/field_project_metadata.py`)
+- **`archeosync_project.json`**: Written beside each generated `.qgs` with `project_kind` (`global` | `recording_area`), extent WKT, and CRS
+- Legacy projects without metadata are treated as per-recording-area imports
+
+### Global field projects
+**Creation (`QGISProjectCreationService.create_global_field_project`)**:
+- Clips configured vector layers (objects, features, small finds, recording areas) to a user-defined extent (layer source: union of selected features, or union of all features when nothing is selected—not the layer bounding box). Recording areas are exported with the same SQL primary-key subset + Geopackage copy as per-zone projects (`id IN (...)`); spatial clipping for other layers uses `QgsFeatureRequest` when needed so PostgreSQL is not sent QGIS-only `$geometry` SQL. Attribute-only extra layers (e.g. lookup tables) are copied in full.
+- Exports optional **alternative objects** table (no geometry) filtered by recording areas in the extent
+- Includes **extra field layers** and **recording areas** as read-only context (`setReadOnly`, `archeosync/readonly` custom property)
+- No project variables or form default injection
+
+**Import (`FieldProjectImportService`)**:
+- Skips Geopackages for recording areas and extra layers
+- Merges alternative-object rows into **New Objects** with null geometry (same validation path as geometric objects)
+
 ### FieldProjectImportService
 QGIS-specific implementation for field project import and processing including:
-- **Data.gpkg Processing**: Automatically processes data.gpkg files from field projects
+- **Geopackage import**: Processes per-layer `.gpkg` files matching configured layer names
 - **Layer Merging**: Merges Objects, Features, and Small Finds layers from multiple projects
 - **Duplicate Detection**: Automatically filters out features that already exist in the current project's Objects, Features, and Small Finds layers
 - **Smart Feature Comparison**: Uses unique signatures based on attributes and geometry to identify duplicates (excluding layer-specific feature IDs)
@@ -206,7 +221,8 @@ Service for detecting duplicate objects with the same recording area and number:
 
 ### QGISProjectCreationService
 QGIS-specific implementation for field project creation and packaging including:
-- Automatic empty layer creation ("Objects", "Features")
+- **Per recording area**: Automatic empty layer creation ("Objects", "Features")
+- **Global project**: Extent-clipped copies of existing data; read-only context layers
 - Layer configuration for offline editing with extra layers support
 - Project packaging with area of interest
 - Automatic cleanup of temporary layers

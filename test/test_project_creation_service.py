@@ -62,6 +62,149 @@ class TestProjectCreationService:
             self.raster_processing_service
         )
 
+    def test_filter_expression_uses_qgis_syntax(self):
+        assert self.project_service._filter_expression_uses_qgis_syntax(
+            "intersects($geometry, geom_from_wkt('POINT(0 0)'))"
+        )
+        assert not self.project_service._filter_expression_uses_qgis_syntax(
+            '"zone_id" IN (1, 2)'
+        )
+
+    def test_create_filtered_layer_routes_qgis_syntax_without_subset_string(self):
+        """QGIS expressions must not be passed to setSubsetString (breaks PostgreSQL)."""
+        mock_layer = Mock(spec=QgsVectorLayer)
+        self.layer_service.get_layer_by_id.return_value = mock_layer
+
+        with patch.object(
+            self.project_service,
+            "_export_layer_with_feature_request",
+            return_value=True,
+        ) as mock_export:
+            result = self.project_service._create_filtered_layer(
+                "layer1",
+                "/tmp/out.gpkg",
+                "Test",
+                "intersects($geometry, geom_from_wkt('POINT(0 0)'))",
+                Mock(),
+            )
+
+        assert result is True
+        mock_export.assert_called_once()
+        mock_layer.setSubsetString.assert_not_called()
+
+    def test_export_extra_layer_for_global_project_non_spatial_uses_full_copy(self):
+        self.layer_service.is_valid_no_geometry_layer.return_value = True
+        with patch.object(
+            self.project_service,
+            "_create_layer_copy",
+            return_value=True,
+        ) as mock_copy:
+            result = self.project_service._export_extra_layer_for_global_project(
+                extra_layer_id="types",
+                output_path="/tmp/types.gpkg",
+                layer_name="Types d'objets",
+                extent_geometry=QgsGeometry.fromWkt(
+                    "POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))"
+                ),
+                project=Mock(),
+            )
+
+        assert result is True
+        mock_copy.assert_called_once()
+        self.layer_service.is_valid_no_geometry_layer.assert_called_once_with("types")
+
+    def test_build_feature_id_subset_expression(self):
+        """Subset filter should use QGIS internal feature ids ($id)."""
+        expression = self.project_service._build_feature_id_subset_expression([1, 5, 10])
+        assert expression == "$id IN (1, 5, 10)"
+
+    def test_build_feature_id_subset_expression_empty(self):
+        assert self.project_service._build_feature_id_subset_expression([]) is None
+
+    def test_build_extent_intersects_subset_expression(self):
+        extent = QgsGeometry.fromWkt("POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))")
+        mock_layer = Mock(spec=QgsVectorLayer)
+        self.layer_service.transform_geometry_to_layer_crs.return_value = extent
+
+        expression = self.project_service._build_extent_intersects_subset_expression(
+            extent,
+            mock_layer,
+            "EPSG:2154",
+        )
+
+        assert expression is not None
+        assert expression.startswith("intersects($geometry, geom_from_wkt('POLYGON")
+        self.layer_service.transform_geometry_to_layer_crs.assert_called_once()
+
+    def test_build_sql_primary_key_in_filter_matches_zone_style_id(self):
+        mock_layer = Mock(spec=QgsVectorLayer)
+        mock_layer.primaryKeyFields.return_value = []
+        mock_layer.fields.return_value.indexOf.return_value = 0
+        expression = self.project_service._build_sql_primary_key_in_filter(mock_layer, [1, 5])
+        assert expression == "id IN (1, 5)"
+
+    def test_build_sql_primary_key_in_filter_uses_declared_pk(self):
+        mock_layer = Mock(spec=QgsVectorLayer)
+        mock_layer.primaryKeyFields.return_value = ["zone_id"]
+        expression = self.project_service._build_sql_primary_key_in_filter(mock_layer, [10])
+        assert expression == '"zone_id" IN (10)'
+
+    def test_create_global_recording_areas_uses_sql_filtered_layer_when_ids_present(self):
+        """Global recording areas should use the same SQL subset export as zone projects."""
+        extent = QgsGeometry.fromWkt("POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))")
+        mock_recording_layer = Mock(spec=QgsVectorLayer)
+        mock_recording_layer.primaryKeyFields.return_value = []
+        mock_recording_layer.fields.return_value.indexOf.return_value = 0
+        mock_project = Mock()
+        self.layer_service.get_recording_area_ids_intersecting_geometry.return_value = [1, 2]
+        self.layer_service.get_layer_info.side_effect = lambda layer_id: {
+            "ra": {"name": "Zones", "id": "ra"},
+            "obj": {"name": "Objects", "id": "obj"},
+        }.get(layer_id)
+        self.layer_service.get_layer_by_id.return_value = mock_recording_layer
+
+        with patch("os.makedirs"), patch("os.path.exists", return_value=False), \
+             patch.object(self.project_service, "_create_clipped_raster", return_value=True), \
+             patch.object(
+                 self.project_service,
+                 "_create_filtered_layer",
+                 return_value=True,
+             ) as mock_filtered_export, \
+             patch.object(
+                 self.project_service,
+                 "_create_extent_intersect_layer_copy",
+                 return_value=True,
+             ), \
+             patch.object(self.project_service, "_apply_readonly_layers_in_project"), \
+             patch.object(self.project_service, "_copy_project_relations_to_field_project"), \
+             patch.object(self.project_service, "_inject_relations_into_qgs_xml"), \
+             patch("services.project_creation_service.write_project_metadata"), \
+             patch("services.project_creation_service.QgsProject") as mock_qgs_project:
+            instance = Mock()
+            instance.crs.return_value = QgsCoordinateReferenceSystem("EPSG:4326")
+            mock_qgs_project.return_value = instance
+            instance.write.return_value = True
+            instance.mapLayers.return_value = {}
+
+            self.settings_manager.get_value.side_effect = lambda key, default=None: {
+                "recording_areas_layer": "ra",
+                "objects_layer": "obj",
+                "features_layer": "",
+                "small_finds_layer": "",
+                "extra_field_layers": [],
+                "alternative_objects_layer": "",
+            }.get(key, default)
+
+            result = self.project_service.create_global_field_project(
+                extent_geometry_wkt=extent.asWkt(),
+                destination_folder="/tmp/archeosync_test",
+                project_name="global_test",
+            )
+
+        assert result is True
+        mock_filtered_export.assert_called_once()
+        assert mock_filtered_export.call_args[0][3] == "id IN (1, 2)"
+
     def test_has_relationship_with_recording_areas_with_relation(self):
         """Test relationship detection when a proper QGIS relation exists."""
         # Mock QGIS project and relation manager
@@ -593,6 +736,25 @@ class TestProjectCreationService:
         assert expressions_by_index[6] == '@recording_area'
         assert expressions_by_index[7] == '@level'
 
+    def test_parse_unsupported_geopackage_field_error_french_message(self):
+        field_name = self.project_service._parse_unsupported_geopackage_field_error(
+            (4, "Type non supporté pour le champ section_geometry")
+        )
+        assert field_name == "section_geometry"
+
+    def test_collect_non_exportable_field_names_detects_geometry_columns(self):
+        mock_layer = Mock(spec=QgsVectorLayer)
+        mock_layer.isValid.return_value = True
+        mock_field = Mock()
+        mock_field.name.return_value = "section_geometry"
+        mock_field.typeName.return_value = "geometry"
+        mock_field.isGeometryType.return_value = True
+        mock_layer.fields.return_value = [mock_field]
+
+        drop_names = self.project_service._collect_non_exportable_field_names(mock_layer)
+
+        assert drop_names == {"section_geometry"}
+
     def test_copy_layer_to_geopackage_retries_without_unsupported_field(self, tmp_path):
         """
         When the writer reports an unsupported attribute type (e.g. geometry-valued attribute),
@@ -632,6 +794,37 @@ class TestProjectCreationService:
         assert len(captured_field_names) == 2
         assert "section_geometry" in captured_field_names[0]
         assert "section_geometry" not in captured_field_names[1]
+
+    def test_copy_layer_to_geopackage_retries_without_unsupported_field_french(self, tmp_path):
+        """French QGIS installations must still trigger the retry-without-field logic."""
+        from qgis.PyQt.QtCore import QVariant
+        from qgis.core import QgsVectorLayer, QgsField, QgsFeature
+
+        src = QgsVectorLayer("Point?crs=EPSG:4326", "src", "memory")
+        assert src.isValid()
+        src.startEditing()
+        src.addAttribute(QgsField("id", QVariant.Int))
+        src.addAttribute(QgsField("section_geometry", QVariant.String))
+        src.updateFields()
+        feature = QgsFeature(src.fields())
+        feature.setAttributes([1, "dummy"])
+        src.addFeature(feature)
+        src.commitChanges()
+
+        output_path = str(tmp_path / "out_fr.gpkg")
+        captured_field_names = []
+
+        def write_side_effect(layer, path, options):
+            captured_field_names.append([fld.name() for fld in layer.fields()])
+            if len(captured_field_names) == 1:
+                return (4, "Type non supporté pour le champ section_geometry")
+            return (0, "")
+
+        with patch("qgis.core.QgsVectorFileWriter.writeAsVectorFormatV2", side_effect=write_side_effect):
+            ok = self.project_service._copy_layer_to_geopackage(src, output_path, "Layer")
+
+        assert ok is True
+        assert "section_geometry" not in captured_field_names[-1]
 
     def test_copy_project_relations_to_field_project_remaps_layer_ids(self):
         """Relations must be recreated in the field project with remapped layer IDs."""

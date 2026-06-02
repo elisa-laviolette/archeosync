@@ -300,6 +300,110 @@ class TestDistanceDetectorService(unittest.TestCase):
             warnings = self.service.detect_distance_warnings()
 
         self.assertEqual(warnings, [])
+
+    def test_detect_distance_warnings_skips_definitive_points_to_temp_objects(self):
+        """Imported objects without imported points should not be matched to definitive points."""
+        temp_objects_layer = Mock()
+        temp_objects_layer.name.return_value = "New Objects"
+        temp_objects_layer.fields.return_value.indexOf.return_value = 0
+
+        definitive_points_layer = Mock()
+        definitive_points_layer.name.return_value = "Points topo"
+        definitive_points_layer.fields.return_value.indexOf.return_value = 0
+
+        definitive_objects_layer = Mock()
+        definitive_objects_layer.name.return_value = "Objets relevés"
+        definitive_objects_layer.fields.return_value.indexOf.return_value = 0
+
+        points_field = Mock()
+        points_field.name.return_value = "identifier"
+        objects_field = Mock()
+        objects_field.name.return_value = "identifier"
+        temp_objects_layer.fields.return_value.__getitem__ = lambda idx: objects_field
+        definitive_points_layer.fields.return_value.__getitem__ = lambda idx: points_field
+        definitive_objects_layer.fields.return_value.__getitem__ = lambda idx: objects_field
+
+        self.settings_manager.get_value.side_effect = lambda key, default=None: {
+            'enable_distance_warnings': True,
+            'distance_max_distance': 0.05,
+            'total_station_points_layer': 'points_id',
+            'objects_layer': 'objects_id'
+        }.get(key, default)
+
+        # No imported points layer in the project.
+        self.layer_service.get_layer_by_name.side_effect = (
+            lambda name: temp_objects_layer if name == "New Objects" else None
+        )
+        self.layer_service.get_layer_by_id.side_effect = lambda lid: (
+            definitive_points_layer if lid == 'points_id'
+            else definitive_objects_layer if lid == 'objects_id'
+            else None
+        )
+
+        mock_relation = Mock()
+        mock_relation.name.return_value = "test_relation"
+        mock_relation.fieldPairs.return_value = {"identifier": "identifier"}
+        mock_relation.referencingLayer.return_value = definitive_points_layer
+        mock_relation.referencedLayer.return_value = definitive_objects_layer
+        mock_relation.id.return_value = "rel_direct"
+
+        definitive_point_feature = Mock()
+        definitive_point_feature.id.return_value = 2
+        definitive_point_feature.geometry.return_value = QgsGeometry.fromPointXY(QgsPointXY(10, 10))
+        definitive_point_feature.attribute.return_value = "obj1"
+
+        temp_object_feature = Mock()
+        temp_object_feature.id.return_value = 3
+        temp_object_feature.geometry.return_value = QgsGeometry.fromPointXY(QgsPointXY(0, 0))
+        temp_object_feature.attribute.return_value = "obj1"
+
+        definitive_object_feature = Mock()
+        definitive_object_feature.id.return_value = 4
+        definitive_object_feature.geometry.return_value = QgsGeometry.fromPointXY(QgsPointXY(0, 0))
+        definitive_object_feature.attribute.return_value = "obj1"
+
+        definitive_points_layer.getFeatures.return_value = [definitive_point_feature]
+        temp_objects_layer.getFeatures.return_value = [temp_object_feature]
+        definitive_objects_layer.getFeatures.return_value = [definitive_object_feature]
+
+        with patch('qgis.core.QgsProject') as mock_project:
+            mock_relation_manager = Mock()
+            mock_relation_manager.relations.return_value = {"test_relation": mock_relation}
+            mock_project.instance.return_value.relationManager.return_value = mock_relation_manager
+
+            warnings = self.service.detect_distance_warnings()
+
+        self.assertEqual(warnings, [])
+
+    def test_object_feature_has_point_association_with_empty_identifiers(self):
+        """If first/last identifiers exist but are empty, object is not associated to points."""
+        fields = QgsFields()
+        fields.append(QgsField("first_identifier", QVariant.String))
+        fields.append(QgsField("last_identifier", QVariant.String))
+        layer = Mock()
+        layer.fields.return_value = fields
+
+        feature = QgsFeature(fields)
+        feature.setAttribute("first_identifier", "")
+        feature.setAttribute("last_identifier", None)
+
+        has_assoc = self.service._object_feature_has_point_association(feature, layer)
+        self.assertFalse(has_assoc)
+
+    def test_object_feature_has_point_association_with_values(self):
+        """A non-empty first/last identifier means object-point association exists."""
+        fields = QgsFields()
+        fields.append(QgsField("first_identifier", QVariant.String))
+        fields.append(QgsField("last_identifier", QVariant.String))
+        layer = Mock()
+        layer.fields.return_value = fields
+
+        feature = QgsFeature(fields)
+        feature.setAttribute("first_identifier", "P100")
+        feature.setAttribute("last_identifier", "")
+
+        has_assoc = self.service._object_feature_has_point_association(feature, layer)
+        self.assertTrue(has_assoc)
     
     def test_detect_distance_warnings_overlapping_features(self):
         """Test detection when features overlap (no distance issue)."""
@@ -396,6 +500,80 @@ class TestDistanceDetectorService(unittest.TestCase):
         
         self.assertIn("15.0 cm", message)
         self.assertIn("5.0 cm", message)
+
+    def test_detect_distance_issues_ignores_empty_relation_values(self):
+        """Empty identifiers must not be considered as valid point/object links."""
+        points_layer = Mock()
+        objects_layer = Mock()
+        points_layer.name.return_value = "Imported_CSV_Points"
+        objects_layer.name.return_value = "New Objects"
+
+        points_fields = QgsFields()
+        points_fields.append(QgsField("identifier", QVariant.String))
+        points_layer.fields.return_value = points_fields
+
+        objects_fields = QgsFields()
+        objects_fields.append(QgsField("identifier", QVariant.String))
+        objects_layer.fields.return_value = objects_fields
+
+        point_feature = QgsFeature(points_fields)
+        point_feature.setGeometry(QgsGeometry.fromPointXY(QgsPointXY(0, 0)))
+        point_feature.setAttribute("identifier", "")
+
+        object_feature = QgsFeature(objects_fields)
+        object_feature.setGeometry(QgsGeometry.fromPointXY(QgsPointXY(1, 0)))
+        object_feature.setAttribute("identifier", "")
+
+        points_layer.getFeatures.return_value = [point_feature]
+        objects_layer.getFeatures.return_value = [object_feature]
+
+        warnings = self.service._detect_distance_issues(
+            points_layer,
+            objects_layer,
+            0,
+            0,
+            True,
+        )
+        self.assertEqual(warnings, [])
+
+    def test_create_distance_warning_uses_unique_identifiers(self):
+        """Repeated pairings should not inflate object/point counts in warning text."""
+        points_layer = Mock()
+        points_layer.name.return_value = "Imported_CSV_Points"
+        objects_layer = Mock()
+        objects_layer.name.return_value = "New Objects"
+
+        points_fields = QgsFields()
+        points_fields.append(QgsField("identifier", QVariant.String))
+        points_layer.fields.return_value = points_fields
+
+        objects_fields = QgsFields()
+        objects_fields.append(QgsField("identifier", QVariant.String))
+        objects_layer.fields.return_value = objects_fields
+
+        p1 = QgsFeature(points_fields)
+        p1.setGeometry(QgsGeometry.fromPointXY(QgsPointXY(0, 0)))
+        p1.setAttribute("identifier", "A1")
+        p2 = QgsFeature(points_fields)
+        p2.setGeometry(QgsGeometry.fromPointXY(QgsPointXY(0, 0.2)))
+        p2.setAttribute("identifier", "A1")
+
+        o1 = QgsFeature(objects_fields)
+        o1.setGeometry(QgsGeometry.fromPointXY(QgsPointXY(1, 0)))
+        o1.setAttribute("identifier", "A1")
+
+        points_layer.getFeatures.return_value = [p1, p2]
+        objects_layer.getFeatures.return_value = [o1]
+
+        warnings = self.service._detect_distance_issues(
+            points_layer,
+            objects_layer,
+            0,
+            0,
+            True,
+        )
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("1 points and 1 objects", warnings[0].message)
     
     def test_get_relation_between_layers(self):
         """Test finding relations between layers."""
@@ -509,6 +687,30 @@ class TestDistanceDetectorService(unittest.TestCase):
             layer, "ref_chantier", is_point_layer=True
         )
         self.assertIsNone(found)
+
+    def test_find_relation_field_identifier_does_not_fallback_to_id(self):
+        """For standard names like identifier, do not fallback to id/fid."""
+        fields = QgsFields()
+        fields.append(QgsField("id", QVariant.String))
+        layer = Mock()
+        layer.fields.return_value = fields
+
+        found = self.service._find_relation_field_on_layer(
+            layer, "identifier", is_point_layer=False
+        )
+        self.assertIsNone(found)
+
+    def test_find_relation_field_id_can_still_match_id(self):
+        """Explicit id relation should still resolve to id field."""
+        fields = QgsFields()
+        fields.append(QgsField("id", QVariant.String))
+        layer = Mock()
+        layer.fields.return_value = fields
+
+        found = self.service._find_relation_field_on_layer(
+            layer, "id", is_point_layer=False
+        )
+        self.assertEqual(found, "id")
 
     def test_case_insensitive_relation_matching(self):
         """Test that relation values are matched case-insensitively."""

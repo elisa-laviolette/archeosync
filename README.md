@@ -83,6 +83,10 @@ A QGIS plugin for archaeologists to prepare data for field work and import it ba
 
 ### Prepare Recording
 
+Choose **Per recording area** (default) or **Global project** at the top of the dialog.
+
+#### Per recording area
+
 1. Select recording areas in your QGIS project
 2. Go to **Plugins > ArcheoSync > Prepare Recording**
 3. The dialog will show:
@@ -97,7 +101,14 @@ A QGIS plugin for archaeologists to prepare data for field work and import it ba
 4. Configure the next values for objects and features
 5. Click OK to create QGIS field projects for each selected recording area
 
-**Project Naming**: When a level is defined, field project names will be the display name of the recording area followed by '_' and the content of the Next level column. For example: "Test Area_A" or "Excavation Site_Level 1". If no level is defined, only the recording area name is used.
+#### Global project
+
+1. Open **Plugins > ArcheoSync > Prepare Recording** and select **Global project**
+2. Enter a **project name** and define an **extent** (manual coordinates or from a map layer; if the layer has a selection, the union of selected geometries is used, otherwise the union of all features on that layer)
+3. Optional: configure **Alternative Objects Layer** (no geometry) in settings — exported as a separate Geopackage for table-based recording
+4. Click **Prepare Global Project** to create one project with configured layers clipped to the extent, plus read-only **recording areas** and **extra field layers** for context (no project variables or form defaults)
+
+**Project Naming** (per recording area): When a level is defined, field project names will be the display name of the recording area followed by '_' and the content of the Next level column. For example: "Test Area_A" or "Excavation Site_Level 1". If no level is defined, only the recording area name is used.
 
 **Project Variable (`recording_area`)**: In **Settings > Layers & Fields**, the new **Recording Area Variable Source** option lets you choose what is written to the `recording_area` project variable: the display value, the feature ID, or a specific field from the recording areas layer.
 
@@ -139,8 +150,8 @@ The raster processing service uses GDAL for high-quality clipping operations and
 - **Error Handling**: Comprehensive error handling with user-friendly messages
 
 #### Field Project Import Features
-- **Data.gpkg Processing**: Automatically processes data.gpkg files from field projects
 - **Layer Merging**: Merges Objects, Features, and Small Finds layers from multiple projects
+- **Global projects**: Recording areas and extra layers in the project folder are not imported (read-only context). Rows from the alternative objects Geopackage are merged into **New Objects** with null geometry, together with objects from per-area projects
 - **Duplicate Detection**: Automatically filters out features that already exist in the current project's Objects, Features, and Small Finds layers
 - **Smart Feature Comparison**: Uses unique signatures based on attributes and geometry to identify duplicates (excluding layer-specific feature IDs)
 - **Layer Creation**: Creates new "New Objects", "New Features", and "New Small Finds" layers in the project

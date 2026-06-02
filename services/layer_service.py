@@ -24,7 +24,25 @@ Usage:
 from typing import List, Optional, Dict, Any, Tuple
 import os
 import tempfile
-from qgis.core import QgsProject, QgsVectorLayer, QgsRasterLayer, QgsExpression, QgsExpressionContext, QgsExpressionContextUtils, QgsFields, QgsField, QgsFeature, QgsGeometry, QgsPointXY, QgsEditFormConfig, QgsDefaultValue, QgsCoordinateReferenceSystem
+from qgis.core import (
+    QgsProject,
+    QgsVectorLayer,
+    QgsRasterLayer,
+    QgsExpression,
+    QgsExpressionContext,
+    QgsExpressionContextUtils,
+    QgsFields,
+    QgsField,
+    QgsFeature,
+    QgsGeometry,
+    QgsPointXY,
+    QgsEditFormConfig,
+    QgsDefaultValue,
+    QgsCoordinateReferenceSystem,
+    QgsCoordinateTransform,
+    QgsWkbTypes,
+    QgsProject,
+)
 from qgis.PyQt.QtCore import QVariant
 
 try:
@@ -44,6 +62,35 @@ class QGISLayerService(ILayerService):
     def __init__(self):
         """Initialize the layer service."""
         pass
+
+    def _vector_layer_has_no_geometry(self, layer: QgsVectorLayer) -> bool:
+        """
+        Return True for attribute-only vector layers (no geometry column).
+
+        QGIS 3 uses QgsWkbTypes.NullGeometry (4) and isSpatial() == False for tables.
+        Older code incorrectly treated geometryType() == 0 as no geometry; that value is
+        UnknownGeometry in QGIS 3, not NullGeometry.
+        """
+        if not isinstance(layer, QgsVectorLayer) or not layer.isValid():
+            return False
+
+        try:
+            if hasattr(layer, "isSpatial") and not layer.isSpatial():
+                return True
+        except Exception:
+            pass
+
+        geom_type = layer.geometryType()
+        if geom_type == QgsWkbTypes.NullGeometry:
+            return True
+
+        try:
+            if QgsWkbTypes.flatType(layer.wkbType()) == QgsWkbTypes.NoGeometry:
+                return True
+        except Exception:
+            pass
+
+        return False
     
     def get_polygon_layers(self) -> List[Dict[str, Any]]:
         """
@@ -208,9 +255,7 @@ class QGISLayerService(ILayerService):
         project = QgsProject.instance()
         
         for layer in project.mapLayers().values():
-            # Check if it's a vector layer with no geometry
-            # Geometry types: 0 = NoGeometry
-            if isinstance(layer, QgsVectorLayer) and layer.geometryType() == 0:
+            if isinstance(layer, QgsVectorLayer) and self._vector_layer_has_no_geometry(layer):
                 layer_info = {
                     'id': layer.id(),
                     'name': layer.name(),
@@ -346,9 +391,8 @@ class QGISLayerService(ILayerService):
         layer = self.get_layer_by_id(layer_id)
         if layer is None:
             return False
-        
-        # Geometry types: 0 = NoGeometry
-        return layer.geometryType() == 0
+
+        return self._vector_layer_has_no_geometry(layer)
     
     def get_layer_info(self, layer_id: str) -> Optional[Dict[str, Any]]:
         """
@@ -1314,4 +1358,164 @@ class QGISLayerService(ILayerService):
         except Exception as e:
             print(f"[DEBUG] Exception during virtual field copying: {e}")
             import traceback
-            print(f"[DEBUG] Traceback: {traceback.format_exc()}") 
+            print(f"[DEBUG] Traceback: {traceback.format_exc()}")
+
+    def resolve_extent_geometry_from_layer(self, layer_id: str) -> Optional[QgsGeometry]:
+        """
+        Build an extent geometry from a vector layer.
+
+        Uses the union of selected feature geometries when a selection exists;
+        otherwise the union of all feature geometries. The layer bounding box is
+        only used as a last resort when the layer has no usable geometries.
+
+        Args:
+            layer_id: Source vector layer ID in the current project
+
+        Returns:
+            Extent geometry in the layer CRS, or None if the layer is invalid
+        """
+        layer = self.get_layer_by_id(layer_id)
+        if not layer or not isinstance(layer, QgsVectorLayer) or not layer.isValid():
+            return None
+
+        selected_ids = layer.selectedFeatureIds()
+        if selected_ids:
+            geometries = []
+            for feature in layer.getFeatures():
+                if feature.id() not in selected_ids:
+                    continue
+                geom = feature.geometry()
+                if geom and not geom.isNull() and not geom.isEmpty():
+                    geometries.append(geom)
+            if geometries:
+                combined = QgsGeometry.unaryUnion(geometries)
+                if combined and not combined.isNull() and not combined.isEmpty():
+                    return combined
+
+        geometries = []
+        for feature in layer.getFeatures():
+            geom = feature.geometry()
+            if geom and not geom.isNull() and not geom.isEmpty():
+                geometries.append(geom)
+        if geometries:
+            combined = QgsGeometry.unaryUnion(geometries)
+            if combined and not combined.isNull() and not combined.isEmpty():
+                return combined
+
+        extent = layer.extent()
+        if extent.isNull() or extent.isEmpty():
+            return None
+        return QgsGeometry.fromRect(extent)
+
+    def resolve_extent_geometry_from_rectangle(
+        self,
+        xmin: float,
+        ymin: float,
+        xmax: float,
+        ymax: float,
+        crs: Optional[QgsCoordinateReferenceSystem] = None,
+    ) -> Optional[QgsGeometry]:
+        """
+        Build a rectangular extent geometry from numeric bounds.
+
+        Args:
+            xmin: Minimum x coordinate
+            ymin: Minimum y coordinate
+            xmax: Maximum x coordinate
+            ymax: Maximum y coordinate
+            crs: Optional CRS (unused for geometry construction; callers set project CRS)
+
+        Returns:
+            Rectangular polygon geometry, or None when bounds are invalid
+        """
+        del crs  # CRS is applied at project level
+        if xmin >= xmax or ymin >= ymax:
+            return None
+        from qgis.core import QgsRectangle
+        return QgsGeometry.fromRect(QgsRectangle(xmin, ymin, xmax, ymax))
+
+    def transform_geometry_to_layer_crs(
+        self,
+        geometry: QgsGeometry,
+        target_layer: QgsVectorLayer,
+        source_crs_authid: Optional[str] = None,
+    ) -> Optional[QgsGeometry]:
+        """
+        Return a copy of a geometry transformed into a layer's CRS when needed.
+
+        Args:
+            geometry: Geometry to transform (e.g. project extent)
+            target_layer: Layer whose CRS is the target
+            source_crs_authid: Auth id of the geometry CRS; defaults to project CRS
+
+        Returns:
+            Transformed geometry copy, or None if invalid
+        """
+        if not geometry or geometry.isNull() or geometry.isEmpty():
+            return None
+        if not target_layer or not isinstance(target_layer, QgsVectorLayer):
+            return None
+
+        result = QgsGeometry(geometry)
+        target_crs = target_layer.crs()
+        if not target_crs.isValid():
+            return result
+
+        if source_crs_authid:
+            source_crs = QgsCoordinateReferenceSystem(source_crs_authid)
+        else:
+            source_crs = QgsProject.instance().crs()
+
+        if not source_crs.isValid() or source_crs == target_crs:
+            return result
+
+        try:
+            transform = QgsCoordinateTransform(
+                source_crs,
+                target_crs,
+                QgsProject.instance(),
+            )
+            result.transform(transform)
+            return result
+        except Exception as exc:
+            print(f"Error transforming geometry to layer CRS: {exc}")
+            return result
+
+    def get_recording_area_ids_intersecting_geometry(
+        self,
+        recording_areas_layer_id: str,
+        extent_geometry: QgsGeometry,
+        extent_crs_authid: Optional[str] = None,
+    ) -> List[Any]:
+        """
+        Return recording-area identifier values for features intersecting an extent.
+
+        Uses QgsFeature.id() values, which match relation filters elsewhere in the plugin.
+
+        Args:
+            recording_areas_layer_id: Recording areas layer ID
+            extent_geometry: Extent geometry in a CRS compatible with the layer
+
+        Returns:
+            List of feature IDs (may be empty)
+        """
+        layer = self.get_layer_by_id(recording_areas_layer_id)
+        if not layer or not isinstance(layer, QgsVectorLayer) or not extent_geometry:
+            return []
+
+        extent_in_layer_crs = self.transform_geometry_to_layer_crs(
+            extent_geometry,
+            layer,
+            extent_crs_authid,
+        )
+        if not extent_in_layer_crs:
+            return []
+
+        ids = []
+        for feature in layer.getFeatures():
+            geom = feature.geometry()
+            if not geom or geom.isNull() or geom.isEmpty():
+                continue
+            if geom.intersects(extent_in_layer_crs):
+                ids.append(feature.id())
+        return ids 

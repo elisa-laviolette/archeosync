@@ -520,6 +520,27 @@ class IProjectCreationService(ABC):
         """
         pass
 
+    @abstractmethod
+    def create_global_field_project(self,
+                                    extent_geometry_wkt: str,
+                                    destination_folder: str,
+                                    project_name: str,
+                                    background_layer_id: Optional[str] = None,
+                                    extent_crs_authid: Optional[str] = None) -> bool:
+        """
+        Create a global QGIS field project clipped to an extent.
+
+        Args:
+            extent_geometry_wkt: WKT polygon defining the project extent
+            destination_folder: Parent folder for the new project directory
+            project_name: Directory and .qgs base name
+            background_layer_id: Optional raster layer to clip as background
+
+        Returns:
+            True if project creation was successful, False otherwise
+        """
+        pass
+
 
 class ICSVImportService(ABC):
     """Interface for CSV import operations."""

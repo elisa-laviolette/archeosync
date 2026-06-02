@@ -42,6 +42,7 @@ try:
     from qgis.core import QgsVectorLayer, QgsFeature, QgsProject, QgsVectorFileWriter, QgsGeometry, QgsWkbTypes
     from qgis.PyQt.QtCore import QVariant, QObject
     from ..core.interfaces import IFieldProjectImportService, ISettingsManager, ILayerService, IFileSystemService, ValidationResult
+    from .field_project_metadata import get_project_kind, is_global_project
 except ImportError:
     # For testing without QGIS
     QgsVectorLayer = None
@@ -51,6 +52,7 @@ except ImportError:
     QgsGeometry = None
     QVariant = None
     from core.interfaces import IFieldProjectImportService, ISettingsManager, ILayerService, IFileSystemService, ValidationResult
+    from services.field_project_metadata import get_project_kind, is_global_project, PROJECT_KIND_GLOBAL
 
 
 class FieldProjectImportService(QObject):
@@ -109,6 +111,8 @@ class FieldProjectImportService(QObject):
             all_objects_features = []
             all_features_features = []
             all_small_finds_features = []
+            alternative_objects_merged_count = 0
+            global_projects_count = 0
             processed_projects = 0
             failed_projects = 0
             
@@ -122,6 +126,16 @@ class FieldProjectImportService(QObject):
                     all_objects_features.extend(individual_features.get('objects', []))
                     all_features_features.extend(individual_features.get('features', []))
                     all_small_finds_features.extend(individual_features.get('small_finds', []))
+
+                    if is_global_project(project_path):
+                        global_projects_count += 1
+                        alt_features = self._process_alternative_objects_layers(
+                            layer_files.get('alternative_objects', []),
+                            configured_layers,
+                        )
+                        converted = self._convert_alternative_features_to_objects(alt_features)
+                        alternative_objects_merged_count += len(converted)
+                        all_objects_features.extend(converted)
                     
                     processed_projects += 1
                     
@@ -166,7 +180,10 @@ class FieldProjectImportService(QObject):
                 'small_finds_count': len(filtered_small_finds_features),
                 'features_duplicates': len(all_features_features) - len(filtered_features_features),
                 'objects_duplicates': len(all_objects_features) - len(filtered_objects_features),
-                'small_finds_duplicates': len(all_small_finds_features) - len(filtered_small_finds_features)
+                'small_finds_duplicates': len(all_small_finds_features) - len(filtered_small_finds_features),
+                'alternative_objects_merged_count': alternative_objects_merged_count,
+                'global_projects_count': global_projects_count,
+                'is_global_project': global_projects_count > 0,
             }
             
             # Prepare result message
@@ -223,7 +240,8 @@ class FieldProjectImportService(QObject):
         layer_files = {
             'objects': [],
             'features': [],
-            'small_finds': []
+            'small_finds': [],
+            'alternative_objects': [],
         }
         
         if not os.path.exists(project_path):
@@ -233,6 +251,9 @@ class FieldProjectImportService(QObject):
         for filename in os.listdir(project_path):
             file_path = os.path.join(project_path, filename)
             if not os.path.isfile(file_path):
+                continue
+
+            if self._is_readonly_context_layer_file(filename):
                 continue
             
             # Check for Objects layer files
@@ -245,8 +266,14 @@ class FieldProjectImportService(QObject):
             # Check for Small Finds layer files
             elif self._is_small_finds_layer_file(filename):
                 layer_files['small_finds'].append(file_path)
+            elif self._is_alternative_objects_layer_file(filename):
+                layer_files['alternative_objects'].append(file_path)
         
         return layer_files
+
+    def get_project_kind(self, project_path: str) -> str:
+        """Return the metadata project kind for a field project directory."""
+        return get_project_kind(project_path)
     
     def _get_configured_layer_info(self) -> Dict[str, Any]:
         """
@@ -647,6 +674,95 @@ class FieldProjectImportService(QObject):
             print(f"Error creating merged layer {layer_name}: {str(e)}")
             return None
     
+    def _is_readonly_context_layer_file(self, filename: str) -> bool:
+        """Return True for recording-area or extra layer exports that must not be imported."""
+        if self._is_recording_areas_layer_file(filename):
+            return True
+        return self._is_extra_field_layer_file(filename)
+
+    def _is_recording_areas_layer_file(self, filename: str) -> bool:
+        """Check if a filename represents the recording areas layer file."""
+        filename_lower = filename.lower()
+        if not filename_lower.endswith('.gpkg'):
+            return False
+        name_without_ext = filename_lower[:-5]
+        recording_areas_layer_id = self._settings_manager.get_value('recording_areas_layer', '')
+        if recording_areas_layer_id:
+            layer_info = self._layer_service.get_layer_info(recording_areas_layer_id)
+            if layer_info and layer_info['name'].lower() == name_without_ext:
+                return True
+        return False
+
+    def _is_extra_field_layer_file(self, filename: str) -> bool:
+        """Check if a filename matches a configured extra field layer."""
+        filename_lower = filename.lower()
+        if not filename_lower.endswith('.gpkg'):
+            return False
+        name_without_ext = filename_lower[:-5]
+        extra_layers = self._settings_manager.get_value('extra_field_layers', []) or []
+        for layer_id in extra_layers:
+            layer_info = self._layer_service.get_layer_info(layer_id)
+            if layer_info and layer_info['name'].lower() == name_without_ext:
+                return True
+        return False
+
+    def _is_alternative_objects_layer_file(self, filename: str) -> bool:
+        """Check if a filename represents the alternative objects layer file."""
+        filename_lower = filename.lower()
+        if not filename_lower.endswith('.gpkg'):
+            return False
+        name_without_ext = filename_lower[:-5]
+        alternative_layer_id = self._settings_manager.get_value('alternative_objects_layer', '')
+        if alternative_layer_id:
+            layer_info = self._layer_service.get_layer_info(alternative_layer_id)
+            if layer_info and layer_info['name'].lower() == name_without_ext:
+                return True
+        return False
+
+    def _process_alternative_objects_layers(
+        self,
+        file_paths: List[str],
+        configured_layers: Dict[str, Any],
+    ) -> List[Any]:
+        """Load features from alternative objects Geopackage files."""
+        features: List[Any] = []
+        alt_layer_id = self._settings_manager.get_value('alternative_objects_layer', '')
+        alt_info = self._layer_service.get_layer_info(alt_layer_id) if alt_layer_id else None
+        expected_name = alt_info['name'] if alt_info else None
+        for file_path in file_paths:
+            if not expected_name:
+                continue
+            layer = self._load_layer(f"{file_path}|layername={expected_name}", expected_name)
+            if layer:
+                features.extend(list(layer.getFeatures()))
+        return features
+
+    def _convert_alternative_features_to_objects(self, source_features: List[Any]) -> List[Any]:
+        """
+        Map alternative-object rows onto the configured objects layer schema.
+
+        Returned features have no geometry so they can be merged into New Objects.
+        """
+        target_layer = self._get_existing_layer('objects_layer')
+        if not target_layer or not source_features:
+            return []
+
+        converted = []
+        target_fields = target_layer.fields()
+        for source_feature in source_features:
+            new_feature = QgsFeature(target_fields)
+            for field in source_feature.fields():
+                field_name = field.name()
+                if field_name.lower() in ('fid', 'ogc_fid'):
+                    continue
+                target_idx = target_fields.indexOf(field_name)
+                if target_idx >= 0:
+                    new_feature.setAttribute(target_idx, source_feature.attribute(field.name()))
+            empty_geometry = QgsGeometry()
+            new_feature.setGeometry(empty_geometry)
+            converted.append(new_feature)
+        return converted
+
     def _is_objects_layer_file(self, filename: str) -> bool:
         """Check if a filename represents an Objects layer file."""
         filename_lower = filename.lower()

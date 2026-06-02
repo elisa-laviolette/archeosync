@@ -316,15 +316,17 @@ class DistanceDetectorService:
             objects_by_relation = {}
             for feature in total_station_points_layer.getFeatures():
                 relation_value = feature.attribute(points_field_idx)
-                if relation_value is not None:
-                    relation_value_key = str(relation_value).lower()
+                if self._is_valid_relation_value(relation_value):
+                    relation_value_key = self._relation_value_key(relation_value)
                     if relation_value_key not in points_by_relation:
                         points_by_relation[relation_value_key] = []
                     points_by_relation[relation_value_key].append(feature)
             for feature in objects_layer.getFeatures():
+                if not self._object_feature_has_point_association(feature, objects_layer):
+                    continue
                 relation_value = feature.attribute(objects_field_idx)
-                if relation_value is not None:
-                    relation_value_key = str(relation_value).lower()
+                if self._is_valid_relation_value(relation_value):
+                    relation_value_key = self._relation_value_key(relation_value)
                     if relation_value_key not in objects_by_relation:
                         objects_by_relation[relation_value_key] = []
                     objects_by_relation[relation_value_key].append(feature)
@@ -379,8 +381,8 @@ class DistanceDetectorService:
                     objects_filter = f'"{objects_layer.fields()[objects_field_idx].name()}" = \'{objects_filter_value}\''
                     
                     # Get feature identifiers for the warning message
-                    point_identifiers = [issue['point_identifier'] for issue in issues]
-                    object_identifiers = [issue['object_identifier'] for issue in issues]
+                    point_identifiers = sorted({issue['point_identifier'] for issue in issues})
+                    object_identifiers = sorted({issue['object_identifier'] for issue in issues})
                     max_distance = max(issue['distance'] for issue in issues)
                     
                     # Create structured warning data
@@ -717,27 +719,31 @@ class DistanceDetectorService:
                 to_idx = hops[i][1]
                 bucket: Dict[str, List[Any]] = defaultdict(list)
                 for feature in feats[i + 1]:
-                    val = feature.attribute(to_idx)
-                    if val is None:
+                    if i + 1 == len(feats) - 1 and not self._object_feature_has_point_association(
+                        feature, combo_layers[i + 1]
+                    ):
                         continue
-                    bucket[str(val).lower()].append(feature)
+                    val = feature.attribute(to_idx)
+                    if not self._is_valid_relation_value(val):
+                        continue
+                    bucket[self._relation_value_key(val)].append(feature)
                 indices.append(dict(bucket))
 
             distance_issues: List[Dict[str, Any]] = []
             for point_feature in feats[0]:
                 v0 = point_feature.attribute(hops[0][0])
-                if v0 is None:
+                if not self._is_valid_relation_value(v0):
                     continue
-                current_matches = indices[0].get(str(v0).lower(), [])
+                current_matches = indices[0].get(self._relation_value_key(v0), [])
                 for hi in range(1, len(hops)):
                     nxt: List[Any] = []
                     from_idx = hops[hi][0]
                     idx_map = indices[hi]
                     for candidate in current_matches:
                         vk = candidate.attribute(from_idx)
-                        if vk is None:
+                        if not self._is_valid_relation_value(vk):
                             continue
-                        nxt.extend(idx_map.get(str(vk).lower(), []))
+                        nxt.extend(idx_map.get(self._relation_value_key(vk), []))
                     current_matches = nxt
                 for object_feature in current_matches:
                     point_geom = point_feature.geometry()
@@ -748,7 +754,7 @@ class DistanceDetectorService:
                         continue
                     distance = point_geom.distance(object_geom)
                     if distance > self._max_distance_meters:
-                        chain_key = str(v0).lower()
+                        chain_key = self._relation_value_key(v0)
                         distance_issues.append({
                             'point_feature': point_feature,
                             'object_feature': object_feature,
@@ -783,8 +789,8 @@ class DistanceDetectorService:
                 objects_filter = (
                     f'"{objects_combo.fields()[objects_field_idx].name()}" = \'{objects_filter_value}\''
                 )
-                point_identifiers = [issue['point_identifier'] for issue in issues]
-                object_identifiers = [issue['object_identifier'] for issue in issues]
+                point_identifiers = sorted({issue['point_identifier'] for issue in issues})
+                object_identifiers = sorted({issue['object_identifier'] for issue in issues})
                 max_distance = max(issue['distance'] for issue in issues)
                 warning_data = WarningData(
                     message=self._create_distance_warning(
@@ -910,6 +916,45 @@ class DistanceDetectorService:
                         return f.name()
         return None 
 
+    def _is_valid_relation_value(self, relation_value: Any) -> bool:
+        """
+        Return whether a relation value can safely link points and objects.
+
+        Empty strings and common textual null markers are treated as missing.
+        This avoids false matches where many features share an "empty" identifier.
+        """
+        if relation_value is None:
+            return False
+        text_value = str(relation_value).strip()
+        if not text_value:
+            return False
+        if text_value.lower() in {"null", "none", "nan"}:
+            return False
+        return True
+
+    def _relation_value_key(self, relation_value: Any) -> str:
+        """Normalize a relation value to a stable case-insensitive key."""
+        return str(relation_value).strip().lower()
+
+    def _object_feature_has_point_association(self, feature: Any, objects_layer: Any) -> bool:
+        """
+        Return whether an object feature has an explicit point association.
+
+        When `first_identifier` / `last_identifier` fields exist, they must contain at
+        least one non-empty value. This prevents distance warnings on imported objects
+        that are not linked to points yet.
+        """
+        if not feature or not objects_layer:
+            return False
+        fields = objects_layer.fields()
+        first_idx = fields.indexOf("first_identifier")
+        last_idx = fields.indexOf("last_identifier")
+        if first_idx < 0 and last_idx < 0:
+            return True
+        first_val = feature.attribute(first_idx) if first_idx >= 0 else None
+        last_val = feature.attribute(last_idx) if last_idx >= 0 else None
+        return self._is_valid_relation_value(first_val) or self._is_valid_relation_value(last_val)
+
     def _find_matching_field(self, layer, target_field_name: str) -> Optional[str]:
         """
         Find a field in the given layer whose name matches target_field_name (case-insensitive).
@@ -945,13 +990,16 @@ class DistanceDetectorService:
         if is_point_layer:
             alternates = (
                 'ptid', 'pt_id', 'label_court', 'label', 'identifiant', 'identifier',
-                'code', 'numero', 'number', 'object_number', 'id',
+                'code', 'numero', 'number', 'object_number',
             )
         else:
             alternates = (
                 'label_court', 'label', 'object_number', 'number', 'identifiant', 'identifier',
-                'code', 'numero', 'ptid', 'pt_id', 'id',
+                'code', 'numero', 'ptid', 'pt_id',
             )
+        # Only allow id-like fallback when the relation itself explicitly targets id/fid.
+        if key in {'id', 'fid'}:
+            alternates = alternates + ('id', 'fid')
         seen = {key}
         for alt in alternates:
             al = alt.lower()

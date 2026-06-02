@@ -381,6 +381,14 @@ class SettingsDialog(QtWidgets.QDialog):
         form_layout.addRow(self.tr("Small Finds Layer:"), self._small_finds_widget)
         self._small_finds_fields_widget = self._create_child_fields_widget(is_small_finds=True)
         form_layout.addRow("", self._small_finds_fields_widget)
+
+        # Alternative objects layer (no geometry, global field projects only)
+        self._alternative_objects_widget = self._create_layer_selector(
+            self.tr("-- Select a no geometry layer --")
+        )
+        form_layout.addRow(self.tr("Alternative Objects Layer:"), self._alternative_objects_widget)
+        self._alternative_objects_fields_widget = self._create_alternative_objects_fields_widget()
+        form_layout.addRow("", self._alternative_objects_fields_widget)
         
         # Total station points layer
         self._total_station_points_widget = self._create_layer_selector(self.tr("-- Select a point or multipoint layer --"))
@@ -699,6 +707,19 @@ class SettingsDialog(QtWidgets.QDialog):
             self._features_level_field_combo = level_combo
 
         return widget
+
+    def _create_alternative_objects_fields_widget(self) -> QtWidgets.QWidget:
+        """Create recording-area field selector for the alternative objects layer."""
+        widget = QtWidgets.QWidget()
+        layout = QtWidgets.QFormLayout(widget)
+        layout.setContentsMargins(20, 0, 0, 0)
+
+        self._alternative_objects_recording_area_field_combo = QtWidgets.QComboBox()
+        self._alternative_objects_recording_area_field_combo.setMinimumWidth(250)
+        layout.addRow(self.tr("Recording Area Field:"), self._alternative_objects_recording_area_field_combo)
+
+        widget.setVisible(False)
+        return widget
     
     def _create_extra_layers_widget(self) -> QtWidgets.QWidget:
         """Create a widget for selecting extra vector layers to include in QField projects."""
@@ -835,6 +856,8 @@ class SettingsDialog(QtWidgets.QDialog):
         self._features_widget.combo_box.currentIndexChanged.connect(self._on_features_layer_changed)
         self._small_finds_widget.refresh_button.clicked.connect(self._refresh_small_finds_layer_list)
         self._small_finds_widget.combo_box.currentIndexChanged.connect(self._on_small_finds_layer_changed)
+        self._alternative_objects_widget.refresh_button.clicked.connect(self._refresh_alternative_objects_layer_list)
+        self._alternative_objects_widget.combo_box.currentIndexChanged.connect(self._on_alternative_objects_layer_changed)
         self._total_station_points_widget.refresh_button.clicked.connect(self._refresh_total_station_points_layer_list)
         # Extra layers connections
         self._extra_layers_widget.refresh_button.clicked.connect(self._refresh_extra_layers_list)
@@ -1010,6 +1033,31 @@ class SettingsDialog(QtWidgets.QDialog):
         except Exception as e:
             self._show_error(self.tr("Layer Error"), self.tr(f"Failed to refresh small finds layer list: {str(e)}"))
 
+    def _refresh_alternative_objects_layer_list(self) -> None:
+        """Refresh no-geometry layers available for alternative objects."""
+        try:
+            combo_box = self._alternative_objects_widget.combo_box
+            current_layer_id = combo_box.currentData()
+
+            combo_box.clear()
+            combo_box.addItem(self.tr("-- Select a no geometry layer --"), "")
+
+            layers = self._layer_service.get_no_geometry_layers()
+            layers.sort(key=lambda item: item['name'].lower())
+            for layer_info in layers:
+                display_text = self.tr(f"{layer_info['name']} ({layer_info['feature_count']} features)")
+                combo_box.addItem(display_text, layer_info['id'])
+
+            if current_layer_id:
+                index = combo_box.findData(current_layer_id)
+                if index >= 0:
+                    combo_box.setCurrentIndex(index)
+        except Exception as e:
+            self._show_error(
+                self.tr("Layer Error"),
+                self.tr(f"Failed to refresh alternative objects layer list: {str(e)}"),
+            )
+
     def _refresh_total_station_points_layer_list(self) -> None:
         """Refresh the list of available point and multipoint layers for total station points."""
         try:
@@ -1177,6 +1225,35 @@ class SettingsDialog(QtWidgets.QDialog):
             )
         else:
             self._small_finds_fields_widget.setVisible(False)
+
+    def _on_alternative_objects_layer_changed(self) -> None:
+        """Handle changes to the alternative objects layer selection."""
+        layer_id = self._alternative_objects_widget.combo_box.currentData()
+        if layer_id:
+            self._alternative_objects_fields_widget.setVisible(True)
+            self._populate_alternative_objects_fields(layer_id)
+        else:
+            self._alternative_objects_fields_widget.setVisible(False)
+
+    def _populate_alternative_objects_fields(self, layer_id: str) -> None:
+        """Populate recording-area field choices for alternative objects."""
+        try:
+            previous = self._alternative_objects_recording_area_field_combo.currentData()
+            fields = self._layer_service.get_layer_fields(layer_id)
+            if fields is None:
+                return
+            combo = self._alternative_objects_recording_area_field_combo
+            combo.clear()
+            combo.addItem(self.tr("-- Select recording area field --"), "")
+            for field in fields:
+                if self._is_field_compatible_with_recording_area_source(field):
+                    combo.addItem(self.tr(f"{field['name']} ({field['type']})"), field['name'])
+            if previous:
+                index = combo.findData(previous)
+                if index >= 0:
+                    combo.setCurrentIndex(index)
+        except Exception as e:
+            self._show_error(self.tr("Field Error"), self.tr(f"Failed to populate alternative objects fields: {str(e)}"))
 
     def _populate_child_fields(self, layer_id: str, recording_area_combo: QtWidgets.QComboBox, level_combo: QtWidgets.QComboBox) -> None:
         """Populate recording-area and level fields for features/small finds."""
@@ -1387,6 +1464,21 @@ class SettingsDialog(QtWidgets.QDialog):
                         if index >= 0:
                             self._features_level_field_combo.setCurrentIndex(index)
             
+            # Load alternative objects layer
+            alternative_objects_layer_id = self._settings_manager.get_value('alternative_objects_layer', '')
+            self._refresh_alternative_objects_layer_list()
+            if alternative_objects_layer_id:
+                index = self._alternative_objects_widget.combo_box.findData(alternative_objects_layer_id)
+                if index >= 0:
+                    self._alternative_objects_widget.combo_box.setCurrentIndex(index)
+                    alt_recording_field = self._settings_manager.get_value(
+                        'alternative_objects_recording_area_field', ''
+                    )
+                    if alt_recording_field:
+                        field_index = self._alternative_objects_recording_area_field_combo.findData(alt_recording_field)
+                        if field_index >= 0:
+                            self._alternative_objects_recording_area_field_combo.setCurrentIndex(field_index)
+
             # Load small finds layer
             small_finds_layer_id = self._settings_manager.get_value('small_finds_layer', '')
             self._refresh_small_finds_layer_list()  # Populate the combo box
@@ -1474,6 +1566,10 @@ class SettingsDialog(QtWidgets.QDialog):
                 'small_finds_layer': small_finds_layer_id,
                 'small_finds_recording_area_field': self._settings_manager.get_value('small_finds_recording_area_field', ''),
                 'small_finds_level_field': self._settings_manager.get_value('small_finds_level_field', ''),
+                'alternative_objects_layer': alternative_objects_layer_id,
+                'alternative_objects_recording_area_field': self._settings_manager.get_value(
+                    'alternative_objects_recording_area_field', ''
+                ),
                 'total_station_points_layer': total_station_points_layer_id,
 
                 'raster_clipping_offset': float(raster_offset),
@@ -1521,6 +1617,10 @@ class SettingsDialog(QtWidgets.QDialog):
                 'small_finds_layer': self._small_finds_widget.combo_box.currentData(),
                 'small_finds_recording_area_field': self._small_finds_recording_area_field_combo.currentData(),
                 'small_finds_level_field': self._small_finds_level_field_combo.currentData(),
+                'alternative_objects_layer': self._alternative_objects_widget.combo_box.currentData(),
+                'alternative_objects_recording_area_field': (
+                    self._alternative_objects_recording_area_field_combo.currentData()
+                ),
                 'total_station_points_layer': self._total_station_points_widget.combo_box.currentData(),
 
                 'raster_clipping_offset': self._raster_offset_spinbox.value(),

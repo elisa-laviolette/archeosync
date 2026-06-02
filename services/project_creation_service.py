@@ -44,14 +44,33 @@ import re
 import uuid
 import xml.etree.ElementTree as ET
 from typing import Optional, Any, Dict, List
-from qgis.core import QgsProject, QgsVectorLayer, QgsRasterLayer, QgsFeature, QgsGeometry, QgsWkbTypes, QgsVectorFileWriter, QgsCoordinateReferenceSystem, QgsDefaultValue
+from qgis.core import (
+    QgsProject,
+    QgsVectorLayer,
+    QgsRasterLayer,
+    QgsFeature,
+    QgsFeatureRequest,
+    QgsGeometry,
+    QgsWkbTypes,
+    QgsVectorFileWriter,
+    QgsCoordinateReferenceSystem,
+    QgsDefaultValue,
+)
 from qgis.PyQt.QtWidgets import QMessageBox
 from qgis.PyQt.QtCore import QObject
 
 try:
     from ..core.interfaces import ISettingsManager, ILayerService, IFileSystemService, IRasterProcessingService
+    from .field_project_metadata import (
+        PROJECT_KIND_GLOBAL,
+        write_project_metadata,
+    )
 except ImportError:
     from core.interfaces import ISettingsManager, ILayerService, IFileSystemService, IRasterProcessingService
+    from services.field_project_metadata import (
+        PROJECT_KIND_GLOBAL,
+        write_project_metadata,
+    )
 
 
 class QGISProjectCreationService(QObject):
@@ -337,6 +356,220 @@ class QGISProjectCreationService(QObject):
 
         except Exception as e:
             print(f"Error creating field project: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return False
+
+    def create_global_field_project(self,
+                                    extent_geometry_wkt: str,
+                                    destination_folder: str,
+                                    project_name: str,
+                                    background_layer_id: Optional[str] = None,
+                                    extent_crs_authid: Optional[str] = None) -> bool:
+        """
+        Create a global field project with layers clipped to an extent.
+
+        Recording areas and extra layers are exported as read-only context.
+        No project variables or form default expressions are applied.
+        """
+        try:
+            if not extent_geometry_wkt or not destination_folder or not project_name:
+                raise ValueError("Extent, destination folder, and project name are required")
+
+            recording_areas_layer_id = self._settings_manager.get_value('recording_areas_layer', '')
+            objects_layer_id = self._settings_manager.get_value('objects_layer', '')
+            if not recording_areas_layer_id or not objects_layer_id:
+                raise ValueError("Recording areas and objects layers must be configured")
+
+            extent_geometry = QgsGeometry.fromWkt(extent_geometry_wkt)
+            if not extent_geometry or extent_geometry.isNull() or extent_geometry.isEmpty():
+                raise ValueError("Invalid extent geometry")
+
+            project_dir = os.path.join(destination_folder, project_name)
+            if not os.path.exists(project_dir):
+                os.makedirs(project_dir)
+
+            project = QgsProject()
+            source_to_target_layer_ids: Dict[str, str] = {}
+            readonly_layer_ids: List[str] = []
+
+            recording_layer = self._layer_service.get_layer_by_id(recording_areas_layer_id)
+            if recording_layer:
+                project.setCrs(recording_layer.crs())
+
+            recording_area_ids = self._layer_service.get_recording_area_ids_intersecting_geometry(
+                recording_areas_layer_id,
+                extent_geometry,
+                extent_crs_authid,
+            )
+            extra_layers = self._settings_manager.get_value('extra_field_layers', []) or []
+
+            if background_layer_id:
+                raster_offset = self._settings_manager.get_value('raster_clipping_offset', 0.0)
+                self._create_clipped_raster(
+                    raster_layer_id=background_layer_id,
+                    recording_area_geometry=extent_geometry_wkt,
+                    output_path=os.path.join(project_dir, "background.tif"),
+                    project=project,
+                    offset_meters=raster_offset,
+                )
+
+            layer_exports = [
+                (recording_areas_layer_id, True),
+                (objects_layer_id, False),
+            ]
+            features_layer_id = self._settings_manager.get_value('features_layer', '')
+            if features_layer_id:
+                layer_exports.append((features_layer_id, False))
+            small_finds_layer_id = self._settings_manager.get_value('small_finds_layer', '')
+            if small_finds_layer_id:
+                layer_exports.append((small_finds_layer_id, False))
+
+            for layer_id, is_readonly in layer_exports:
+                layer_info = self._layer_service.get_layer_info(layer_id)
+                if not layer_info:
+                    continue
+                layer_name = layer_info['name']
+                output_path = os.path.join(project_dir, f"{layer_name}.gpkg")
+                if layer_id == recording_areas_layer_id:
+                    success = self._create_global_recording_areas_layer_copy(
+                        recording_areas_layer_id=layer_id,
+                        recording_area_ids=recording_area_ids,
+                        output_path=output_path,
+                        layer_name=layer_name,
+                        extent_geometry=extent_geometry,
+                        project=project,
+                        extent_crs_authid=extent_crs_authid,
+                    )
+                else:
+                    success = self._create_extent_intersect_layer_copy(
+                        source_layer_id=layer_id,
+                        output_path=output_path,
+                        layer_name=layer_name,
+                        extent_geometry=extent_geometry,
+                        project=project,
+                        extent_crs_authid=extent_crs_authid,
+                    )
+                if not success:
+                    print(f"Warning: Failed to export layer {layer_name} for global project")
+                else:
+                    self._try_register_created_layer_id_mapping(
+                        project=project,
+                        source_layer_id=layer_id,
+                        created_layer_name=layer_name,
+                        created_layer_source_path=output_path,
+                        source_to_target_layer_ids=source_to_target_layer_ids,
+                    )
+                    if is_readonly:
+                        readonly_layer_ids.append(layer_id)
+
+            alternative_objects_layer_id = self._settings_manager.get_value('alternative_objects_layer', '')
+            if alternative_objects_layer_id:
+                alt_info = self._layer_service.get_layer_info(alternative_objects_layer_id)
+                if alt_info:
+                    alt_name = alt_info['name']
+                    alt_path = os.path.join(project_dir, f"{alt_name}.gpkg")
+                    if self._create_alternative_objects_layer_copy(
+                        source_layer_id=alternative_objects_layer_id,
+                        recording_areas_layer_id=recording_areas_layer_id,
+                        recording_area_ids=recording_area_ids,
+                        output_path=alt_path,
+                        layer_name=alt_name,
+                        project=project,
+                    ):
+                        self._try_register_created_layer_id_mapping(
+                            project=project,
+                            source_layer_id=alternative_objects_layer_id,
+                            created_layer_name=alt_name,
+                            created_layer_source_path=alt_path,
+                            source_to_target_layer_ids=source_to_target_layer_ids,
+                        )
+
+            for extra_layer_id in extra_layers:
+                if extra_layer_id == recording_areas_layer_id:
+                    continue
+                extra_info = self._layer_service.get_layer_info(extra_layer_id)
+                if not extra_info:
+                    continue
+                extra_name = extra_info['name']
+                extra_path = os.path.join(project_dir, f"{extra_name}.gpkg")
+                if self._has_relationship_with_recording_areas(extra_layer_id, recording_areas_layer_id):
+                    filter_expression = self._get_relationship_filter_expression_for_ids(
+                        extra_layer_id,
+                        recording_areas_layer_id,
+                        recording_area_ids,
+                    )
+                    if filter_expression:
+                        success = self._create_filtered_layer(
+                            source_layer_id=extra_layer_id,
+                            output_path=extra_path,
+                            layer_name=extra_name,
+                            filter_expression=filter_expression,
+                            project=project,
+                        )
+                    else:
+                        success = self._export_extra_layer_for_global_project(
+                            extra_layer_id=extra_layer_id,
+                            output_path=extra_path,
+                            layer_name=extra_name,
+                            extent_geometry=extent_geometry,
+                            project=project,
+                            extent_crs_authid=extent_crs_authid,
+                        )
+                else:
+                    success = self._export_extra_layer_for_global_project(
+                        extra_layer_id=extra_layer_id,
+                        output_path=extra_path,
+                        layer_name=extra_name,
+                        extent_geometry=extent_geometry,
+                        project=project,
+                        extent_crs_authid=extent_crs_authid,
+                    )
+                if success:
+                    self._try_register_created_layer_id_mapping(
+                        project=project,
+                        source_layer_id=extra_layer_id,
+                        created_layer_name=extra_name,
+                        created_layer_source_path=extra_path,
+                        source_to_target_layer_ids=source_to_target_layer_ids,
+                    )
+                    readonly_layer_ids.append(extra_layer_id)
+
+            self._apply_readonly_layers_in_project(project, readonly_layer_ids, source_to_target_layer_ids)
+
+            self._copy_project_relations_to_field_project(
+                source_project=QgsProject.instance(),
+                target_project=project,
+                source_to_target_layer_ids=source_to_target_layer_ids,
+            )
+
+            for layer in project.mapLayers().values():
+                if isinstance(layer, QgsVectorLayer):
+                    self._layer_service._fix_valuerelation_layer_references(layer, project)
+
+            project_path = os.path.join(project_dir, f"{project_name}.qgs")
+            if not project.write(project_path):
+                raise RuntimeError(f"Failed to save project: {project_path}")
+
+            self._inject_relations_into_qgs_xml(
+                qgs_path=project_path,
+                source_project=QgsProject.instance(),
+                target_project=project,
+                source_to_target_layer_ids=source_to_target_layer_ids,
+            )
+
+            crs_string = self._get_crs_string(project.crs()) if project.crs() else ""
+            write_project_metadata(
+                project_dir,
+                PROJECT_KIND_GLOBAL,
+                extent_geometry_wkt,
+                crs_string,
+            )
+
+            print(f"Successfully created global field project: {project_path}")
+            return True
+        except Exception as e:
+            print(f"Error creating global field project: {str(e)}")
             import traceback
             traceback.print_exc()
             return False
@@ -851,6 +1084,137 @@ class QGISProjectCreationService(QObject):
         except Exception as e:
             print(f"[DEBUG] Failed to inject relations into .qgs XML: {str(e)}")
 
+    def _filter_expression_uses_qgis_syntax(self, filter_expression: str) -> bool:
+        """Return True when the expression uses QGIS tokens (e.g. $geometry, $id)."""
+        return "$" in filter_expression
+
+    def _export_memory_layer_to_project(
+        self,
+        memory_layer: QgsVectorLayer,
+        source_layer: QgsVectorLayer,
+        output_path: str,
+        layer_name: str,
+        project: QgsProject,
+    ) -> bool:
+        """Write a memory layer to Geopackage and register it in the target project."""
+        success = self._copy_layer_to_geopackage(
+            memory_layer,
+            output_path,
+            layer_name,
+            properties_source_layer=source_layer,
+        )
+        if not success:
+            return False
+        layer = QgsVectorLayer(output_path, layer_name, "ogr")
+        if layer.isValid():
+            layer.triggerRepaint()
+            project.addMapLayer(layer)
+            return True
+        return False
+
+    def _build_memory_layer_from_feature_iterator(
+        self,
+        source_layer: QgsVectorLayer,
+        features,
+    ) -> Optional[QgsVectorLayer]:
+        """Copy features from an iterator into a new memory layer."""
+        try:
+            memory_layer = QgsVectorLayer(
+                self._memory_layer_uri_for_vector_layer(source_layer),
+                "filtered",
+                "memory",
+            )
+            if not memory_layer.isValid():
+                print(f"[DEBUG] Could not create memory layer for {source_layer.name()}")
+                return None
+
+            fields_to_drop = self._collect_non_exportable_field_names(source_layer)
+            source_fields = source_layer.fields()
+            kept_field_names: List[str] = []
+
+            memory_layer.startEditing()
+            for i in range(source_fields.count()):
+                field = source_fields[i]
+                if field.name() in fields_to_drop:
+                    continue
+                memory_layer.addAttribute(field)
+                kept_field_names.append(field.name())
+            memory_layer.updateFields()
+
+            kept_indexes = [source_fields.indexOf(name) for name in kept_field_names]
+            features_to_add: List[QgsFeature] = []
+            for feature in features:
+                new_feature = QgsFeature(memory_layer.fields())
+                geom = feature.geometry()
+                if geom and not geom.isNull() and not geom.isEmpty():
+                    new_feature.setGeometry(geom)
+                new_feature.setAttributes([feature.attribute(idx) for idx in kept_indexes])
+                features_to_add.append(new_feature)
+
+            if features_to_add:
+                memory_layer.addFeatures(features_to_add)
+            memory_layer.commitChanges()
+            memory_layer.updateExtents()
+            return memory_layer
+        except Exception as e:
+            print(f"Error building memory layer from features: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return None
+
+    def _export_layer_with_feature_request(
+        self,
+        source_layer_id: str,
+        output_path: str,
+        layer_name: str,
+        project: QgsProject,
+        filter_expression: Optional[str] = None,
+        feature_ids: Optional[List[Any]] = None,
+    ) -> bool:
+        """
+        Export layer features using QgsFeatureRequest without setSubsetString.
+
+        Required for QGIS expressions and for providers (e.g. PostgreSQL) whose
+        subset filters are SQL, not expression syntax.
+        """
+        try:
+            source_layer = self._layer_service.get_layer_by_id(source_layer_id)
+            if not source_layer or not isinstance(source_layer, QgsVectorLayer):
+                return False
+
+            request = QgsFeatureRequest()
+            if feature_ids is not None:
+                request.setFilterFids(feature_ids)
+            elif filter_expression:
+                request.setFilterExpression(filter_expression)
+            else:
+                return False
+
+            memory_layer = self._build_memory_layer_from_feature_iterator(
+                source_layer,
+                source_layer.getFeatures(request),
+            )
+            if memory_layer is None:
+                return False
+
+            filtered_count = memory_layer.featureCount()
+            print(
+                f"[DEBUG] Exporting layer '{layer_name}' via feature request "
+                f"({filtered_count} feature(s))"
+            )
+            if filtered_count == 0:
+                return False
+            return self._export_memory_layer_to_project(
+                memory_layer,
+                source_layer,
+                output_path,
+                layer_name,
+                project,
+            )
+        except Exception as e:
+            print(f"Error exporting layer with feature request: {str(e)}")
+            return False
+
     def _create_filtered_layer(self, source_layer_id: str, output_path: str, layer_name: str, 
                              filter_expression: str, project: QgsProject) -> bool:
         """Create a filtered copy of a layer."""
@@ -859,7 +1223,16 @@ class QGISProjectCreationService(QObject):
             if not source_layer:
                 return False
 
-            # Apply filter
+            if self._filter_expression_uses_qgis_syntax(filter_expression):
+                return self._export_layer_with_feature_request(
+                    source_layer_id,
+                    output_path,
+                    layer_name,
+                    project,
+                    filter_expression=filter_expression,
+                )
+
+            # Apply SQL-compatible provider subset filter
             source_layer.setSubsetString(filter_expression)
 
             # Count features for debug output
@@ -941,7 +1314,69 @@ class QGISProjectCreationService(QObject):
             print(f"Error creating layer copy: {str(e)}")
             return False
 
-    def _copy_layer_to_geopackage(self, source_layer, output_path, layer_name):
+    def _parse_unsupported_geopackage_field_error(self, err: Any) -> Optional[str]:
+        """
+        Extract the field name from a Geopackage writer unsupported-type error.
+
+        Supports English and French QGIS messages.
+        """
+        try:
+            if isinstance(err, (tuple, list)) and len(err) >= 2 and isinstance(err[1], str):
+                message = err[1]
+            else:
+                message = str(err)
+
+            patterns = [
+                r"Unsupported type for field\s+([A-Za-z0-9_]+)",
+                r"Type non supporté pour le champ\s+([A-Za-z0-9_]+)",
+                r"Type non supporte pour le champ\s+([A-Za-z0-9_]+)",
+            ]
+            for pattern in patterns:
+                match = re.search(pattern, message, flags=re.IGNORECASE)
+                if match:
+                    return match.group(1)
+            return None
+        except Exception:
+            return None
+
+    def _collect_non_exportable_field_names(self, source_layer: QgsVectorLayer) -> set:
+        """
+        Return attribute field names that cannot be written to Geopackage.
+
+        PostgreSQL layers may expose extra geometry-valued columns (e.g. section_geometry)
+        that OGR refuses to serialize.
+        """
+        drop_names = set()
+        if not source_layer or not source_layer.isValid():
+            return drop_names
+
+        non_exportable_type_names = {
+            "geometry",
+            "geography",
+            "json",
+            "jsonb",
+            "bytea",
+        }
+        for field in source_layer.fields():
+            field_name = field.name()
+            type_name = (field.typeName() or "").lower()
+            if type_name in non_exportable_type_names or "geometry" in type_name:
+                drop_names.add(field_name)
+                continue
+            try:
+                if hasattr(field, "isGeometryType") and field.isGeometryType():
+                    drop_names.add(field_name)
+            except Exception:
+                pass
+        return drop_names
+
+    def _copy_layer_to_geopackage(
+        self,
+        source_layer,
+        output_path,
+        layer_name,
+        properties_source_layer=None,
+    ):
         """Copy a layer to a Geopackage file with preserved forms, styles, and field configurations."""
         try:
             print(f"[DEBUG] _copy_layer_to_geopackage called for layer: {layer_name}")
@@ -949,26 +1384,6 @@ class QGISProjectCreationService(QObject):
             options = QgsVectorFileWriter.SaveVectorOptions()
             options.driverName = "GPKG"
             options.layerName = layer_name
-
-            def _handle_unsupported_attribute_type_error(err: Any) -> Optional[str]:
-                """
-                Detect QGIS writer errors caused by unsupported attribute types.
-
-                Returns the offending field name when it can be extracted, otherwise None.
-                """
-                try:
-                    # QGIS may return int (classic API) or tuple/list (V2 API).
-                    if isinstance(err, (tuple, list)) and len(err) >= 2 and isinstance(err[1], str):
-                        message = err[1]
-                    else:
-                        message = str(err)
-
-                    # Typical message:
-                    # "Unsupported type for field section_geometry"
-                    match = re.search(r"Unsupported type for field\s+([A-Za-z0-9_]+)", message)
-                    return match.group(1) if match else None
-                except Exception:
-                    return None
 
             def _write_layer(layer_to_write: QgsVectorLayer) -> Any:
                 """Write with V2 when possible, otherwise classic API."""
@@ -983,18 +1398,35 @@ class QGISProjectCreationService(QObject):
                     layer_to_write, output_path, "UTF-8", layer_to_write.crs(), "GPKG", False, ["layerName=" + layer_name]
                 )
 
-            # First attempt: write the layer as-is.
-            error = _write_layer(source_layer)
+            fields_to_drop = self._collect_non_exportable_field_names(source_layer)
+            layer_to_write = source_layer
+            if fields_to_drop:
+                print(
+                    f"[DEBUG] Omitting non-exportable field(s) for {layer_name}: "
+                    f"{', '.join(sorted(fields_to_drop))}"
+                )
+                safe_layer = self._create_export_layer_without_fields(source_layer, fields_to_drop)
+                if safe_layer is not None:
+                    layer_to_write = safe_layer
 
-            # If we hit an unsupported attribute type, retry once after dropping the offending field.
-            unsupported_field = _handle_unsupported_attribute_type_error(error)
-            if unsupported_field:
-                print(f"[DEBUG] Detected unsupported attribute type for field '{unsupported_field}', retrying without it")
-                safe_layer = self._create_export_layer_without_fields(source_layer, {unsupported_field})
+            error = _write_layer(layer_to_write)
+            while True:
+                unsupported_field = self._parse_unsupported_geopackage_field_error(error)
+                if not unsupported_field:
+                    break
+                if unsupported_field in fields_to_drop:
+                    break
+                fields_to_drop.add(unsupported_field)
+                print(
+                    f"[DEBUG] Detected unsupported attribute type for field "
+                    f"'{unsupported_field}', retrying without it"
+                )
+                safe_layer = self._create_export_layer_without_fields(source_layer, fields_to_drop)
                 if safe_layer is None:
                     print(f"[DEBUG] Could not create safe export layer for {layer_name}")
                     return False
-                error = _write_layer(safe_layer)
+                layer_to_write = safe_layer
+                error = _write_layer(layer_to_write)
 
             # Accept both int and tuple return types
             if (isinstance(error, int) and error != QgsVectorFileWriter.NoError) or \
@@ -1004,7 +1436,8 @@ class QGISProjectCreationService(QObject):
                 return False
             
             # After successful data copy, copy forms, styles, and field configurations
-            self._copy_layer_properties_to_geopackage(source_layer, output_path, layer_name)
+            props_layer = properties_source_layer if properties_source_layer is not None else source_layer
+            self._copy_layer_properties_to_geopackage(props_layer, output_path, layer_name)
             return True
         except Exception as e:
             print(f"Error copying layer to Geopackage: {str(e)}")
@@ -1405,6 +1838,455 @@ class QGISProjectCreationService(QObject):
         except Exception as e:
             print(f"Error getting relationship filter expression: {str(e)}")
             return None
+
+    def _get_relationship_filter_expression_for_ids(
+        self,
+        layer_id: str,
+        recording_areas_layer_id: str,
+        recording_area_ids: List[Any],
+    ) -> Optional[str]:
+        """Build a subset expression for features related to multiple recording areas."""
+        if not recording_area_ids:
+            return None
+        try:
+            from qgis.core import QgsProject
+
+            recording_layer = self._layer_service.get_layer_by_id(recording_areas_layer_id)
+            if not recording_layer:
+                return None
+
+            relation_manager = QgsProject.instance().relationManager()
+            for relation in relation_manager.relations().values():
+                if (
+                    relation.referencingLayerId() == layer_id
+                    and relation.referencedLayerId() == recording_areas_layer_id
+                ):
+                    field_pairs = relation.fieldPairs()
+                    if not field_pairs:
+                        continue
+                    referencing_field = list(field_pairs.keys())[0]
+                    referenced_field = list(field_pairs.values())[0]
+                    referenced_values = self._collect_recording_area_referenced_values(
+                        recording_layer,
+                        referenced_field,
+                        recording_area_ids,
+                    )
+                    if not referenced_values:
+                        return None
+                    in_clause = self._format_sql_in_list(referenced_values)
+                    return f'"{referencing_field}" IN ({in_clause})'
+            return None
+        except Exception as e:
+            print(f"Error building multi-area relationship filter: {str(e)}")
+            return None
+
+    def _collect_recording_area_referenced_values(
+        self,
+        recording_layer: QgsVectorLayer,
+        referenced_field: str,
+        recording_area_ids: List[Any],
+    ) -> List[Any]:
+        """Collect referenced-field values for the given recording-area feature IDs."""
+        field_idx = recording_layer.fields().indexOf(referenced_field)
+        if field_idx < 0:
+            return []
+        id_set = set(recording_area_ids)
+        values = []
+        seen = set()
+        for feature in recording_layer.getFeatures():
+            if feature.id() not in id_set:
+                continue
+            value = feature.attribute(field_idx)
+            if value is None or value in seen:
+                continue
+            seen.add(value)
+            values.append(value)
+        return values
+
+    def _format_sql_in_list(self, values: List[Any]) -> str:
+        """Format Python values for use in a QgsVectorLayer subset IN clause."""
+        formatted = []
+        for value in values:
+            if isinstance(value, str):
+                escaped = str(value).replace("'", "''")
+                formatted.append(f"'{escaped}'")
+            else:
+                formatted.append(str(value))
+        return ", ".join(formatted)
+
+    def _build_feature_id_subset_expression(self, feature_ids: List[Any]) -> Optional[str]:
+        """Build a QgsVectorLayer subset expression filtering by internal feature IDs."""
+        if not feature_ids:
+            return None
+        return f'$id IN ({self._format_sql_in_list(feature_ids)})'
+
+    def _build_sql_primary_key_in_filter(
+        self,
+        source_layer: QgsVectorLayer,
+        feature_ids: List[Any],
+    ) -> Optional[str]:
+        """
+        Build a provider SQL subset filter on the layer primary key.
+
+        Matches per-zone recording-area export (``id = <feature id>``) but for
+        multiple features. Uses the layer's declared primary-key field when available.
+        """
+        if not feature_ids:
+            return None
+        pk_fields = source_layer.primaryKeyFields() if hasattr(source_layer, "primaryKeyFields") else []
+        if pk_fields:
+            field_name = pk_fields[0]
+        elif source_layer.fields().indexOf("id") >= 0:
+            field_name = "id"
+        else:
+            return None
+        in_clause = self._format_sql_in_list(feature_ids)
+        if field_name == "id":
+            return f"id IN ({in_clause})"
+        return f'"{field_name}" IN ({in_clause})'
+
+    def _build_extent_intersects_subset_expression(
+        self,
+        extent_geometry: QgsGeometry,
+        source_layer: QgsVectorLayer,
+        extent_crs_authid: Optional[str] = None,
+    ) -> Optional[str]:
+        """
+        Build a subset expression selecting features intersecting an extent geometry.
+
+        The extent is transformed into the source layer CRS before building the WKT.
+        """
+        extent_in_layer_crs = self._layer_service.transform_geometry_to_layer_crs(
+            extent_geometry,
+            source_layer,
+            extent_crs_authid,
+        )
+        if not extent_in_layer_crs or extent_in_layer_crs.isNull() or extent_in_layer_crs.isEmpty():
+            return None
+        wkt = extent_in_layer_crs.asWkt().replace("'", "''")
+        return f"intersects($geometry, geom_from_wkt('{wkt}'))"
+
+    def _export_extra_layer_for_global_project(
+        self,
+        extra_layer_id: str,
+        output_path: str,
+        layer_name: str,
+        extent_geometry: QgsGeometry,
+        project: QgsProject,
+        extent_crs_authid: Optional[str] = None,
+    ) -> bool:
+        """
+        Export an extra context layer for a global field project.
+
+        Attribute-only layers (e.g. lookup tables) are copied in full; spatial layers
+        are clipped to the project extent.
+        """
+        if self._layer_service.is_valid_no_geometry_layer(extra_layer_id):
+            return self._create_layer_copy(
+                extra_layer_id,
+                output_path,
+                layer_name,
+                project,
+            )
+        return self._create_extent_intersect_layer_copy(
+            source_layer_id=extra_layer_id,
+            output_path=output_path,
+            layer_name=layer_name,
+            extent_geometry=extent_geometry,
+            project=project,
+            extent_crs_authid=extent_crs_authid,
+        )
+
+    def _create_global_recording_areas_layer_copy(
+        self,
+        recording_areas_layer_id: str,
+        recording_area_ids: List[Any],
+        output_path: str,
+        layer_name: str,
+        extent_geometry: QgsGeometry,
+        project: QgsProject,
+        extent_crs_authid: Optional[str] = None,
+    ) -> bool:
+        """
+        Export recording areas intersecting the global extent into the field project.
+
+        Prefer the same SQL subset + direct Geopackage export used for per-zone projects
+        (``"id" IN (...)`` on the primary key), then fall back to spatial clipping.
+        """
+        source_layer = self._layer_service.get_layer_by_id(recording_areas_layer_id)
+        if source_layer and isinstance(source_layer, QgsVectorLayer) and recording_area_ids:
+            sql_filter = self._build_sql_primary_key_in_filter(source_layer, recording_area_ids)
+            if sql_filter:
+                print(
+                    f"[DEBUG] Exporting recording areas for {layer_name} "
+                    f"with SQL filter: {sql_filter}"
+                )
+                if self._create_filtered_layer(
+                    recording_areas_layer_id,
+                    output_path,
+                    layer_name,
+                    sql_filter,
+                    project,
+                ):
+                    return True
+                print(
+                    f"[DEBUG] SQL primary-key export failed for {layer_name}, "
+                    "trying spatial clip"
+                )
+
+        if self._create_extent_intersect_layer_copy(
+            source_layer_id=recording_areas_layer_id,
+            output_path=output_path,
+            layer_name=layer_name,
+            extent_geometry=extent_geometry,
+            project=project,
+            extent_crs_authid=extent_crs_authid,
+        ):
+            return True
+
+        print(
+            f"Warning: Could not export intersecting recording areas for {layer_name}; "
+            "creating empty context layer"
+        )
+        return self._create_empty_layer_copy(
+            recording_areas_layer_id,
+            output_path,
+            layer_name,
+            project,
+        )
+
+    def _create_extent_intersect_layer_copy(
+        self,
+        source_layer_id: str,
+        output_path: str,
+        layer_name: str,
+        extent_geometry: QgsGeometry,
+        project: QgsProject,
+        extent_crs_authid: Optional[str] = None,
+    ) -> bool:
+        """Export vector features intersecting an extent geometry to Geopackage."""
+        try:
+            source_layer = self._layer_service.get_layer_by_id(source_layer_id)
+            if not source_layer or not isinstance(source_layer, QgsVectorLayer):
+                return False
+
+            spatial_filter = self._build_extent_intersects_subset_expression(
+                extent_geometry,
+                source_layer,
+                extent_crs_authid,
+            )
+            if spatial_filter and self._export_layer_with_feature_request(
+                source_layer_id,
+                output_path,
+                layer_name,
+                project,
+                filter_expression=spatial_filter,
+            ):
+                return True
+            if spatial_filter:
+                print(
+                    f"[DEBUG] Spatial feature-request export failed for {layer_name}, "
+                    "trying memory-layer path"
+                )
+
+            filtered_layer = self._build_memory_layer_with_intersecting_features(
+                source_layer,
+                extent_geometry,
+                extent_crs_authid,
+            )
+            if filtered_layer is None:
+                print(f"[DEBUG] Memory export failed for {layer_name}, trying structure + features fallback")
+                return self._create_extent_intersect_layer_copy_fallback(
+                    source_layer=source_layer,
+                    output_path=output_path,
+                    layer_name=layer_name,
+                    extent_geometry=extent_geometry,
+                    project=project,
+                    extent_crs_authid=extent_crs_authid,
+                )
+
+            return self._export_memory_layer_to_project(
+                filtered_layer,
+                source_layer,
+                output_path,
+                layer_name,
+                project,
+            )
+        except Exception as e:
+            print(f"Error creating extent-intersect layer copy: {str(e)}")
+            return False
+
+    def _memory_layer_uri_for_vector_layer(self, source_layer: QgsVectorLayer) -> str:
+        """Build a memory provider URI compatible with the source layer geometry."""
+        crs_string = self._get_crs_string(source_layer.crs())
+        wkb_type = source_layer.wkbType()
+        geom_string = QgsWkbTypes.displayString(wkb_type)
+        memory_layer = QgsVectorLayer(f"{geom_string}?crs={crs_string}", "probe", "memory")
+        if memory_layer.isValid():
+            return f"{geom_string}?crs={crs_string}"
+
+        geometry_type = source_layer.geometryType()
+        if geometry_type == QgsWkbTypes.PointGeometry:
+            geom_string = "Point"
+        elif geometry_type == QgsWkbTypes.LineGeometry:
+            geom_string = "LineString"
+        elif geometry_type == QgsWkbTypes.PolygonGeometry:
+            geom_string = "MultiPolygon" if QgsWkbTypes.isMultiType(wkb_type) else "Polygon"
+        else:
+            geom_string = "Polygon"
+        return f"{geom_string}?crs={crs_string}"
+
+    def _build_memory_layer_with_intersecting_features(
+        self,
+        source_layer: QgsVectorLayer,
+        extent_geometry: QgsGeometry,
+        extent_crs_authid: Optional[str] = None,
+    ) -> Optional[QgsVectorLayer]:
+        """Create an in-memory layer containing features intersecting the extent."""
+        try:
+            extent_in_layer_crs = self._layer_service.transform_geometry_to_layer_crs(
+                extent_geometry,
+                source_layer,
+                extent_crs_authid,
+            )
+            if not extent_in_layer_crs:
+                return None
+
+            def _intersecting_features():
+                for feature in source_layer.getFeatures():
+                    geom = feature.geometry()
+                    if not geom or geom.isNull() or geom.isEmpty():
+                        continue
+                    if geom.intersects(extent_in_layer_crs):
+                        yield feature
+
+            return self._build_memory_layer_from_feature_iterator(
+                source_layer,
+                _intersecting_features(),
+            )
+        except Exception as e:
+            print(f"Error building filtered memory layer: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return None
+
+    def _create_extent_intersect_layer_copy_fallback(
+        self,
+        source_layer: QgsVectorLayer,
+        output_path: str,
+        layer_name: str,
+        extent_geometry: QgsGeometry,
+        project: QgsProject,
+        extent_crs_authid: Optional[str] = None,
+    ) -> bool:
+        """
+        Fallback export when the memory-layer path fails.
+
+        Writes layer structure to GPKG then appends intersecting features directly.
+        """
+        try:
+            if not self._copy_layer_structure_to_geopackage(source_layer, output_path, layer_name):
+                return False
+
+            extent_in_layer_crs = self._layer_service.transform_geometry_to_layer_crs(
+                extent_geometry,
+                source_layer,
+                extent_crs_authid,
+            )
+            if not extent_in_layer_crs:
+                layer = QgsVectorLayer(output_path, layer_name, "ogr")
+                if layer.isValid():
+                    project.addMapLayer(layer)
+                    return True
+                return False
+
+            target_layer = QgsVectorLayer(output_path, layer_name, "ogr")
+            if not target_layer.isValid():
+                return False
+
+            target_layer.startEditing()
+            added = 0
+            for feature in source_layer.getFeatures():
+                geom = feature.geometry()
+                if not geom or geom.isNull() or geom.isEmpty():
+                    continue
+                if not geom.intersects(extent_in_layer_crs):
+                    continue
+                new_feature = QgsFeature(target_layer.fields())
+                new_feature.setGeometry(geom)
+                for field_name in feature.fields().names():
+                    if field_name in target_layer.fields().names():
+                        new_feature[field_name] = feature[field_name]
+                if target_layer.addFeature(new_feature):
+                    added += 1
+            target_layer.commitChanges()
+            self._copy_layer_properties_to_geopackage(source_layer, output_path, layer_name)
+            project.addMapLayer(target_layer)
+            print(f"[DEBUG] Fallback export added {added} feature(s) to {layer_name}")
+            return True
+        except Exception as e:
+            print(f"Error in extent intersect fallback export: {str(e)}")
+            return False
+
+    def _create_alternative_objects_layer_copy(
+        self,
+        source_layer_id: str,
+        recording_areas_layer_id: str,
+        recording_area_ids: List[Any],
+        output_path: str,
+        layer_name: str,
+        project: QgsProject,
+    ) -> bool:
+        """Export alternative objects rows linked to recording areas within the extent."""
+        try:
+            filter_expression = self._get_relationship_filter_expression_for_ids(
+                source_layer_id,
+                recording_areas_layer_id,
+                recording_area_ids,
+            )
+            if not filter_expression:
+                recording_field = self._settings_manager.get_value(
+                    'alternative_objects_recording_area_field',
+                    '',
+                )
+                if recording_field and recording_area_ids:
+                    in_clause = self._format_sql_in_list(recording_area_ids)
+                    filter_expression = f'"{recording_field}" IN ({in_clause})'
+
+            if filter_expression:
+                return self._create_filtered_layer(
+                    source_layer_id=source_layer_id,
+                    output_path=output_path,
+                    layer_name=layer_name,
+                    filter_expression=filter_expression,
+                    project=project,
+                )
+
+            return self._create_layer_copy(
+                source_layer_id=source_layer_id,
+                output_path=output_path,
+                layer_name=layer_name,
+                project=project,
+            )
+        except Exception as e:
+            print(f"Error creating alternative objects layer copy: {str(e)}")
+            return False
+
+    def _apply_readonly_layers_in_project(
+        self,
+        project: QgsProject,
+        readonly_source_layer_ids: List[str],
+        source_to_target_layer_ids: Dict[str, str],
+    ) -> None:
+        """Mark exported context layers as read-only in the generated project."""
+        for source_layer_id in readonly_source_layer_ids:
+            target_layer_id = source_to_target_layer_ids.get(source_layer_id)
+            if not target_layer_id:
+                continue
+            target_layer = project.mapLayer(target_layer_id)
+            if isinstance(target_layer, QgsVectorLayer):
+                target_layer.setReadOnly(True)
+                target_layer.setCustomProperty("archeosync/readonly", True)
 
     def _create_clipped_raster(self, raster_layer_id: str, recording_area_geometry: str, 
                               output_path: str, project: QgsProject, offset_meters: float = 0.0) -> bool:
