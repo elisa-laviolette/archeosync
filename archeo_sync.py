@@ -134,7 +134,8 @@ class ArcheoSyncPlugin(QObject):
             self._csv_import_service = CSVImportService(
                 self._iface,
                 self._file_system_service,
-                self._settings_manager
+                self._settings_manager,
+                self._layer_service,
             )
         except Exception as exc:
             print(f"Failed to initialize CSV import service: {exc}")

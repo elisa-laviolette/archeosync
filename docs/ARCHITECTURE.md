@@ -212,6 +212,7 @@ QGIS-specific implementation for field project import and processing including:
 - **Global project metadata**: When a global field project is created, `archeosync_project.json` stores `import_layers` with the original QGIS layer display names used for each exported `.gpkg`. Import uses those names so completed global projects stay aligned with the source project even if plugin settings change later.
 - **Smart Feature Comparison**: Uses unique signatures based on attributes and geometry to identify duplicates (excluding layer-specific feature IDs)
 - **Layer Creation**: Creates new "New Objects", "New Features", and "New Small Finds" layers in the project
+- **Temporary Layer Configuration**: Copies symbology, display expression, form configuration (including field widgets), and QGIS project relations from configured definitive layers to each temporary import layer (reference layers such as materials and types are preserved)
 - **Feature Collection**: Collects all features from completed field recordings
 - **Automatic Archiving**: Moves imported field projects to the configured archive folder after successful import
 - **Validation**: Validates project structure and data integrity
@@ -255,6 +256,7 @@ QGIS-specific implementation for CSV import operations including:
 - PointZ vector layer creation with attribute preservation; the memory layer includes a string field ``identifier`` when the CSV has no such column, using plugin setting ``csv_topo_identifier_column``, a single unambiguous text column, or a one-time user choice when several text columns exist
 - ``check_csv_identifier_column_requirement`` preflight used by the import workflow before creating features
 - Automatic project integration
+- **Temporary Layer Configuration**: Copies symbology, display expression, form configuration, and project relations from the configured total station points layer to ``Imported_CSV_Points``
 - Comprehensive error handling and validation
 - Interactive column mapping dialog integration
 - **Automatic Archiving**: Moves imported CSV files to configured archive folder after successful import

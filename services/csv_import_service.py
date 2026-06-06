@@ -15,6 +15,7 @@ Key Features:
 - Maps columns across multiple CSV files
 - Creates point vector layers from CSV data (Point or PointZ depending on configured definitive layer)
 - Loads layers into QGIS project as temporary layers
+- Copies symbology, form configuration, and project relations from the configured total station points layer
 - Handles different column names and data types
 
 Architecture Benefits:
@@ -61,7 +62,13 @@ class CSVImportService(ICSVImportService):
     point data, including validation, column mapping, and layer creation.
     """
     
-    def __init__(self, qgis_iface: Any, file_system_service: Optional[Any] = None, settings_manager: Optional[Any] = None):
+    def __init__(
+        self,
+        qgis_iface: Any,
+        file_system_service: Optional[Any] = None,
+        settings_manager: Optional[Any] = None,
+        layer_service: Optional[Any] = None,
+    ):
         """
         Initialize the CSV import service.
         
@@ -69,10 +76,12 @@ class CSVImportService(ICSVImportService):
             qgis_iface: QGIS interface object for accessing project and canvas
             file_system_service: Service for file system operations (optional)
             settings_manager: Service for managing settings (optional)
+            layer_service: Service for layer operations such as style copying (optional)
         """
         self._iface = qgis_iface
         self._file_system_service = file_system_service
         self._settings_manager = settings_manager
+        self._layer_service = layer_service
         self._required_columns = ['X', 'Y', 'Z']
         # Canonical link field on Imported_CSV_Points (must match definitive topo layer / QGIS relations)
         self._identifier_field_name = 'identifier'
@@ -238,6 +247,20 @@ class CSVImportService(ICSVImportService):
                 continue
             return _normalize_cell(row[col])
         return None
+
+    def _apply_definitive_layer_style(self, temp_layer: Any) -> None:
+        """
+        Apply symbology, forms, and relations from the definitive topo layer.
+
+        Args:
+            temp_layer: Temporary ``Imported_CSV_Points`` layer to configure
+        """
+        if not self._layer_service:
+            return
+        source_layer = self._get_configured_total_station_points_layer()
+        if not source_layer or not temp_layer:
+            return
+        self._layer_service.configure_temporary_import_layer(source_layer, temp_layer)
 
     def _get_configured_total_station_points_layer(self):
         """
@@ -689,6 +712,7 @@ class CSVImportService(ICSVImportService):
             layer.commitChanges()
 
             QgsProject.instance().addMapLayer(layer)
+            self._apply_definitive_layer_style(layer)
 
             self._last_imported_files = csv_files
             self._last_import_count = feature_id - 1

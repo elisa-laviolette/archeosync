@@ -36,7 +36,13 @@ class TestCSVImportService:
         self.mock_file_system_service = Mock()
         self.mock_settings_manager = Mock()
         
-        self.csv_service = CSVImportService(self.mock_iface, self.mock_file_system_service, self.mock_settings_manager)
+        self.mock_layer_service = Mock()
+        self.csv_service = CSVImportService(
+            self.mock_iface,
+            self.mock_file_system_service,
+            self.mock_settings_manager,
+            self.mock_layer_service,
+        )
         
         # Create temporary directory for test files
         self.temp_dir = tempfile.mkdtemp()
@@ -231,6 +237,55 @@ class TestCSVImportService:
             "Description": ["Description", "description"]
         }
     
+    @patch('archeosync.services.csv_import_service.QgsVectorLayer')
+    @patch('archeosync.services.csv_import_service.QgsFeature')
+    @patch('archeosync.services.csv_import_service.QgsGeometry')
+    @patch('archeosync.services.csv_import_service.QgsPointXY')
+    @patch('qgis.core.QgsProject')
+    def test_import_csv_files_applies_definitive_layer_style(
+        self, mock_project, mock_point, mock_geometry, mock_feature, mock_layer
+    ):
+        """Imported_CSV_Points inherits style and forms from the configured topo layer."""
+        csv1 = self._create_test_csv(
+            "test1.csv",
+            ["X", "Y", "Z", "Description"],
+            [["100.0", "200.0", "10.5", "Point 1"]],
+        )
+
+        mock_layer_instance = Mock()
+        mock_layer.return_value = mock_layer_instance
+        mock_layer_instance.isValid.return_value = True
+        mock_field = Mock()
+        mock_field.name.return_value = "x"
+        mock_layer_instance.fields.return_value = [mock_field]
+        mock_layer_instance.startEditing = Mock()
+        mock_layer_instance.addFeature = Mock()
+        mock_layer_instance.commitChanges = Mock()
+
+        mock_feature_instance = Mock()
+        mock_feature.return_value = mock_feature_instance
+        mock_geometry_instance = Mock()
+        mock_geometry.return_value = mock_geometry_instance
+        mock_geometry.fromPointXY = Mock(return_value=mock_geometry_instance)
+        mock_point.return_value = Mock()
+
+        mock_project_instance = Mock()
+        mock_project.instance.return_value = mock_project_instance
+        mock_project_instance.addMapLayer = Mock()
+
+        definitive_layer = Mock()
+        self.mock_settings_manager.get_value.return_value = "topo_layer_id"
+        mock_project_instance.mapLayer.return_value = definitive_layer
+
+        result = self.csv_service.import_csv_files([csv1])
+
+        assert result.is_valid is True
+        mock_project_instance.addMapLayer.assert_called_once_with(mock_layer_instance)
+        self.mock_layer_service.configure_temporary_import_layer.assert_called_once_with(
+            definitive_layer,
+            mock_layer_instance,
+        )
+
     @patch('archeosync.services.csv_import_service.QgsVectorLayer')
     @patch('archeosync.services.csv_import_service.QgsFeature')
     @patch('archeosync.services.csv_import_service.QgsGeometry')

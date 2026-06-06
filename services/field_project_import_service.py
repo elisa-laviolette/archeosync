@@ -10,7 +10,8 @@ Key Features:
 - Only imports layers with names matching the configured objects, features, and small finds layers
 - Only imports layers with the same geometry type as the configured layers
 - Merges Objects and Features layers from multiple projects
-- Creates new "New Objects" and "New Features" layers in the project
+- Creates new "New Objects", "New Features", and "New Small Finds" layers in the project
+- Copies symbology, form configuration, and project relations from definitive layers to temporary layers
 - Handles layer validation and error recovery
 - Automatic archiving of imported projects
 
@@ -182,18 +183,21 @@ class FieldProjectImportService(QObject):
                 objects_layer = self._create_merged_layer("New Objects", filtered_objects_features)
                 if objects_layer:
                     QgsProject.instance().addMapLayer(objects_layer)
+                    self._apply_definitive_layer_style(objects_layer, "objects_layer")
                     layers_created += 1
             
             if filtered_features_features:
                 features_layer = self._create_merged_layer("New Features", filtered_features_features)
                 if features_layer:
                     QgsProject.instance().addMapLayer(features_layer)
+                    self._apply_definitive_layer_style(features_layer, "features_layer")
                     layers_created += 1
             
             if filtered_small_finds_features:
                 small_finds_layer = self._create_merged_layer("New Small Finds", filtered_small_finds_features)
                 if small_finds_layer:
                     QgsProject.instance().addMapLayer(small_finds_layer)
+                    self._apply_definitive_layer_style(small_finds_layer, "small_finds_layer")
                     layers_created += 1
             
             # Store imported projects for later archiving instead of archiving immediately
@@ -1042,6 +1046,19 @@ class FieldProjectImportService(QObject):
                     
         except Exception as e:
             print(f"Error archiving projects: {str(e)}") 
+
+    def _apply_definitive_layer_style(self, temp_layer: Any, layer_setting_key: str) -> None:
+        """
+        Apply symbology, forms, and relations from a definitive project layer to a temp layer.
+
+        Args:
+            temp_layer: Temporary import layer to configure
+            layer_setting_key: Settings key for the definitive layer (e.g. ``objects_layer``)
+        """
+        source_layer = self._get_existing_layer(layer_setting_key)
+        if not source_layer or not temp_layer:
+            return
+        self._layer_service.configure_temporary_import_layer(source_layer, temp_layer)
 
     def _get_existing_layer(self, layer_setting_key: str) -> Optional[Any]:
         """

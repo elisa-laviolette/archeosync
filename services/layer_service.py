@@ -12,6 +12,7 @@ Key Features:
 - Layer metadata access
 - Spatial relationship checking between raster and polygon layers
 - Create empty layers with same structure as existing layers
+- Configure temporary import layers with definitive-layer style, forms, and relations
 
 Usage:
     layer_service = QGISLayerService()
@@ -24,6 +25,7 @@ Usage:
 from typing import List, Optional, Dict, Any, Tuple
 import os
 import tempfile
+import uuid
 from qgis.core import (
     QgsProject,
     QgsVectorLayer,
@@ -778,16 +780,7 @@ class QGISLayerService(ILayerService):
             memory_provider.addAttributes(field_list)
             memory_layer.updateFields()
             
-            # Copy layer properties (forms, field configurations, etc.)
-            self._copy_layer_properties(source_layer, memory_layer)
-            
-            # Try to copy QML style file first (preferred method for complete symbology)
-            qml_success = self._copy_qml_style(source_layer, memory_layer)
-            
-            # If QML style copying failed, use renderer fallback
-            if not qml_success:
-                print(f"QML style copying failed for {new_layer_name}, using renderer clone as fallback")
-                self._copy_renderer_fallback(source_layer, memory_layer)
+            self.copy_layer_style_and_forms(source_layer, memory_layer)
             
             # Add the layer to the project
             project = QgsProject.instance()
@@ -802,6 +795,419 @@ class QGISLayerService(ILayerService):
             traceback.print_exc()
             return None
     
+    def copy_layer_style_and_forms(
+        self,
+        source_layer: QgsVectorLayer,
+        target_layer: QgsVectorLayer,
+    ) -> None:
+        """
+        Copy symbology, form layout, and field widget configuration from source to target.
+
+        Uses QML style copying when available, with a renderer clone as fallback.
+
+        Args:
+            source_layer: Layer to copy style and forms from
+            target_layer: Layer to apply style and forms to
+        """
+        if source_layer is None or target_layer is None:
+            return
+        if not isinstance(source_layer, QgsVectorLayer) or not isinstance(target_layer, QgsVectorLayer):
+            return
+
+        self._copy_layer_properties(source_layer, target_layer)
+
+        qml_success = self._copy_qml_style(source_layer, target_layer)
+        if not qml_success:
+            print(
+                f"QML style copying failed for {target_layer.name()}, "
+                f"using renderer clone as fallback"
+            )
+            self._copy_renderer_fallback(source_layer, target_layer)
+
+    def configure_temporary_import_layer(
+        self,
+        source_layer: QgsVectorLayer,
+        target_layer: QgsVectorLayer,
+    ) -> None:
+        """
+        Apply definitive-layer style, forms, and project relations to a temporary import layer.
+
+        Copies symbology, display expression, and form widgets from the definitive layer,
+        recreates QGIS relations involving that layer (e.g. to materials or types tables),
+        and remaps relation references in field widgets and form layout.
+
+        Args:
+            source_layer: Configured definitive project layer
+            target_layer: Temporary import layer to configure
+        """
+        if source_layer is None or target_layer is None:
+            return
+        if not isinstance(source_layer, QgsVectorLayer) or not isinstance(target_layer, QgsVectorLayer):
+            return
+
+        relation_id_mapping = self.copy_layer_relations_for_temporary_layer(
+            source_layer,
+            target_layer,
+        )
+        self.copy_layer_style_and_forms(source_layer, target_layer)
+        self._copy_layer_display_expression(source_layer, target_layer)
+        if relation_id_mapping:
+            self._remap_layer_relation_references(target_layer, relation_id_mapping)
+
+    def _copy_layer_display_expression(
+        self,
+        source_layer: QgsVectorLayer,
+        target_layer: QgsVectorLayer,
+    ) -> None:
+        """
+        Copy the feature display name expression from source to target layer.
+
+        In QGIS this is the layer's display expression (``previewExpression`` in QML),
+        used in identify results, attribute tables, and relation pickers.
+        """
+        if not hasattr(source_layer, "displayExpression") or not hasattr(
+            target_layer, "setDisplayExpression"
+        ):
+            return
+        try:
+            target_layer.setDisplayExpression(source_layer.displayExpression() or "")
+        except Exception as e:
+            print(
+                f"Error copying display expression from {source_layer.name()} to "
+                f"{target_layer.name()}: {e}"
+            )
+
+    def copy_layer_relations_for_temporary_layer(
+        self,
+        source_layer: QgsVectorLayer,
+        target_layer: QgsVectorLayer,
+    ) -> Dict[str, str]:
+        """
+        Copy project relations from a definitive layer to a temporary import layer.
+
+        Relations that involve reference layers (materials, types, recording areas, etc.)
+        keep their referenced layer unchanged; only the definitive layer id is replaced by
+        the temporary layer id.
+
+        Args:
+            source_layer: Definitive layer whose relations should be cloned
+            target_layer: Temporary import layer that should receive cloned relations
+
+        Returns:
+            Mapping of source relation id to newly created relation id
+        """
+        relation_id_mapping: Dict[str, str] = {}
+        if source_layer is None or target_layer is None:
+            return relation_id_mapping
+        if not isinstance(source_layer, QgsVectorLayer) or not isinstance(target_layer, QgsVectorLayer):
+            return relation_id_mapping
+
+        try:
+            from qgis.core import QgsRelation
+
+            project = QgsProject.instance()
+            if project is None:
+                return relation_id_mapping
+
+            relation_manager = project.relationManager()
+            if relation_manager is None:
+                return relation_id_mapping
+
+            source_layer_id = source_layer.id()
+            target_layer_id = target_layer.id()
+            if not source_layer_id or not target_layer_id:
+                return relation_id_mapping
+
+            self._remove_relations_for_layer(relation_manager, target_layer_id)
+
+            for source_relation in list(relation_manager.relations().values()):
+                try:
+                    src_referencing_id = source_relation.referencingLayerId()
+                    src_referenced_id = source_relation.referencedLayerId()
+                    involves_source = (
+                        src_referencing_id == source_layer_id
+                        or src_referenced_id == source_layer_id
+                    )
+                    if not involves_source:
+                        continue
+
+                    tgt_referencing_id = (
+                        target_layer_id
+                        if src_referencing_id == source_layer_id
+                        else src_referencing_id
+                    )
+                    tgt_referenced_id = (
+                        target_layer_id
+                        if src_referenced_id == source_layer_id
+                        else src_referenced_id
+                    )
+
+                    if project.mapLayer(tgt_referencing_id) is None:
+                        continue
+                    if project.mapLayer(tgt_referenced_id) is None:
+                        continue
+
+                    new_relation = QgsRelation()
+                    relation_name = (
+                        source_relation.name()
+                        if hasattr(source_relation, "name")
+                        else ""
+                    )
+                    if relation_name and hasattr(new_relation, "setName"):
+                        new_relation.setName(relation_name)
+
+                    source_relation_id = (
+                        source_relation.id()
+                        if hasattr(source_relation, "id")
+                        else ""
+                    )
+                    existing_ids = set(relation_manager.relations().keys())
+                    new_relation_id = (
+                        f"archeosync_import_{uuid.uuid4().hex[:12]}"
+                    )
+                    while new_relation_id in existing_ids:
+                        new_relation_id = f"archeosync_import_{uuid.uuid4().hex[:12]}"
+                    if hasattr(new_relation, "setId"):
+                        new_relation.setId(new_relation_id)
+
+                    tgt_referencing_layer = project.mapLayer(tgt_referencing_id)
+                    tgt_referenced_layer = project.mapLayer(tgt_referenced_id)
+                    self._bind_relation_layers(
+                        new_relation,
+                        tgt_referencing_id,
+                        tgt_referenced_id,
+                        tgt_referencing_layer,
+                        tgt_referenced_layer,
+                    )
+
+                    if (
+                        new_relation.referencingLayerId() != tgt_referencing_id
+                        or new_relation.referencedLayerId() != tgt_referenced_id
+                    ):
+                        continue
+
+                    field_pairs = self._normalize_relation_field_pairs(
+                        source_relation.fieldPairs()
+                        if hasattr(source_relation, "fieldPairs")
+                        else None
+                    )
+                    for referencing_field, referenced_field in field_pairs:
+                        new_relation.addFieldPair(
+                            str(referencing_field),
+                            str(referenced_field),
+                        )
+
+                    if not field_pairs:
+                        continue
+
+                    if hasattr(source_relation, "relationStrength") and hasattr(
+                        new_relation, "setRelationStrength"
+                    ):
+                        new_relation.setRelationStrength(
+                            source_relation.relationStrength()
+                        )
+
+                    add_result = relation_manager.addRelation(new_relation)
+                    if add_result is False:
+                        rel_label = (
+                            relation_name
+                            or source_relation_id
+                            or new_relation_id
+                        )
+                        validation_error = None
+                        for attr in (
+                            "validationError",
+                            "validationErrorString",
+                            "errorString",
+                        ):
+                            if hasattr(new_relation, attr):
+                                try:
+                                    validation_error = getattr(new_relation, attr)()
+                                    break
+                                except Exception:
+                                    pass
+                        print(
+                            f"addRelation rejected for temporary layer "
+                            f"'{target_layer.name()}' ({rel_label}): "
+                            f"{validation_error or 'unknown reason'}"
+                        )
+                    else:
+                        if source_relation_id:
+                            relation_id_mapping[source_relation_id] = new_relation_id
+                except Exception as relation_error:
+                    print(
+                        f"Error copying relation for {target_layer.name()}: "
+                        f"{relation_error}"
+                    )
+
+            return relation_id_mapping
+        except Exception as e:
+            print(
+                f"Error copying relations from {source_layer.name()} to "
+                f"{target_layer.name()}: {e}"
+            )
+            import traceback
+            traceback.print_exc()
+            return relation_id_mapping
+
+    def _remove_relations_for_layer(self, relation_manager: Any, layer_id: str) -> None:
+        """Remove existing project relations that involve the given layer."""
+        if not relation_manager or not layer_id:
+            return
+        for relation_id, relation in list(relation_manager.relations().items()):
+            if (
+                relation.referencingLayerId() == layer_id
+                or relation.referencedLayerId() == layer_id
+            ):
+                relation_manager.removeRelation(relation_id)
+
+    def _bind_relation_layers(
+        self,
+        relation: Any,
+        referencing_layer_id: str,
+        referenced_layer_id: str,
+        referencing_layer: Any,
+        referenced_layer: Any,
+    ) -> None:
+        """Bind a QgsRelation to target layers, handling QGIS API differences."""
+        try:
+            if hasattr(relation, "setReferencingLayerId"):
+                relation.setReferencingLayerId(referencing_layer_id)
+            else:
+                relation.setReferencingLayer(referencing_layer_id)
+        except Exception:
+            try:
+                relation.setReferencingLayer(referencing_layer)
+            except Exception:
+                pass
+
+        try:
+            if hasattr(relation, "setReferencedLayerId"):
+                relation.setReferencedLayerId(referenced_layer_id)
+            else:
+                relation.setReferencedLayer(referenced_layer_id)
+        except Exception:
+            try:
+                relation.setReferencedLayer(referenced_layer)
+            except Exception:
+                pass
+
+        if relation.referencingLayerId() != referencing_layer_id:
+            try:
+                relation.setReferencingLayer(referencing_layer)
+            except Exception:
+                pass
+        if relation.referencedLayerId() != referenced_layer_id:
+            try:
+                relation.setReferencedLayer(referenced_layer)
+            except Exception:
+                pass
+
+    def _normalize_relation_field_pairs(self, field_pairs_obj: Any) -> List[Tuple[str, str]]:
+        """Normalize QgsRelation.fieldPairs() output to (referencing, referenced) tuples."""
+        field_pairs_list: List[Tuple[str, str]] = []
+        if not field_pairs_obj:
+            return field_pairs_list
+        try:
+            if hasattr(field_pairs_obj, "items"):
+                field_pairs_list = [
+                    (str(key), str(value))
+                    for key, value in field_pairs_obj.items()
+                ]
+            elif hasattr(field_pairs_obj, "keys") and hasattr(field_pairs_obj, "values"):
+                keys = list(field_pairs_obj.keys())
+                values = list(field_pairs_obj.values())
+                field_pairs_list = [
+                    (str(key), str(value)) for key, value in zip(keys, values)
+                ]
+            elif hasattr(field_pairs_obj, "__iter__"):
+                keys = list(field_pairs_obj)
+                values = (
+                    list(field_pairs_obj.values())
+                    if hasattr(field_pairs_obj, "values")
+                    else []
+                )
+                if keys and values and len(keys) == len(values):
+                    field_pairs_list = [
+                        (str(key), str(value)) for key, value in zip(keys, values)
+                    ]
+        except Exception:
+            field_pairs_list = []
+        return field_pairs_list
+
+    def _remap_layer_relation_references(
+        self,
+        target_layer: QgsVectorLayer,
+        relation_id_mapping: Dict[str, str],
+    ) -> None:
+        """
+        Update relation ids in field widgets and edit-form layout after relation cloning.
+        """
+        if not relation_id_mapping or target_layer is None:
+            return
+
+        try:
+            from qgis.core import QgsEditorWidgetSetup
+
+            target_fields = target_layer.fields()
+            for field_index in range(target_fields.count()):
+                editor_widget = target_layer.editorWidgetSetup(field_index)
+                if not editor_widget or editor_widget.type() != "RelationReference":
+                    continue
+                config_dict = dict(editor_widget.config())
+                old_relation_id = config_dict.get("Relation")
+                if old_relation_id in relation_id_mapping:
+                    config_dict["Relation"] = relation_id_mapping[old_relation_id]
+                    target_layer.setEditorWidgetSetup(
+                        field_index,
+                        QgsEditorWidgetSetup("RelationReference", config_dict),
+                    )
+
+            if hasattr(target_layer, "editFormConfig"):
+                form_config = target_layer.editFormConfig()
+                if form_config is not None:
+                    self._remap_edit_form_relation_references(
+                        form_config,
+                        relation_id_mapping,
+                    )
+                    target_layer.setEditFormConfig(form_config)
+        except Exception as e:
+            print(
+                f"Error remapping relation references for {target_layer.name()}: {e}"
+            )
+
+    def _remap_edit_form_relation_references(
+        self,
+        form_config: QgsEditFormConfig,
+        relation_id_mapping: Dict[str, str],
+    ) -> None:
+        """Recursively remap relation ids inside an edit form layout tree."""
+        if not hasattr(form_config, "invisibleRootContainer"):
+            return
+        root_container = form_config.invisibleRootContainer()
+        if root_container is not None:
+            self._remap_container_relation_references(
+                root_container,
+                relation_id_mapping,
+            )
+
+    def _remap_container_relation_references(
+        self,
+        container: Any,
+        relation_id_mapping: Dict[str, str],
+    ) -> None:
+        """Walk a form container tree and update relation editor widgets."""
+        if container is None:
+            return
+        children = container.children() if hasattr(container, "children") else []
+        for child in children:
+            if hasattr(child, "relationId") and hasattr(child, "setRelationId"):
+                current_relation_id = child.relationId()
+                if current_relation_id in relation_id_mapping:
+                    child.setRelationId(relation_id_mapping[current_relation_id])
+            if hasattr(child, "children"):
+                self._remap_container_relation_references(child, relation_id_mapping)
+
     def _get_geometry_type_string(self, geometry_type: int) -> str:
         """
         Convert QGIS geometry type to string for layer creation.
@@ -1050,15 +1456,8 @@ class QGISLayerService(ILayerService):
                         exported_qml_content = f.read()
                     print(f"[DEBUG] Exported QML content length: {len(exported_qml_content)} characters")
                     
-                    # Create target QML file path
-                    target_style_path = os.path.join(os.path.dirname(target_layer.source()), f"{target_layer.name()}.qml")
-                    
-                    # Write the exported QML content to target file
-                    with open(target_style_path, 'w', encoding='utf-8') as f:
-                        f.write(exported_qml_content)
-                    
-                    # Load the style into the target layer
-                    load_result = target_layer.loadNamedStyle(target_style_path)
+                    # Load from the temporary export file (memory layers have no writable .qml path)
+                    load_result = target_layer.loadNamedStyle(temp_qml_path)
                     if load_result[1]:  # Check the success boolean (second element)
                         print(f"Successfully copied complete style from {source_layer.name()} to {target_layer.name()}")
                         
@@ -1067,7 +1466,7 @@ class QGISLayerService(ILayerService):
                         self._override_qml_field_configurations_with_current(source_layer, target_layer)
                         
                         # Parse QML file to find expression fields and add them as virtual fields
-                        virtual_fields = self._parse_qml_expression_fields(target_style_path)
+                        virtual_fields = self._parse_qml_expression_fields(temp_qml_path)
                         if virtual_fields:
                             # Add virtual fields to the layer
                             provider = target_layer.dataProvider()
@@ -1107,20 +1506,31 @@ class QGISLayerService(ILayerService):
                     with open(source_style_path, 'r', encoding='utf-8') as f:
                         qml_content = f.read()
                     
-                    # Create target QML file path
-                    target_style_path = os.path.join(os.path.dirname(target_layer.source()), f"{target_layer.name()}.qml")
-                    
-                    # Write QML content to target file
-                    with open(target_style_path, 'w', encoding='utf-8') as f:
-                        f.write(qml_content)
-                    
-                    # Load the QML style into the target layer
-                    load_result = target_layer.loadNamedStyle(target_style_path)
-                    if load_result[1]:  # Check the success boolean (second element)
-                        print(f"Successfully loaded QML style from {target_style_path} to {target_layer.name()}")
-                        
-                        # Parse QML file to find expression fields and add them as virtual fields
-                        virtual_fields = self._parse_qml_expression_fields(target_style_path)
+                    with tempfile.NamedTemporaryFile(
+                        suffix='.qml', delete=False, mode='w', encoding='utf-8'
+                    ) as temp_target_file:
+                        temp_target_file.write(qml_content)
+                        temp_target_qml_path = temp_target_file.name
+
+                    load_result = (False, "")
+                    virtual_fields: Dict[str, str] = {}
+                    try:
+                        load_result = target_layer.loadNamedStyle(temp_target_qml_path)
+                        if load_result[1]:  # Check the success boolean (second element)
+                            print(
+                                f"Successfully loaded QML style from source URI to "
+                                f"{target_layer.name()}"
+                            )
+                            virtual_fields = self._parse_qml_expression_fields(
+                                temp_target_qml_path
+                            )
+                    finally:
+                        try:
+                            os.unlink(temp_target_qml_path)
+                        except OSError:
+                            pass
+
+                    if load_result[1]:
                         if virtual_fields:
                             # Add virtual fields to the layer
                             provider = target_layer.dataProvider()

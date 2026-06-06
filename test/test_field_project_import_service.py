@@ -102,7 +102,6 @@ class TestFieldProjectImportService:
         self.settings_manager = Mock()
         self.layer_service = Mock()
         self.file_system_service = Mock()
-        self.translation_service = Mock()
         
         # Set up default mock returns for settings manager
         self.settings_manager.get_value.side_effect = lambda key, default='': {
@@ -123,7 +122,6 @@ class TestFieldProjectImportService:
             self.settings_manager,
             self.layer_service,
             self.file_system_service,
-            self.translation_service
         )
     
     def test_field_import_service_creation(self):
@@ -1490,4 +1488,22 @@ class TestFieldProjectImportService:
         # Check that addFeature was called with a feature having the correct value
         args, kwargs = target_layer.addFeature.call_args
         new_feature = args[0]
-        assert new_feature['Name'] == 'TestValue' 
+        assert new_feature['Name'] == 'TestValue'
+
+    @pytest.mark.parametrize(
+        "setting_key",
+        ["objects_layer", "features_layer", "small_finds_layer"],
+    )
+    def test_apply_definitive_layer_style_calls_layer_service(self, setting_key):
+        """Temporary import layers inherit style, forms, and relations from definitive layers."""
+        temp_layer = Mock()
+        definitive_layer = Mock()
+        self.layer_service.get_layer_by_id.return_value = definitive_layer
+
+        self.field_import_service._apply_definitive_layer_style(temp_layer, setting_key)
+
+        self.layer_service.configure_temporary_import_layer.assert_called_once_with(
+            definitive_layer,
+            temp_layer,
+        )
+        self.settings_manager.get_value.assert_called_with(setting_key, "")

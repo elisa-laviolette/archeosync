@@ -455,6 +455,42 @@ class ILayerService(ABC):
         pass
     
     @abstractmethod
+    def copy_layer_style_and_forms(self, source_layer: Any, target_layer: Any) -> None:
+        """
+        Copy symbology, form layout, and field widget configuration from source to target.
+
+        Args:
+            source_layer: Layer to copy style and forms from
+            target_layer: Layer to apply style and forms to
+        """
+        pass
+
+    @abstractmethod
+    def configure_temporary_import_layer(self, source_layer: Any, target_layer: Any) -> None:
+        """
+        Apply definitive-layer style, forms, and project relations to a temporary import layer.
+
+        Args:
+            source_layer: Configured definitive project layer
+            target_layer: Temporary import layer to configure
+        """
+        pass
+
+    @abstractmethod
+    def copy_layer_relations_for_temporary_layer(
+        self,
+        source_layer: Any,
+        target_layer: Any,
+    ) -> Dict[str, str]:
+        """
+        Copy project relations from a definitive layer to a temporary import layer.
+
+        Returns:
+            Mapping of source relation id to newly created relation id
+        """
+        pass
+
+    @abstractmethod
     def create_empty_layer_copy(self, source_layer_id: str, new_layer_name: str) -> Optional[str]:
         """
         Create an empty layer with the same structure (fields, geometry type, CRS) as the source layer.
