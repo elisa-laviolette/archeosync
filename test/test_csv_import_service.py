@@ -281,7 +281,7 @@ class TestCSVImportService:
 
         assert result.is_valid is True
         mock_project_instance.addMapLayer.assert_called_once_with(mock_layer_instance)
-        self.mock_layer_service.configure_temporary_import_layer.assert_called_once_with(
+        self.mock_layer_service.configure_temporary_topo_csv_layer.assert_called_once_with(
             definitive_layer,
             mock_layer_instance,
         )

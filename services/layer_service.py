@@ -854,6 +854,38 @@ class QGISLayerService(ILayerService):
         if relation_id_mapping:
             self._remap_layer_relation_references(target_layer, relation_id_mapping)
 
+    def configure_temporary_topo_csv_layer(
+        self,
+        source_layer: QgsVectorLayer,
+        target_layer: QgsVectorLayer,
+    ) -> None:
+        """
+        Apply symbology and relations to a CSV topo import layer safely.
+
+        Unlike :meth:`configure_temporary_import_layer`, this avoids copying the full
+        QML style and edit form from the definitive layer. CSV temp layers are built
+        from CSV headers and usually do not share the definitive layer schema; loading
+        the complete style/form tree can segfault QGIS.
+
+        Args:
+            source_layer: Configured definitive total station points layer
+            target_layer: Temporary ``Imported_CSV_Points`` layer to configure
+        """
+        if source_layer is None or target_layer is None:
+            return
+        if not isinstance(source_layer, QgsVectorLayer) or not isinstance(target_layer, QgsVectorLayer):
+            return
+
+        relation_id_mapping = self.copy_layer_relations_for_temporary_layer(
+            source_layer,
+            target_layer,
+        )
+        self._copy_renderer_fallback(source_layer, target_layer)
+        self._copy_layer_display_expression(source_layer, target_layer)
+        self._copy_overlapping_field_configurations(source_layer, target_layer)
+        if relation_id_mapping:
+            self._remap_layer_relation_references(target_layer, relation_id_mapping)
+
     def _copy_layer_display_expression(
         self,
         source_layer: QgsVectorLayer,
@@ -1263,6 +1295,43 @@ class QGISLayerService(ILayerService):
                 # Copy field constraints if available
                 if config['constraints'] and hasattr(target_layer, 'setConstraints'):
                     target_layer.setConstraints(target_field_idx, config['constraints'])
+
+    def _copy_overlapping_field_configurations(
+        self,
+        source_layer: QgsVectorLayer,
+        target_layer: QgsVectorLayer,
+    ) -> None:
+        """
+        Copy field widget setups for fields present on both layers.
+
+        Used for CSV topo imports where the temporary layer schema differs from the
+        definitive layer; copying the full edit form would reference missing fields.
+        """
+        source_fields = source_layer.fields()
+        target_fields = target_layer.fields()
+        target_field_names = {target_fields[i].name() for i in range(target_fields.count())}
+
+        for source_index in range(source_fields.count()):
+            field_name = source_fields[source_index].name()
+            if field_name not in target_field_names:
+                continue
+
+            target_field_idx = target_fields.indexOf(field_name)
+            if target_field_idx < 0:
+                continue
+
+            editor_widget = source_layer.editorWidgetSetup(source_index)
+            if editor_widget and hasattr(editor_widget, "type"):
+                target_layer.setEditorWidgetSetup(target_field_idx, editor_widget)
+
+            default_value = source_layer.defaultValueDefinition(source_index)
+            if default_value and default_value.isValid():
+                target_layer.setDefaultValueDefinition(target_field_idx, default_value)
+
+            if hasattr(source_layer, "constraints") and hasattr(target_layer, "setConstraints"):
+                constraints = source_layer.constraints(source_index)
+                if constraints:
+                    target_layer.setConstraints(target_field_idx, constraints)
 
     def _copy_layer_properties(self, source_layer: QgsVectorLayer, target_layer: QgsVectorLayer) -> None:
         """

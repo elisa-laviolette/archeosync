@@ -203,6 +203,45 @@ class TestStyleCopying(unittest.TestCase):
         )
 
     @patch.object(QGISLayerService, "_remap_layer_relation_references")
+    @patch.object(QGISLayerService, "_copy_overlapping_field_configurations")
+    @patch.object(QGISLayerService, "_copy_layer_display_expression")
+    @patch.object(QGISLayerService, "_copy_renderer_fallback")
+    @patch.object(QGISLayerService, "copy_layer_relations_for_temporary_layer")
+    def test_configure_temporary_topo_csv_layer_avoids_full_style_copy(
+        self,
+        mock_copy_relations,
+        mock_copy_renderer,
+        mock_copy_display_expression,
+        mock_copy_overlapping_fields,
+        mock_remap,
+    ):
+        """CSV topo import must not load definitive QML/forms onto a different schema."""
+        source_layer = QgsVectorLayer(
+            "Point?crs=EPSG:4326&field=identifier:string&field=type:string",
+            "Points topo",
+            "memory",
+        )
+        target_layer = QgsVectorLayer(
+            "Point?crs=EPSG:4326&field=x:real&field=y:real&field=z:real&field=identifier:string",
+            "Imported_CSV_Points",
+            "memory",
+        )
+        self.assertTrue(source_layer.isValid())
+        self.assertTrue(target_layer.isValid())
+        mock_copy_relations.return_value = {"topo_materials": "archeosync_import_new"}
+
+        self.layer_service.configure_temporary_topo_csv_layer(source_layer, target_layer)
+
+        mock_copy_relations.assert_called_once_with(source_layer, target_layer)
+        mock_copy_renderer.assert_called_once_with(source_layer, target_layer)
+        mock_copy_display_expression.assert_called_once_with(source_layer, target_layer)
+        mock_copy_overlapping_fields.assert_called_once_with(source_layer, target_layer)
+        mock_remap.assert_called_once_with(
+            target_layer,
+            {"topo_materials": "archeosync_import_new"},
+        )
+
+    @patch.object(QGISLayerService, "_remap_layer_relation_references")
     @patch.object(QGISLayerService, "_copy_layer_display_expression")
     @patch.object(QGISLayerService, "copy_layer_style_and_forms")
     @patch.object(QGISLayerService, "copy_layer_relations_for_temporary_layer")

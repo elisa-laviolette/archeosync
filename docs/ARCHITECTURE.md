@@ -256,7 +256,7 @@ QGIS-specific implementation for CSV import operations including:
 - PointZ vector layer creation with attribute preservation; the memory layer includes a string field ``identifier`` when the CSV has no such column, using plugin setting ``csv_topo_identifier_column``, a single unambiguous text column, or a one-time user choice when several text columns exist
 - ``check_csv_identifier_column_requirement`` preflight used by the import workflow before creating features
 - Automatic project integration
-- **Temporary Layer Configuration**: Copies symbology, display expression, form configuration, and project relations from the configured total station points layer to ``Imported_CSV_Points``
+- **Temporary Layer Configuration**: Copies symbology (renderer only), display expression, overlapping field widgets, and project relations from the configured total station points layer to ``Imported_CSV_Points``. Full QML/form copy is skipped because CSV temp layers usually have a different schema than the definitive topo layer (loading the complete style tree can crash QGIS).
 - Comprehensive error handling and validation
 - Interactive column mapping dialog integration
 - **Automatic Archiving**: Moves imported CSV files to configured archive folder after successful import

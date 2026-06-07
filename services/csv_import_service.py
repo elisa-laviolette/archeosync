@@ -252,6 +252,9 @@ class CSVImportService(ICSVImportService):
         """
         Apply symbology, forms, and relations from the definitive topo layer.
 
+        Uses a schema-safe path: CSV temp layers are built from CSV headers and must not
+        receive the definitive layer's full QML/form configuration (that can crash QGIS).
+
         Args:
             temp_layer: Temporary ``Imported_CSV_Points`` layer to configure
         """
@@ -260,7 +263,7 @@ class CSVImportService(ICSVImportService):
         source_layer = self._get_configured_total_station_points_layer()
         if not source_layer or not temp_layer:
             return
-        self._layer_service.configure_temporary_import_layer(source_layer, temp_layer)
+        self._layer_service.configure_temporary_topo_csv_layer(source_layer, temp_layer)
 
     def _get_configured_total_station_points_layer(self):
         """

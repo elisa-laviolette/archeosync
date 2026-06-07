@@ -477,6 +477,20 @@ class ILayerService(ABC):
         pass
 
     @abstractmethod
+    def configure_temporary_topo_csv_layer(self, source_layer: Any, target_layer: Any) -> None:
+        """
+        Apply symbology and relations to a CSV topo import layer without full QML/form copy.
+
+        CSV temp layers often have a different field schema than the definitive topo layer;
+        loading the full style/form configuration can crash QGIS.
+
+        Args:
+            source_layer: Configured definitive total station points layer
+            target_layer: Temporary ``Imported_CSV_Points`` layer to configure
+        """
+        pass
+
+    @abstractmethod
     def copy_layer_relations_for_temporary_layer(
         self,
         source_layer: Any,
