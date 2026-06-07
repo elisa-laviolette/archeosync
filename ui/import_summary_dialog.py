@@ -1612,7 +1612,14 @@ class ImportSummaryDockWidget(QDockWidget):
             raise
     
     def _create_feature_with_target_structure(self, source_feature, target_layer):
-        """Create a new feature with the target layer's field structure."""
+        """
+        Create a new feature with the target layer's field structure.
+
+        Copies matching attributes from the source feature, lets QGIS apply default
+        expressions for remaining empty fields, then restores imported values so
+        layer defaults cannot replace attributes that were already present on the
+        temporary import layer.
+        """
         try:
             from qgis.core import QgsGeometry, QgsVectorLayerUtils
 
@@ -1653,12 +1660,21 @@ class ImportSummaryDockWidget(QDockWidget):
                 except Exception:
                     context = None
 
-            return QgsVectorLayerUtils.createFeature(
+            new_feature = QgsVectorLayerUtils.createFeature(
                 target_layer,
                 geometry,
                 attribute_map,
                 context,
             )
+
+            # Imported attributes must win over layer default expressions. QGIS may
+            # re-evaluate defaults (e.g. CASE WHEN "field" IS NULL THEN X ELSE "field"
+            # END) against a feature that does not yet carry the source value, which
+            # replaces valid imported integers with the fallback literal.
+            for field_index, source_value in attribute_map.items():
+                new_feature.setAttribute(field_index, source_value)
+
+            return new_feature
 
         except Exception as e:
             print(f"Error creating feature with target structure: {e}")

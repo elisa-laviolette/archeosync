@@ -967,6 +967,48 @@ class TestImportSummaryFeatureCopy(unittest.TestCase):
         self.assertEqual(new_feature['site_code'], 'SITE-A')
         self.assertEqual(new_feature['sequence'], 4)
 
+    def test_self_referencing_default_preserves_imported_integer(self):
+        """Imported integer values must not be replaced by self-referencing CASE defaults."""
+        from qgis.core import (
+            QgsDefaultValue,
+            QgsFeature,
+            QgsFields,
+            QgsField,
+            QgsGeometry,
+            QgsPointXY,
+            QgsVectorLayer,
+        )
+        from qgis.PyQt.QtCore import QVariant
+
+        def_layer = QgsVectorLayer(
+            "Point?crs=EPSG:4326&field=object_id:string&field=square_meter_id:integer",
+            "Objects",
+            "memory",
+        )
+        self.assertTrue(def_layer.isValid())
+        square_idx = def_layer.fields().indexOf('square_meter_id')
+        def_layer.setDefaultValueDefinition(
+            square_idx,
+            QgsDefaultValue(
+                'CASE WHEN "square_meter_id" IS NULL THEN 3 ELSE "square_meter_id" END'
+            ),
+        )
+
+        temp_fields = QgsFields()
+        temp_fields.append(QgsField('object_id', QVariant.String))
+        temp_fields.append(QgsField('square_meter_id', QVariant.Int))
+        temp_feature = QgsFeature(temp_fields)
+        temp_feature.setGeometry(QgsGeometry.fromPointXY(QgsPointXY(1.0, 2.0)))
+        temp_feature.setAttribute('object_id', 'OBJ-1')
+        temp_feature.setAttribute('square_meter_id', 7)
+
+        new_feature = self._feature_copy_helper()._create_feature_with_target_structure(
+            temp_feature, def_layer
+        )
+
+        self.assertEqual(new_feature['object_id'], 'OBJ-1')
+        self.assertEqual(new_feature['square_meter_id'], 7)
+
     def test_topo_csv_date_copied_to_definitive_layer(self):
         """Survey date from the temp topo layer should override definitive defaults."""
         from qgis.core import (

@@ -338,7 +338,7 @@ Dialog for displaying comprehensive import statistics after successful data impo
     - "New Small Finds" → configured Small Finds layer
     - "Imported_CSV_Points" → configured Total Station Points layer
   - **Edit Mode Management**: Keeps definitive layers in edit mode for user review
-  - **Default Value Replay**: Uses ``QgsVectorLayerUtils.createFeature`` with the definitive layer expression context so missing attributes receive the same default expressions as interactive digitizing
+  - **Default Value Replay**: Uses ``QgsVectorLayerUtils.createFeature`` with the definitive layer expression context so missing attributes receive the same default expressions as interactive digitizing; attributes copied from the temporary layer are re-applied afterward so self-referencing defaults (e.g. ``CASE WHEN "field" IS NULL THEN … ELSE "field" END``) cannot overwrite imported values
   - **Feature Selection**: Automatically selects newly copied features for easy identification
   - **User Control**: Allows users to save or cancel changes as needed
 - **User-Friendly Interface**: Clean, organized dialog with intuitive design
