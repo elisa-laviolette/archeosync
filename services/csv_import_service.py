@@ -10,6 +10,11 @@ has no column named ``identifier`` (case-insensitive): values come from that col
 otherwise from the plugin setting ``csv_topo_identifier_column``, from a single unambiguous text
 column per file, or after user selection when several text columns exist.
 
+When the configured definitive topo layer defines a survey date field (auto-detected or
+via ``csv_topo_date_field``), ``Imported_CSV_Points`` receives that field with the same
+name and QGIS type. The attribute is filled from each CSV basename for rows that do not
+already provide a value.
+
 Key Features:
 - Validates CSV files have required X, Y, Z columns (case-insensitive)
 - Maps columns across multiple CSV files
@@ -37,6 +42,13 @@ Usage:
 import csv
 import os
 from typing import List, Dict, Optional, Any
+
+try:
+    from .csv_filename_date import parse_date_from_filename
+    from .field_type_utils import is_temporal_qgs_field, temporal_memory_uri_type_for_qgs_field
+except ImportError:
+    from csv_filename_date import parse_date_from_filename
+    from field_type_utils import is_temporal_qgs_field, temporal_memory_uri_type_for_qgs_field
 
 try:
     from qgis.core import QgsVectorLayer, QgsFeature, QgsGeometry, QgsPointXY, QgsFields, QgsField, QgsWkbTypes
@@ -85,6 +97,15 @@ class CSVImportService(ICSVImportService):
         self._required_columns = ['X', 'Y', 'Z']
         # Canonical link field on Imported_CSV_Points (must match definitive topo layer / QGIS relations)
         self._identifier_field_name = 'identifier'
+
+    _QGIS_TYPE_TO_URI = {
+        "Date": "date",
+        "DateTime": "datetime",
+        "date": "date",
+        "datetime": "datetime",
+        "timestamp": "datetime",
+        "timestamptz": "datetime",
+    }
 
     def _has_identifier_column_key(self, column_mapping: Dict[str, List[Optional[str]]]) -> bool:
         """True if the mapping already includes a column whose name is ``identifier`` (case-insensitive)."""
@@ -316,6 +337,138 @@ class CSVImportService(ICSVImportService):
             # Defensive fallback for mocked/non-standard runtimes.
             point = QgsPointXY(x, y)
             return QgsGeometry.fromPointXY(point)
+
+    def _qgis_field_uri_type(self, field: Any) -> str:
+        """Map a definitive layer field type to a memory-layer URI type."""
+        if is_temporal_qgs_field(field):
+            return temporal_memory_uri_type_for_qgs_field(field)
+        type_name = field.typeName() if hasattr(field, "typeName") else ""
+        return self._QGIS_TYPE_TO_URI.get(type_name, "string")
+
+    def _find_definitive_layer_field(self, field_name: str) -> Optional[Any]:
+        """Return the field definition from the configured definitive topo layer."""
+        definitive_layer = self._get_configured_total_station_points_layer()
+        if definitive_layer is None or not field_name:
+            return None
+        try:
+            for field in definitive_layer.fields():
+                if field.name().lower() == field_name.strip().lower():
+                    return field
+        except Exception:
+            return None
+        return None
+
+    def _resolve_topo_date_field_info(
+        self,
+        column_mapping: Dict[str, List[Optional[str]]],
+        csv_files: List[str],
+    ) -> Optional[Dict[str, str]]:
+        """
+        Resolve the survey date field to create on ``Imported_CSV_Points``.
+
+        Uses ``csv_topo_date_field`` when configured, otherwise the first ``Date`` or
+        ``DateTime`` field on the definitive topo layer, then a field named ``date``.
+
+        Returns:
+            Dict with ``name`` (exact definitive field name) and ``uri_type`` (``date`` or
+            ``datetime``), or ``None`` when no suitable field exists.
+        """
+        definitive_layer = self._get_configured_total_station_points_layer()
+        if definitive_layer is None:
+            return None
+
+        configured_name = ""
+        if self._settings_manager:
+            configured_name = (
+                self._settings_manager.get_value("csv_topo_date_field", "") or ""
+            ).strip()
+
+        if configured_name:
+            field = self._find_definitive_layer_field(configured_name)
+            if field is None:
+                return None
+            return {"name": field.name(), "uri_type": self._qgis_field_uri_type(field)}
+
+        try:
+            for field in definitive_layer.fields():
+                if is_temporal_qgs_field(field):
+                    return {
+                        "name": field.name(),
+                        "uri_type": temporal_memory_uri_type_for_qgs_field(field),
+                    }
+
+            for field in definitive_layer.fields():
+                if field.name().lower() == "date":
+                    return {
+                        "name": field.name(),
+                        "uri_type": temporal_memory_uri_type_for_qgs_field(field),
+                    }
+        except Exception:
+            return None
+
+        return None
+
+    @staticmethod
+    def _column_mapping_has_field(
+        column_mapping: Dict[str, List[Optional[str]]],
+        field_name: str,
+    ) -> bool:
+        """True when the unified column mapping already includes ``field_name``."""
+        target = field_name.strip().lower()
+        return any(key.strip().lower() == target for key in column_mapping.keys())
+
+    @staticmethod
+    def _is_empty_attribute_value(value: Any) -> bool:
+        """Return True when a CSV cell should be treated as missing for date injection."""
+        if value is None:
+            return True
+        try:
+            if hasattr(value, "isNull") and callable(value.isNull) and value.isNull():
+                return True
+        except Exception:
+            pass
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped == "" or stripped.lower() == "null"
+        return False
+
+    def _survey_date_attribute_value(self, iso_date: Optional[str], uri_type: str) -> Any:
+        """Convert an ISO date string to a QGIS attribute value."""
+        if not iso_date:
+            return None
+        try:
+            from qgis.PyQt.QtCore import QDate, QDateTime
+
+            qdate = QDate.fromString(iso_date, "yyyy-MM-dd")
+            if not qdate.isValid():
+                return iso_date
+            if uri_type == "datetime":
+                return QDateTime(qdate)
+            return qdate
+        except ImportError:
+            return iso_date
+
+    def _apply_filename_date_to_feature(
+        self,
+        feature: Any,
+        date_field_name: str,
+        iso_date: Optional[str],
+        layer_field_names: set,
+        uri_type: str = "date",
+    ) -> None:
+        """Set the survey date from the CSV filename when the attribute is still empty."""
+        if not iso_date or date_field_name not in layer_field_names:
+            return
+        try:
+            current = feature.attribute(date_field_name)
+        except Exception:
+            current = None
+        if not self._is_empty_attribute_value(current):
+            return
+        feature.setAttribute(
+            date_field_name,
+            self._survey_date_attribute_value(iso_date, uri_type),
+        )
 
     def validate_csv_files(self, csv_files: List[str]) -> ValidationResult:
         """
@@ -638,6 +791,15 @@ class CSVImportService(ICSVImportService):
             if not has_id:
                 layer_uri += f"&field={self._identifier_field_name}:string"
 
+            import_date_field_info = self._resolve_topo_date_field_info(column_mapping, csv_files)
+            if import_date_field_info and not self._column_mapping_has_field(
+                column_mapping, import_date_field_info["name"]
+            ):
+                layer_uri += (
+                    f"&field={import_date_field_info['name']}:"
+                    f"{import_date_field_info['uri_type']}"
+                )
+
             layer = QgsVectorLayer(layer_uri, layer_name, "memory")
 
             if not layer.isValid():
@@ -649,6 +811,7 @@ class CSVImportService(ICSVImportService):
 
             feature_id = 1
             for file_index, csv_file in enumerate(csv_files):
+                file_survey_date = parse_date_from_filename(csv_file)
                 try:
                     with open(csv_file, 'r', newline='', encoding='utf-8') as file:
                         reader = csv.DictReader(file)
@@ -702,6 +865,15 @@ class CSVImportService(ICSVImportService):
                                         configured_source_key=effective_key,
                                     )
                                     feature.setAttribute(self._identifier_field_name, id_val)
+
+                                if import_date_field_info:
+                                    self._apply_filename_date_to_feature(
+                                        feature,
+                                        import_date_field_info["name"],
+                                        file_survey_date,
+                                        layer_field_names,
+                                        import_date_field_info["uri_type"],
+                                    )
 
                                 layer.addFeature(feature)
                                 feature_id += 1

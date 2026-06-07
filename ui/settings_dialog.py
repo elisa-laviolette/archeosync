@@ -393,6 +393,9 @@ class SettingsDialog(QtWidgets.QDialog):
         # Total station points layer
         self._total_station_points_widget = self._create_layer_selector(self.tr("-- Select a point or multipoint layer --"))
         form_layout.addRow(self.tr("Total Station Points Layer:"), self._total_station_points_widget)
+
+        self._total_station_fields_widget = self._create_total_station_fields_widget()
+        form_layout.addRow("", self._total_station_fields_widget)
         
         # Extra layers for field projects
         self._extra_layers_widget = self._create_extra_layers_widget()
@@ -720,6 +723,22 @@ class SettingsDialog(QtWidgets.QDialog):
 
         widget.setVisible(False)
         return widget
+
+    def _create_total_station_fields_widget(self) -> QtWidgets.QWidget:
+        """Create field selectors for the configured total station points layer."""
+        widget = QtWidgets.QWidget()
+        layout = QtWidgets.QFormLayout(widget)
+        layout.setContentsMargins(20, 0, 0, 0)
+
+        self._csv_topo_date_field_combo = QtWidgets.QComboBox()
+        self._csv_topo_date_field_combo.setMinimumWidth(250)
+        layout.addRow(
+            self.tr("Topo CSV date field (optional):"),
+            self._csv_topo_date_field_combo,
+        )
+
+        widget.setVisible(False)
+        return widget
     
     def _create_extra_layers_widget(self) -> QtWidgets.QWidget:
         """Create a widget for selecting extra vector layers to include in QField projects."""
@@ -859,6 +878,9 @@ class SettingsDialog(QtWidgets.QDialog):
         self._alternative_objects_widget.refresh_button.clicked.connect(self._refresh_alternative_objects_layer_list)
         self._alternative_objects_widget.combo_box.currentIndexChanged.connect(self._on_alternative_objects_layer_changed)
         self._total_station_points_widget.refresh_button.clicked.connect(self._refresh_total_station_points_layer_list)
+        self._total_station_points_widget.combo_box.currentIndexChanged.connect(
+            self._on_total_station_points_layer_changed
+        )
         # Extra layers connections
         self._extra_layers_widget.refresh_button.clicked.connect(self._refresh_extra_layers_list)
         # No slider signal connections needed for spinboxes
@@ -1085,9 +1107,65 @@ class SettingsDialog(QtWidgets.QDialog):
                 index = combo_box.findData(current_layer_id)
                 if index >= 0:
                     combo_box.setCurrentIndex(index)
+
+            if combo_box.currentData():
+                self._on_total_station_points_layer_changed()
+            else:
+                self._total_station_fields_widget.setVisible(False)
             
         except Exception as e:
             self._show_error(self.tr("Layer Error"), self.tr(f"Failed to refresh total station points layer list: {str(e)}"))
+
+    def _on_total_station_points_layer_changed(self) -> None:
+        """Handle changes to the total station points layer selection."""
+        layer_id = self._total_station_points_widget.combo_box.currentData()
+        if layer_id:
+            self._total_station_fields_widget.setVisible(True)
+            self._populate_total_station_date_fields(layer_id)
+        else:
+            self._total_station_fields_widget.setVisible(False)
+
+    def _populate_total_station_date_fields(
+        self,
+        layer_id: str,
+        selected_field: Optional[str] = None,
+    ) -> None:
+        """Populate the date/datetime field selector for the total station points layer."""
+        try:
+            previous = selected_field
+            if previous is None:
+                previous = self._csv_topo_date_field_combo.currentData()
+
+            fields = self._layer_service.get_layer_fields(layer_id)
+            if fields is None:
+                self._show_error(
+                    self.tr("Field Error"),
+                    self.tr(f"Could not retrieve fields for layer {layer_id}"),
+                )
+                return
+
+            self._csv_topo_date_field_combo.clear()
+            self._csv_topo_date_field_combo.addItem(
+                self.tr("-- Select date field --"),
+                "",
+            )
+
+            for field in fields:
+                if not field.get("is_temporal"):
+                    continue
+                display_text = self.tr(f"{field['name']} ({field['type']})")
+                self._csv_topo_date_field_combo.addItem(display_text, field["name"])
+
+            if previous:
+                index = self._csv_topo_date_field_combo.findData(previous)
+                if index >= 0:
+                    self._csv_topo_date_field_combo.setCurrentIndex(index)
+
+        except Exception as e:
+            self._show_error(
+                self.tr("Field Error"),
+                self.tr(f"Failed to populate total station date fields: {str(e)}"),
+            )
     
     def _refresh_extra_layers_list(self) -> None:
         """Refresh the list of available vector layers for extra QField layers."""
@@ -1523,6 +1601,16 @@ class SettingsDialog(QtWidgets.QDialog):
                 index = self._total_station_points_widget.combo_box.findData(total_station_points_layer_id)
                 if index >= 0:
                     self._total_station_points_widget.combo_box.setCurrentIndex(index)
+
+            csv_topo_date_field = self._settings_manager.get_value('csv_topo_date_field', '')
+            if total_station_points_layer_id:
+                self._total_station_fields_widget.setVisible(True)
+                self._populate_total_station_date_fields(
+                    total_station_points_layer_id,
+                    csv_topo_date_field,
+                )
+            else:
+                self._total_station_fields_widget.setVisible(False)
             
 
             
@@ -1590,6 +1678,7 @@ class SettingsDialog(QtWidgets.QDialog):
                     'alternative_objects_recording_area_field', ''
                 ),
                 'total_station_points_layer': total_station_points_layer_id,
+                'csv_topo_date_field': csv_topo_date_field,
 
                 'raster_clipping_offset': float(raster_offset),
                 'raster_brightness': int(brightness),
@@ -1641,6 +1730,7 @@ class SettingsDialog(QtWidgets.QDialog):
                     self._alternative_objects_recording_area_field_combo.currentData()
                 ),
                 'total_station_points_layer': self._total_station_points_widget.combo_box.currentData(),
+                'csv_topo_date_field': self._csv_topo_date_field_combo.currentData() or '',
 
                 'raster_clipping_offset': self._raster_offset_spinbox.value(),
                 'raster_brightness': self._sliders['Brightness'].value(),
@@ -1811,6 +1901,17 @@ class SettingsDialog(QtWidgets.QDialog):
                     self._total_station_points_widget.combo_box.setCurrentIndex(0)
             else:
                 self._total_station_points_widget.combo_box.setCurrentIndex(0)
+
+            csv_topo_date_field = self._original_values.get('csv_topo_date_field', '')
+            total_station_points_layer_id = self._original_values.get('total_station_points_layer', '')
+            if total_station_points_layer_id:
+                self._total_station_fields_widget.setVisible(True)
+                self._populate_total_station_date_fields(
+                    total_station_points_layer_id,
+                    csv_topo_date_field,
+                )
+            else:
+                self._total_station_fields_widget.setVisible(False)
             
             # Revert warning settings
             self._enable_distance_warnings.setChecked(_to_bool(self._original_values.get('enable_distance_warnings', True)))

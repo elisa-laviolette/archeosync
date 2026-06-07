@@ -860,81 +860,150 @@ class TestImportSummaryDialog(unittest.TestCase):
             mock_archive.assert_called_once()
             mock_delete_later.assert_called_once()
 
-    def test_case_insensitive_field_matching_csv_points(self):
-        """Test that total station points are copied correctly when field names differ only by case."""
-        from qgis.core import QgsFields, QgsField, QgsFeature
-        from PyQt5.QtCore import QVariant
-        # Create a mock temporary CSV layer with field 'pointid' (lowercase)
-        temp_fields = QgsFields()
-        temp_fields.append(QgsField('pointid', QVariant.String))
-        temp_feature = QgsFeature(temp_fields)
-        temp_feature.setAttribute('pointid', 'TS001')
-        temp_layer = Mock()
-        temp_layer.name.return_value = "Imported_CSV_Points"
-        temp_layer.getFeatures.return_value = [temp_feature]
-        temp_layer.fields.return_value = temp_fields
-        # Create a mock definitive layer with field 'PointID' (different case)
-        def_fields = QgsFields()
-        def_fields.append(QgsField('PointID', QVariant.String))
-        def_layer = Mock()
-        def_layer.name.return_value = "Total Station Points"
-        def_layer.id.return_value = "definitive_layer_id"
-        def_layer.isEditable.return_value = False
-        def_layer.startEditing = Mock()
-        def_layer.addFeature = Mock(return_value=True)
-        def_layer.removeSelection = Mock()
-        def_layer.select = Mock()
-        def_layer.fields.return_value = def_fields
-        # Patch QgsFeature to allow construction with target fields
-        import ui.import_summary_dialog as isd
-        orig_qgsfeature = isd.QgsFeature
-        isd.QgsFeature = lambda fields: QgsFeature(fields)
-        try:
-            # Call the feature creation logic directly
-            new_feature = self.dialog._create_feature_with_target_structure(temp_feature, def_layer)
-        finally:
-            isd.QgsFeature = orig_qgsfeature
-        # Check that the new feature has the correct value for the definitive field
-        assert new_feature['PointID'] == 'TS001'
 
-    def test_apply_layer_default_value_when_source_field_missing(self):
-        """Missing source attributes should be populated from target layer default values."""
-        from qgis.core import QgsFields, QgsField, QgsFeature
+class TestImportSummaryFeatureCopy(unittest.TestCase):
+    """QGIS-backed tests for feature copy/default replay without full dialog UI."""
+
+    def setUp(self):
+        if QtWidgets.QApplication.instance() is None:
+            self._qt_app = QtWidgets.QApplication(sys.argv if sys.argv else ["test"])
+
+    @staticmethod
+    def _feature_copy_helper():
+        return ImportSummaryDockWidget.__new__(ImportSummaryDockWidget)
+
+    def test_case_insensitive_field_matching_csv_points(self):
+        """Total station points copy when field names differ only by case."""
+        from qgis.core import QgsFields, QgsField, QgsFeature, QgsGeometry, QgsPointXY, QgsVectorLayer
         from qgis.PyQt.QtCore import QVariant
 
         temp_fields = QgsFields()
         temp_fields.append(QgsField('pointid', QVariant.String))
         temp_feature = QgsFeature(temp_fields)
         temp_feature.setAttribute('pointid', 'TS001')
+        temp_feature.setGeometry(QgsGeometry.fromPointXY(QgsPointXY(100.0, 200.0)))
 
-        def_fields = QgsFields()
-        def_fields.append(QgsField('PointID', QVariant.String))
-        def_fields.append(QgsField('operation_id', QVariant.Int))
-
-        default_definition = Mock()
-        default_definition.expression.return_value = "6"
-        empty_definition = Mock()
-        empty_definition.expression.return_value = ""
-
-        def_layer = Mock()
-        def_layer.fields.return_value = def_fields
-        def_layer.defaultValueDefinition.side_effect = lambda idx: (
-            default_definition if def_fields.at(idx).name() == 'operation_id' else empty_definition
+        def_layer = QgsVectorLayer(
+            "Point?crs=EPSG:4326&field=PointID:string",
+            "Total Station Points",
+            "memory",
         )
-        def_layer.defaultValue.side_effect = lambda idx, *_args: (
-            6 if def_fields.at(idx).name() == 'operation_id' else None
-        )
+        self.assertTrue(def_layer.isValid())
 
-        import ui.import_summary_dialog as isd
-        orig_qgsfeature = isd.QgsFeature
-        isd.QgsFeature = lambda fields: QgsFeature(fields)
-        try:
-            new_feature = self.dialog._create_feature_with_target_structure(temp_feature, def_layer)
-        finally:
-            isd.QgsFeature = orig_qgsfeature
+        new_feature = self._feature_copy_helper()._create_feature_with_target_structure(temp_feature, def_layer)
+
+        self.assertEqual(new_feature['PointID'], 'TS001')
+
+    def test_apply_layer_default_value_when_source_field_missing(self):
+        """Missing source attributes should be populated from target layer default values."""
+        from qgis.core import QgsDefaultValue, QgsFields, QgsField, QgsFeature, QgsGeometry, QgsPointXY, QgsVectorLayer
+        from qgis.PyQt.QtCore import QVariant
+
+        temp_fields = QgsFields()
+        temp_fields.append(QgsField('pointid', QVariant.String))
+        temp_feature = QgsFeature(temp_fields)
+        temp_feature.setAttribute('pointid', 'TS001')
+        temp_feature.setGeometry(QgsGeometry.fromPointXY(QgsPointXY(100.0, 200.0)))
+
+        def_layer = QgsVectorLayer(
+            "Point?crs=EPSG:4326&field=PointID:string&field=operation_id:integer",
+            "Total Station Points",
+            "memory",
+        )
+        self.assertTrue(def_layer.isValid())
+        operation_idx = def_layer.fields().indexOf('operation_id')
+        def_layer.setDefaultValueDefinition(operation_idx, QgsDefaultValue('6'))
+
+        new_feature = self._feature_copy_helper()._create_feature_with_target_structure(temp_feature, def_layer)
 
         self.assertEqual(new_feature['PointID'], 'TS001')
         self.assertEqual(new_feature['operation_id'], 6)
+
+    def test_topo_import_applies_default_values_with_real_layers(self):
+        """Topo CSV validation should fill definitive defaults using QgsVectorLayerUtils."""
+        from qgis.core import (
+            QgsDefaultValue,
+            QgsFeature,
+            QgsFields,
+            QgsField,
+            QgsGeometry,
+            QgsPointXY,
+            QgsVectorLayer,
+        )
+        from qgis.PyQt.QtCore import QVariant
+
+        def_layer = QgsVectorLayer(
+            "Point?crs=EPSG:4326&field=pointid:string&field=site_code:string&field=sequence:integer",
+            "Total Station Points",
+            "memory",
+        )
+        self.assertTrue(def_layer.isValid())
+        site_idx = def_layer.fields().indexOf('site_code')
+        sequence_idx = def_layer.fields().indexOf('sequence')
+        def_layer.setDefaultValueDefinition(site_idx, QgsDefaultValue("'SITE-A'"))
+        def_layer.setDefaultValueDefinition(sequence_idx, QgsDefaultValue('maximum("sequence") + 1'))
+
+        def_layer.startEditing()
+        existing = QgsFeature(def_layer.fields())
+        existing.setGeometry(QgsGeometry.fromPointXY(QgsPointXY(1.0, 2.0)))
+        existing.setAttribute('pointid', 'P1')
+        existing.setAttribute('site_code', 'SITE-A')
+        existing.setAttribute('sequence', 3)
+        def_layer.addFeature(existing)
+        def_layer.commitChanges()
+
+        temp_fields = QgsFields()
+        temp_fields.append(QgsField('pointid', QVariant.String))
+        temp_fields.append(QgsField('x', QVariant.Double))
+        temp_fields.append(QgsField('y', QVariant.Double))
+        temp_fields.append(QgsField('z', QVariant.Double))
+        temp_feature = QgsFeature(temp_fields)
+        temp_feature.setGeometry(QgsGeometry.fromPointXY(QgsPointXY(100.0, 200.0)))
+        temp_feature.setAttribute('pointid', 'TS002')
+
+        new_feature = self._feature_copy_helper()._create_feature_with_target_structure(temp_feature, def_layer)
+
+        self.assertEqual(new_feature['pointid'], 'TS002')
+        self.assertEqual(new_feature['site_code'], 'SITE-A')
+        self.assertEqual(new_feature['sequence'], 4)
+
+    def test_topo_csv_date_copied_to_definitive_layer(self):
+        """Survey date from the temp topo layer should override definitive defaults."""
+        from qgis.core import (
+            QgsDefaultValue,
+            QgsFeature,
+            QgsGeometry,
+            QgsPointXY,
+            QgsVectorLayer,
+        )
+        from qgis.PyQt.QtCore import QDate
+
+        def_layer = QgsVectorLayer(
+            "Point?crs=EPSG:4326&field=pointid:string&field=DateLeve:date",
+            "Total Station Points",
+            "memory",
+        )
+        self.assertTrue(def_layer.isValid())
+        date_idx = def_layer.fields().indexOf('DateLeve')
+        def_layer.setDefaultValueDefinition(date_idx, QgsDefaultValue("to_date('2000-01-01')"))
+
+        temp_layer = QgsVectorLayer(
+            "Point?crs=EPSG:4326&field=pointid:string&field=DateLeve:date",
+            "Imported_CSV_Points",
+            "memory",
+        )
+        self.assertTrue(temp_layer.isValid())
+        temp_feature = QgsFeature(temp_layer.fields())
+        temp_feature.setGeometry(QgsGeometry.fromPointXY(QgsPointXY(100.0, 200.0)))
+        temp_feature.setAttribute('pointid', 'PINC150725')
+        temp_feature.setAttribute('DateLeve', QDate(2025, 7, 15))
+
+        new_feature = self._feature_copy_helper()._create_feature_with_target_structure(
+            temp_feature, def_layer
+        )
+
+        self.assertEqual(new_feature['pointid'], 'PINC150725')
+        self.assertEqual(new_feature['DateLeve'], QDate(2025, 7, 15))
 
 
 if __name__ == '__main__':

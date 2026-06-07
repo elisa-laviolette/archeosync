@@ -239,16 +239,22 @@ class TestStyleCopying(unittest.TestCase):
         mock_remap.assert_called_once_with(
             target_layer,
             {"topo_materials": "archeosync_import_new"},
+            source_layer,
         )
 
     @patch.object(QGISLayerService, "_remap_layer_relation_references")
     @patch.object(QGISLayerService, "_copy_layer_display_expression")
+    @patch.object(
+        QGISLayerService,
+        "_restore_field_and_form_configuration_after_style_copy",
+    )
     @patch.object(QGISLayerService, "copy_layer_style_and_forms")
     @patch.object(QGISLayerService, "copy_layer_relations_for_temporary_layer")
     def test_configure_temporary_import_layer_orchestrates_copy_and_remap(
         self,
         mock_copy_relations,
         mock_copy_style,
+        mock_restore_field_and_form,
         mock_copy_display_expression,
         mock_remap,
     ):
@@ -271,10 +277,228 @@ class TestStyleCopying(unittest.TestCase):
 
         mock_copy_relations.assert_called_once_with(source_layer, target_layer)
         mock_copy_style.assert_called_once_with(source_layer, target_layer)
+        mock_restore_field_and_form.assert_called_once_with(
+            source_layer,
+            target_layer,
+        )
         mock_copy_display_expression.assert_called_once_with(source_layer, target_layer)
         mock_remap.assert_called_once_with(
             target_layer,
             {"objects_materials": "archeosync_import_new"},
+            source_layer,
+        )
+
+    def test_remap_layer_relation_references_updates_relation_reference_widgets(self):
+        """RelationReference widgets must point to cloned relation ids, not definitive ones."""
+        from qgis.core import QgsEditorWidgetSetup
+
+        materials_layer = QgsVectorLayer(
+            "Point?crs=EPSG:4326&field=id:integer&field=name:string",
+            "Materials",
+            "memory",
+        )
+        source_layer = QgsVectorLayer(
+            "Point?crs=EPSG:4326&field=id:integer&field=material_id:integer",
+            "Objects",
+            "memory",
+        )
+        target_layer = QgsVectorLayer(
+            "Point?crs=EPSG:4326&field=id:integer&field=material_id:integer",
+            "New Objects",
+            "memory",
+        )
+        for layer in (materials_layer, source_layer, target_layer):
+            self.assertTrue(layer.isValid())
+
+        project = QgsProject.instance()
+        project.addMapLayer(materials_layer, False)
+        project.addMapLayer(source_layer, False)
+        project.addMapLayer(target_layer, False)
+        self._create_test_relation(
+            "archeosync_import_new",
+            target_layer,
+            "material_id",
+            materials_layer,
+            "id",
+        )
+
+        material_field_idx = target_layer.fields().indexOf("material_id")
+        self.assertGreaterEqual(material_field_idx, 0)
+        target_layer.setEditorWidgetSetup(
+            material_field_idx,
+            QgsEditorWidgetSetup(
+                "RelationReference",
+                {"Relation": "objects_materials", "AllowNULL": True},
+            ),
+        )
+
+        self.layer_service._remap_layer_relation_references(
+            target_layer,
+            {"objects_materials": "archeosync_import_new"},
+            source_layer,
+        )
+
+        remapped_widget = target_layer.editorWidgetSetup(material_field_idx)
+        self.assertEqual(remapped_widget.type(), "RelationReference")
+        self.assertEqual(
+            remapped_widget.config().get("Relation"),
+            "archeosync_import_new",
+        )
+
+        project.relationManager().removeRelation("archeosync_import_new")
+        project.removeMapLayers(
+            [materials_layer.id(), source_layer.id(), target_layer.id()]
+        )
+
+    def _create_test_relation(
+        self,
+        relation_id: str,
+        referencing_layer: QgsVectorLayer,
+        referencing_field: str,
+        referenced_layer: QgsVectorLayer,
+        referenced_field: str,
+    ):
+        """Create and register a QgsRelation in the current project."""
+        from qgis.core import QgsRelation
+
+        relation = QgsRelation()
+        relation.setId(relation_id)
+        relation.setName(relation_id)
+        relation.setReferencingLayer(referencing_layer.id())
+        relation.setReferencedLayer(referenced_layer.id())
+        relation.addFieldPair(referencing_field, referenced_field)
+        QgsProject.instance().relationManager().addRelation(relation)
+        return relation
+
+    def test_remap_layer_relation_references_uses_target_referencing_relations(self):
+        """Stale definitive relation ids must be replaced using cloned relations."""
+        from qgis.core import QgsEditorWidgetSetup
+
+        materials_layer = QgsVectorLayer(
+            "Point?crs=EPSG:4326&field=id:integer&field=name:string",
+            "Materials",
+            "memory",
+        )
+        source_layer = QgsVectorLayer(
+            "Point?crs=EPSG:4326&field=id:integer&field=material_id:integer",
+            "Objects",
+            "memory",
+        )
+        target_layer = QgsVectorLayer(
+            "Point?crs=EPSG:4326&field=id:integer&field=material_id:integer",
+            "New Objects",
+            "memory",
+        )
+        for layer in (materials_layer, source_layer, target_layer):
+            self.assertTrue(layer.isValid())
+
+        project = QgsProject.instance()
+        project.addMapLayer(materials_layer, False)
+        project.addMapLayer(source_layer, False)
+        project.addMapLayer(target_layer, False)
+
+        self._create_test_relation(
+            "objects_materials",
+            source_layer,
+            "material_id",
+            materials_layer,
+            "id",
+        )
+        self._create_test_relation(
+            "archeosync_import_abc",
+            target_layer,
+            "material_id",
+            materials_layer,
+            "id",
+        )
+
+        material_field_idx = target_layer.fields().indexOf("material_id")
+        target_layer.setEditorWidgetSetup(
+            material_field_idx,
+            QgsEditorWidgetSetup(
+                "RelationReference",
+                {
+                    "Relation": "objects_materials",
+                    "ReferencedLayerId": source_layer.id(),
+                },
+            ),
+        )
+
+        self.layer_service._remap_layer_relation_references(
+            target_layer,
+            {"objects_materials": "archeosync_import_abc"},
+            source_layer,
+        )
+
+        remapped_widget = target_layer.editorWidgetSetup(material_field_idx)
+        remapped_config = remapped_widget.config()
+        self.assertEqual(remapped_config.get("Relation"), "archeosync_import_abc")
+        self.assertEqual(remapped_config.get("ReferencedLayerId"), materials_layer.id())
+
+        project.relationManager().removeRelation("objects_materials")
+        project.relationManager().removeRelation("archeosync_import_abc")
+        project.removeMapLayers(
+            [materials_layer.id(), source_layer.id(), target_layer.id()]
+        )
+
+    def test_remap_layer_relation_references_assigns_relation_when_config_empty(self):
+        """RelationReference widgets with empty Relation must bind cloned relations."""
+        from qgis.core import QgsEditorWidgetSetup
+
+        materials_layer = QgsVectorLayer(
+            "Point?crs=EPSG:4326&field=id:integer&field=name:string",
+            "Materials",
+            "memory",
+        )
+        source_layer = QgsVectorLayer(
+            "Point?crs=EPSG:4326&field=id:integer&field=material_id:integer",
+            "Objects",
+            "memory",
+        )
+        target_layer = QgsVectorLayer(
+            "Point?crs=EPSG:4326&field=id:integer&field=material_id:integer",
+            "New Objects",
+            "memory",
+        )
+        for layer in (materials_layer, source_layer, target_layer):
+            self.assertTrue(layer.isValid())
+
+        project = QgsProject.instance()
+        project.addMapLayer(materials_layer, False)
+        project.addMapLayer(source_layer, False)
+        project.addMapLayer(target_layer, False)
+
+        self._create_test_relation(
+            "archeosync_import_abc",
+            target_layer,
+            "material_id",
+            materials_layer,
+            "id",
+        )
+
+        source_field_idx = source_layer.fields().indexOf("material_id")
+        source_layer.setEditorWidgetSetup(
+            source_field_idx,
+            QgsEditorWidgetSetup("RelationReference", {}),
+        )
+
+        self.layer_service._remap_layer_relation_references(
+            target_layer,
+            {"objects_materials": "archeosync_import_abc"},
+            source_layer,
+        )
+
+        target_field_idx = target_layer.fields().indexOf("material_id")
+        remapped_widget = target_layer.editorWidgetSetup(target_field_idx)
+        self.assertEqual(remapped_widget.type(), "RelationReference")
+        self.assertEqual(
+            remapped_widget.config().get("Relation"),
+            "archeosync_import_abc",
+        )
+
+        project.relationManager().removeRelation("archeosync_import_abc")
+        project.removeMapLayers(
+            [materials_layer.id(), source_layer.id(), target_layer.id()]
         )
 
     @patch("archeosync.services.layer_service.uuid.uuid4")

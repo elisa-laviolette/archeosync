@@ -212,7 +212,7 @@ QGIS-specific implementation for field project import and processing including:
 - **Global project metadata**: When a global field project is created, `archeosync_project.json` stores `import_layers` with the original QGIS layer display names used for each exported `.gpkg`. Import uses those names so completed global projects stay aligned with the source project even if plugin settings change later.
 - **Smart Feature Comparison**: Uses unique signatures based on attributes and geometry to identify duplicates (excluding layer-specific feature IDs)
 - **Layer Creation**: Creates new "New Objects", "New Features", and "New Small Finds" layers in the project
-- **Temporary Layer Configuration**: Copies symbology, display expression, form configuration (including field widgets), and QGIS project relations from configured definitive layers to each temporary import layer (reference layers such as materials and types are preserved)
+- **Temporary Layer Configuration**: For each temporary import layer (`New Objects`, etc.), clones QGIS project relations from the definitive layer first, then copies symbology, display expression, and form configuration, re-applies field widgets and edit form (QML/virtual-field copy can reset them), and finally binds `RelationReference` widgets to the cloned relations via `target_layer.referencingRelations(field_index)` (QGIS only lists relations that apply to the temporary layer in the field widget UI; stale definitive-layer relation ids are replaced and `ReferencedLayerId` is refreshed)
 - **Feature Collection**: Collects all features from completed field recordings
 - **Automatic Archiving**: Moves imported field projects to the configured archive folder after successful import
 - **Validation**: Validates project structure and data integrity
@@ -255,6 +255,7 @@ QGIS-specific implementation for CSV import operations including:
 - Column mapping across multiple CSV files with different structures
 - PointZ vector layer creation with attribute preservation; the memory layer includes a string field ``identifier`` when the CSV has no such column, using plugin setting ``csv_topo_identifier_column``, a single unambiguous text column, or a one-time user choice when several text columns exist
 - ``check_csv_identifier_column_requirement`` preflight used by the import workflow before creating features
+- **Survey date from filename**: When the configured total station layer has a date/datetime field (auto-detected, or chosen via optional ``csv_topo_date_field`` in settings), ``Imported_CSV_Points`` includes that field with the same name and type. The attribute is filled from each CSV basename unless the row already provides a value, and is copied to the definitive layer during validation. The date field is selected from a dropdown listing ``Date`` / ``DateTime`` fields on the total station layer.
 - Automatic project integration
 - **Temporary Layer Configuration**: Copies symbology (renderer only), display expression, overlapping field widgets, and project relations from the configured total station points layer to ``Imported_CSV_Points``. Full QML/form copy is skipped because CSV temp layers usually have a different schema than the definitive topo layer (loading the complete style tree can crash QGIS).
 - Comprehensive error handling and validation
@@ -337,7 +338,7 @@ Dialog for displaying comprehensive import statistics after successful data impo
     - "New Small Finds" → configured Small Finds layer
     - "Imported_CSV_Points" → configured Total Station Points layer
   - **Edit Mode Management**: Keeps definitive layers in edit mode for user review
-  - **Default Value Replay**: For missing attributes, evaluates and applies definitive layer default expressions during programmatic feature copy
+  - **Default Value Replay**: Uses ``QgsVectorLayerUtils.createFeature`` with the definitive layer expression context so missing attributes receive the same default expressions as interactive digitizing
   - **Feature Selection**: Automatically selects newly copied features for easy identification
   - **User Control**: Allows users to save or cancel changes as needed
 - **User-Friendly Interface**: Clean, organized dialog with intuitive design

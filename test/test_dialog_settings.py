@@ -197,6 +197,25 @@ class TestArcheoSyncDialogSettings(unittest.TestCase):
         
         self.assertEqual(self.dialog._field_projects_widget.input_field.text(), original_folder)
 
+    def test_populate_total_station_date_fields_lists_date_and_datetime(self):
+        """Date field dropdown should list temporal fields from the topo layer."""
+        self.mock_layer_service.get_layer_fields.return_value = [
+            {"name": "pointid", "type": "String", "is_temporal": False},
+            {"name": "DateLeve", "type": "Date", "is_temporal": True},
+            {"name": "Created", "type": "DateTime", "is_temporal": True},
+            {"name": "survey_ts", "type": "timestamp", "is_temporal": True},
+        ]
+
+        self.dialog._populate_total_station_date_fields("topo_layer_id", "survey_ts")
+
+        combo = self.dialog._csv_topo_date_field_combo
+        self.assertEqual(combo.count(), 4)
+        self.assertEqual(combo.itemData(0), "")
+        self.assertEqual(combo.itemData(1), "DateLeve")
+        self.assertEqual(combo.itemData(2), "Created")
+        self.assertEqual(combo.itemData(3), "survey_ts")
+        self.assertEqual(combo.currentData(), "survey_ts")
+
 
 if __name__ == '__main__':
     unittest.main() 

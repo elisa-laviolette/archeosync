@@ -12,7 +12,7 @@ import pytest
 import tempfile
 import os
 import csv
-from unittest.mock import Mock, MagicMock, patch
+from unittest.mock import Mock, MagicMock, patch, call
 from typing import List, Dict, Any
 
 try:
@@ -963,3 +963,193 @@ class TestCSVImportService:
         self.mock_settings_manager.get_value.return_value = ""
         r = self.csv_service.check_csv_identifier_column_requirement([csv1], mapping)
         assert r.is_valid is True
+
+    def _mock_definitive_topo_date_field(self, mock_project, field_name="Date"):
+        """Configure mocks so the definitive topo layer exposes a Date field."""
+        date_field = Mock()
+        date_field.name.return_value = field_name
+        date_field.typeName.return_value = "Date"
+        definitive_layer = Mock()
+        definitive_layer.fields.return_value = [date_field]
+
+        def _get_value(key, default=None):
+            if key == "total_station_points_layer":
+                return "topo_layer_id"
+            return default
+
+        self.mock_settings_manager.get_value.side_effect = _get_value
+        mock_project.instance.return_value.mapLayer.return_value = definitive_layer
+        return definitive_layer
+
+    @patch('archeosync.services.csv_import_service.QgsVectorLayer')
+    @patch('archeosync.services.csv_import_service.QgsFeature')
+    @patch('archeosync.services.csv_import_service.QgsGeometry')
+    @patch('archeosync.services.csv_import_service.QgsPointXY')
+    @patch('qgis.core.QgsProject')
+    def test_import_csv_files_sets_date_from_filename(
+        self, mock_project, mock_point, mock_geometry, mock_feature, mock_layer
+    ):
+        """Imported points receive the survey date parsed from the CSV basename."""
+        csv1 = self._create_test_csv(
+            "survey_2025-06-07.csv",
+            ["X", "Y", "Z", "Description"],
+            [["100.0", "200.0", "10.5", "Point 1"]],
+        )
+
+        mock_layer_instance = Mock()
+        mock_layer.return_value = mock_layer_instance
+        mock_layer_instance.isValid.return_value = True
+        mock_fields = []
+        for name in ("x", "y", "z", "description", "identifier", "Date"):
+            field = Mock()
+            field.name.return_value = name
+            mock_fields.append(field)
+        mock_layer_instance.fields.return_value = mock_fields
+        mock_layer_instance.startEditing = Mock()
+        mock_layer_instance.addFeature = Mock()
+        mock_layer_instance.commitChanges = Mock()
+
+        mock_feature_instance = Mock()
+        mock_feature.return_value = mock_feature_instance
+        mock_feature_instance.setId = Mock()
+        mock_feature_instance.setGeometry = Mock()
+        mock_feature_instance.setAttribute = Mock()
+        mock_feature_instance.attribute = Mock(return_value=None)
+
+        mock_geometry.fromPointXY = Mock(return_value=Mock())
+        mock_point.return_value = Mock()
+
+        mock_project_instance = Mock()
+        mock_project.instance.return_value = mock_project_instance
+        mock_project_instance.addMapLayer = Mock()
+        mock_project_instance.crs.return_value = Mock(authid=Mock(return_value="EPSG:4326"))
+
+        self._mock_definitive_topo_date_field(mock_project, field_name="Date")
+
+        result = self.csv_service.import_csv_files([csv1])
+
+        assert result.is_valid is True
+        date_calls = [
+            call
+            for call in mock_feature_instance.setAttribute.call_args_list
+            if call.args[0] == "Date"
+        ]
+        assert date_calls
+        assert date_calls[0].args[1] == "2025-06-07"
+
+    @patch('archeosync.services.csv_import_service.QgsVectorLayer')
+    @patch('archeosync.services.csv_import_service.QgsFeature')
+    @patch('archeosync.services.csv_import_service.QgsGeometry')
+    @patch('archeosync.services.csv_import_service.QgsPointXY')
+    @patch('qgis.core.QgsProject')
+    def test_import_csv_files_does_not_override_existing_date_value(
+        self, mock_project, mock_point, mock_geometry, mock_feature, mock_layer
+    ):
+        """Filename date is skipped when the CSV row already provides a date."""
+        csv1 = self._create_test_csv(
+            "survey_2025-06-07.csv",
+            ["X", "Y", "Z", "Date"],
+            [["100.0", "200.0", "10.5", "2024-01-15"]],
+        )
+
+        mock_layer_instance = Mock()
+        mock_layer.return_value = mock_layer_instance
+        mock_layer_instance.isValid.return_value = True
+        mock_fields = []
+        for name in ("x", "y", "z", "Date", "identifier"):
+            field = Mock()
+            field.name.return_value = name
+            mock_fields.append(field)
+        mock_layer_instance.fields.return_value = mock_fields
+        mock_layer_instance.startEditing = Mock()
+        mock_layer_instance.addFeature = Mock()
+        mock_layer_instance.commitChanges = Mock()
+
+        mock_feature_instance = Mock()
+        mock_feature.return_value = mock_feature_instance
+        mock_feature_instance.setId = Mock()
+        mock_feature_instance.setGeometry = Mock()
+        mock_feature_instance.setAttribute = Mock()
+        mock_feature_instance.attribute = Mock(return_value="2024-01-15")
+
+        mock_geometry.fromPointXY = Mock(return_value=Mock())
+        mock_point.return_value = Mock()
+
+        mock_project_instance = Mock()
+        mock_project.instance.return_value = mock_project_instance
+        mock_project_instance.addMapLayer = Mock()
+        mock_project_instance.crs.return_value = Mock(authid=Mock(return_value="EPSG:4326"))
+
+        self._mock_definitive_topo_date_field(mock_project, field_name="Date")
+
+        result = self.csv_service.import_csv_files([csv1])
+
+        assert result.is_valid is True
+        date_calls = [
+            call
+            for call in mock_feature_instance.setAttribute.call_args_list
+            if call.args[0] == "Date" and call.args[1] == "2025-06-07"
+        ]
+        assert not date_calls
+
+    def test_resolve_topo_date_field_info_uses_definitive_layer(self):
+        """Date field name and type come from the configured definitive topo layer."""
+        definitive_layer = Mock()
+        date_field = Mock()
+        date_field.name.return_value = "DateLeve"
+        date_field.typeName.return_value = "Date"
+        definitive_layer.fields.return_value = [date_field]
+
+        self.mock_settings_manager.get_value.side_effect = (
+            lambda key, default=None: "topo_layer_id"
+            if key == "total_station_points_layer"
+            else default
+        )
+        with patch('archeosync.services.csv_import_service.QgsProject') as mock_project:
+            mock_project.instance.return_value.mapLayer.return_value = definitive_layer
+            info = self.csv_service._resolve_topo_date_field_info({}, ["PINC150725.csv"])
+
+        assert info == {"name": "DateLeve", "uri_type": "date"}
+
+    def test_resolve_topo_date_field_info_detects_timestamp_field(self):
+        """Auto-detection should recognize PostGIS timestamp fields."""
+        definitive_layer = Mock()
+        timestamp_field = Mock()
+        timestamp_field.name.return_value = "survey_ts"
+        timestamp_field.typeName.return_value = "timestamp"
+        timestamp_field.type.return_value = 16
+        definitive_layer.fields.return_value = [timestamp_field]
+
+        self.mock_settings_manager.get_value.side_effect = (
+            lambda key, default=None: "topo_layer_id"
+            if key == "total_station_points_layer"
+            else default
+        )
+        with patch('archeosync.services.csv_import_service.QgsProject') as mock_project:
+            mock_project.instance.return_value.mapLayer.return_value = definitive_layer
+            info = self.csv_service._resolve_topo_date_field_info({}, ["PINC150725.csv"])
+
+        assert info == {"name": "survey_ts", "uri_type": "datetime"}
+
+    def test_resolve_topo_date_field_info_uses_configured_field_name(self):
+        """csv_topo_date_field selects a non-default date column on the definitive layer."""
+        definitive_layer = Mock()
+        survey_field = Mock()
+        survey_field.name.return_value = "DateLeve"
+        survey_field.typeName.return_value = "Date"
+        other_field = Mock()
+        other_field.name.return_value = "Created"
+        other_field.typeName.return_value = "DateTime"
+        definitive_layer.fields.return_value = [other_field, survey_field]
+
+        self.mock_settings_manager.get_value.side_effect = (
+            lambda key, default=None: {
+                "total_station_points_layer": "topo_layer_id",
+                "csv_topo_date_field": "DateLeve",
+            }.get(key, default)
+        )
+        with patch('archeosync.services.csv_import_service.QgsProject') as mock_project:
+            mock_project.instance.return_value.mapLayer.return_value = definitive_layer
+            info = self.csv_service._resolve_topo_date_field_info({}, ["points.csv"])
+
+        assert info == {"name": "DateLeve", "uri_type": "date"}

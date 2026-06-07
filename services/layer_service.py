@@ -439,13 +439,20 @@ class QGISLayerService(ILayerService):
         
         fields = []
         for field in layer.fields():
+            type_name = field.typeName()
+            type_id = field.type()
+            try:
+                from .field_type_utils import is_temporal_field
+            except ImportError:
+                from field_type_utils import is_temporal_field
             field_info = {
                 'name': field.name(),
-                'type': field.typeName(),
-                'type_id': field.type(),
+                'type': type_name,
+                'type_id': type_id,
                 'comment': field.comment() if hasattr(field, 'comment') else '',
                 'is_numeric': field.isNumeric(),
-                'is_integer': field.type() in [2, 4, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30]  # QGIS integer field types (excluding 6 which is Real/float and 10 which is string)
+                'is_integer': field.type() in [2, 4, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30],  # QGIS integer field types (excluding 6 which is Real/float and 10 which is string)
+                'is_temporal': is_temporal_field(type_name=type_name, type_id=type_id),
             }
             fields.append(field_info)
         
@@ -832,9 +839,12 @@ class QGISLayerService(ILayerService):
         """
         Apply definitive-layer style, forms, and project relations to a temporary import layer.
 
-        Copies symbology, display expression, and form widgets from the definitive layer,
-        recreates QGIS relations involving that layer (e.g. to materials or types tables),
-        and remaps relation references in field widgets and form layout.
+        Order of operations:
+
+        1. Clone project relations involving the definitive layer.
+        2. Copy symbology, display expression, and form widgets from the definitive layer.
+        3. Re-apply field widgets and edit form (QML/virtual-field copy can reset them).
+        4. Remap relation ids in field widgets and form layout to the cloned relations.
 
         Args:
             source_layer: Configured definitive project layer
@@ -850,9 +860,17 @@ class QGISLayerService(ILayerService):
             target_layer,
         )
         self.copy_layer_style_and_forms(source_layer, target_layer)
+        # QML copy may add virtual fields and reset editor widgets before remap runs.
+        self._restore_field_and_form_configuration_after_style_copy(
+            source_layer,
+            target_layer,
+        )
         self._copy_layer_display_expression(source_layer, target_layer)
-        if relation_id_mapping:
-            self._remap_layer_relation_references(target_layer, relation_id_mapping)
+        self._remap_layer_relation_references(
+            target_layer,
+            relation_id_mapping,
+            source_layer,
+        )
 
     def configure_temporary_topo_csv_layer(
         self,
@@ -883,8 +901,42 @@ class QGISLayerService(ILayerService):
         self._copy_renderer_fallback(source_layer, target_layer)
         self._copy_layer_display_expression(source_layer, target_layer)
         self._copy_overlapping_field_configurations(source_layer, target_layer)
-        if relation_id_mapping:
-            self._remap_layer_relation_references(target_layer, relation_id_mapping)
+        self._remap_layer_relation_references(
+            target_layer,
+            relation_id_mapping,
+            source_layer,
+        )
+
+    def _restore_field_and_form_configuration_after_style_copy(
+        self,
+        source_layer: QgsVectorLayer,
+        target_layer: QgsVectorLayer,
+    ) -> None:
+        """
+        Re-apply field widgets and edit form after QML/style copy.
+
+        ``loadNamedStyle`` and virtual-field creation can reset or misalign editor
+        widget setups copied from the definitive layer. Restoring them here keeps
+        relation remapping reliable for temporary import layers.
+        """
+        if source_layer is None or target_layer is None:
+            return
+        if not isinstance(source_layer, QgsVectorLayer) or not isinstance(
+            target_layer, QgsVectorLayer
+        ):
+            return
+
+        self._override_qml_field_configurations_with_current(source_layer, target_layer)
+        if hasattr(source_layer, "editFormConfig") and hasattr(
+            target_layer, "setEditFormConfig"
+        ):
+            try:
+                target_layer.setEditFormConfig(source_layer.editFormConfig())
+            except Exception as e:
+                print(
+                    f"Error restoring edit form for {target_layer.name()} "
+                    f"after style copy: {e}"
+                )
 
     def _copy_layer_display_expression(
         self,
@@ -1171,31 +1223,81 @@ class QGISLayerService(ILayerService):
         self,
         target_layer: QgsVectorLayer,
         relation_id_mapping: Dict[str, str],
+        source_layer: Optional[QgsVectorLayer] = None,
     ) -> None:
         """
         Update relation ids in field widgets and edit-form layout after relation cloning.
+
+        QGIS fills the RelationReference dropdown from
+        ``target_layer.referencingRelations(field_index)``. Widgets copied from the
+        definitive layer often keep a stale relation id that still exists in the
+        project but no longer applies to the temporary layer, which leaves the
+        Relation field empty in the UI.
         """
-        if not relation_id_mapping or target_layer is None:
+        if target_layer is None:
             return
+
+        relation_id_mapping = relation_id_mapping or {}
 
         try:
             from qgis.core import QgsEditorWidgetSetup
 
+            project = QgsProject.instance()
+            relation_manager = (
+                project.relationManager() if project is not None else None
+            )
+
             target_fields = target_layer.fields()
             for field_index in range(target_fields.count()):
+                field_name = target_fields.at(field_index).name()
                 editor_widget = target_layer.editorWidgetSetup(field_index)
-                if not editor_widget or editor_widget.type() != "RelationReference":
-                    continue
-                config_dict = dict(editor_widget.config())
-                old_relation_id = config_dict.get("Relation")
-                if old_relation_id in relation_id_mapping:
-                    config_dict["Relation"] = relation_id_mapping[old_relation_id]
-                    target_layer.setEditorWidgetSetup(
-                        field_index,
-                        QgsEditorWidgetSetup("RelationReference", config_dict),
-                    )
+                source_widget = None
+                if source_layer is not None:
+                    source_field_idx = source_layer.fields().indexOf(field_name)
+                    if source_field_idx >= 0:
+                        source_widget = source_layer.editorWidgetSetup(
+                            source_field_idx
+                        )
 
-            if hasattr(target_layer, "editFormConfig"):
+                uses_relation_reference = (
+                    (editor_widget and editor_widget.type() == "RelationReference")
+                    or (
+                        source_widget
+                        and source_widget.type() == "RelationReference"
+                    )
+                )
+                if not uses_relation_reference:
+                    continue
+
+                base_widget = editor_widget or source_widget
+                base_config = (
+                    dict(base_widget.config()) if base_widget is not None else {}
+                )
+                cloned_relation = self._find_cloned_relation_for_field(
+                    target_layer=target_layer,
+                    field_index=field_index,
+                    source_layer=source_layer,
+                    relation_id_mapping=relation_id_mapping,
+                    relation_manager=relation_manager,
+                    base_config=base_config,
+                )
+                if cloned_relation is None or not cloned_relation.isValid():
+                    print(
+                        f"No cloned relation found for field '{field_name}' on "
+                        f"'{target_layer.name()}'"
+                    )
+                    continue
+
+                new_config = self._relation_reference_config_for_relation(
+                    cloned_relation,
+                    base_config,
+                )
+                target_layer.setEditorWidgetSetup(
+                    field_index,
+                    QgsEditorWidgetSetup("RelationReference", new_config),
+                )
+
+            if relation_id_mapping and hasattr(target_layer, "editFormConfig"):
                 form_config = target_layer.editFormConfig()
                 if form_config is not None:
                     self._remap_edit_form_relation_references(
@@ -1207,6 +1309,126 @@ class QGISLayerService(ILayerService):
             print(
                 f"Error remapping relation references for {target_layer.name()}: {e}"
             )
+
+    def _find_cloned_relation_for_field(
+        self,
+        target_layer: QgsVectorLayer,
+        field_index: int,
+        source_layer: Optional[QgsVectorLayer],
+        relation_id_mapping: Dict[str, str],
+        relation_manager: Any,
+        base_config: Dict[str, Any],
+    ) -> Any:
+        """Resolve the cloned project relation that applies to a target-layer field."""
+        from qgis.core import QgsRelation
+
+        field_name = target_layer.fields().at(field_index).name()
+        invalid_relation = QgsRelation()
+
+        old_relation_id = base_config.get("Relation")
+        if old_relation_id is not None:
+            old_relation_id = str(old_relation_id)
+            mapped_relation_id = relation_id_mapping.get(old_relation_id)
+            if mapped_relation_id and relation_manager is not None:
+                mapped_relation = relation_manager.relation(mapped_relation_id)
+                if mapped_relation.isValid():
+                    return mapped_relation
+
+        target_relations: List[Any] = []
+        if hasattr(target_layer, "referencingRelations"):
+            try:
+                target_relations = list(
+                    target_layer.referencingRelations(field_index)
+                )
+            except Exception:
+                target_relations = []
+
+        if len(target_relations) == 1:
+            return target_relations[0]
+
+        if (
+            len(target_relations) > 1
+            and relation_manager is not None
+            and old_relation_id
+        ):
+            source_relation = relation_manager.relation(old_relation_id)
+            if source_relation.isValid():
+                source_referenced_id = source_relation.referencedLayerId()
+                for relation in target_relations:
+                    if relation.referencedLayerId() == source_referenced_id:
+                        return relation
+
+        if relation_manager is not None and relation_id_mapping:
+            for new_relation_id in relation_id_mapping.values():
+                relation = relation_manager.relation(new_relation_id)
+                if not relation.isValid():
+                    continue
+                if relation.referencingLayerId() != target_layer.id():
+                    continue
+                field_pairs = self._normalize_relation_field_pairs(
+                    relation.fieldPairs() if hasattr(relation, "fieldPairs") else None
+                )
+                if any(
+                    referencing_field == field_name
+                    for referencing_field, _ in field_pairs
+                ):
+                    return relation
+
+        if source_layer is not None and relation_manager is not None:
+            source_field_idx = source_layer.fields().indexOf(field_name)
+            if source_field_idx >= 0 and hasattr(
+                source_layer, "referencingRelations"
+            ):
+                try:
+                    source_relations = list(
+                        source_layer.referencingRelations(source_field_idx)
+                    )
+                except Exception:
+                    source_relations = []
+                for source_relation in source_relations:
+                    source_relation_id = (
+                        source_relation.id()
+                        if hasattr(source_relation, "id")
+                        else ""
+                    )
+                    mapped_relation_id = relation_id_mapping.get(
+                        str(source_relation_id)
+                    )
+                    if mapped_relation_id:
+                        mapped_relation = relation_manager.relation(
+                            mapped_relation_id
+                        )
+                        if mapped_relation.isValid():
+                            return mapped_relation
+
+        return invalid_relation
+
+    def _relation_reference_config_for_relation(
+        self,
+        relation: Any,
+        base_config: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Build a RelationReference widget config bound to a project relation."""
+        config = dict(base_config or {})
+        relation_id = relation.id() if hasattr(relation, "id") else ""
+        if relation_id:
+            config["Relation"] = str(relation_id)
+
+        referenced_layer = (
+            relation.referencedLayer() if hasattr(relation, "referencedLayer") else None
+        )
+        if referenced_layer is not None:
+            config["ReferencedLayerId"] = referenced_layer.id()
+            config["ReferencedLayerName"] = referenced_layer.name()
+            if hasattr(referenced_layer, "dataProvider"):
+                provider = referenced_layer.dataProvider()
+                if provider is not None:
+                    if hasattr(provider, "name"):
+                        config["ReferencedLayerProviderKey"] = provider.name()
+                    if hasattr(provider, "dataSourceUri"):
+                        config["ReferencedLayerDataSource"] = provider.dataSourceUri()
+
+        return config
 
     def _remap_edit_form_relation_references(
         self,
@@ -1235,6 +1457,8 @@ class QGISLayerService(ILayerService):
         for child in children:
             if hasattr(child, "relationId") and hasattr(child, "setRelationId"):
                 current_relation_id = child.relationId()
+                if current_relation_id:
+                    current_relation_id = str(current_relation_id)
                 if current_relation_id in relation_id_mapping:
                     child.setRelationId(relation_id_mapping[current_relation_id])
             if hasattr(child, "children"):

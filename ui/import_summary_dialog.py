@@ -1614,42 +1614,52 @@ class ImportSummaryDockWidget(QDockWidget):
     def _create_feature_with_target_structure(self, source_feature, target_layer):
         """Create a new feature with the target layer's field structure."""
         try:
-            from qgis.core import QgsFeature
-            
-            # Create a new feature with the target layer's fields
-            # This automatically assigns a new FID, avoiding conflicts
-            new_feature = QgsFeature(target_layer.fields())
-            
-            # Copy geometry if both layers have geometry
-            if source_feature.geometry() and not source_feature.geometry().isEmpty():
-                new_feature.setGeometry(source_feature.geometry())
-            
-            # Copy attributes by field name, excluding FID fields (case-insensitive matching)
-            # Build a mapping from lower-case source field names to their indices
-            source_fields = source_feature.fields()
-            source_field_name_to_index = {source_fields.at(i).name().lower(): i for i in range(source_fields.count())}
-            for field in target_layer.fields():
-                field_name = field.name()
-                # Skip FID-related fields to avoid conflicts
-                if field_name.lower() in ['fid', 'id', 'gid', 'objectid', 'featureid']:
-                    continue
-                source_field_idx = source_field_name_to_index.get(field_name.lower(), -1)
-                if source_field_idx >= 0:
-                    # Field exists in source, copy the value
-                    source_value = source_feature[source_field_idx]
-                    # Handle NULL values properly
-                    if source_value is None or str(source_value).lower() == 'null':
-                        new_feature[field_name] = None
-                    else:
-                        new_feature[field_name] = source_value
-                else:
-                    # Field doesn't exist in source, set to NULL
-                    new_feature[field_name] = None
+            from qgis.core import QgsGeometry, QgsVectorLayerUtils
 
-            self._apply_default_values_from_target_layer(target_layer, new_feature)
-            
-            return new_feature
-            
+            geometry = (
+                source_feature.geometry()
+                if source_feature.geometry() and not source_feature.geometry().isEmpty()
+                else QgsGeometry()
+            )
+
+            attribute_map = {}
+            source_fields = source_feature.fields()
+            source_field_name_to_index = {
+                source_fields.at(i).name().lower(): i
+                for i in range(source_fields.count())
+            }
+            fid_field_names = {'fid', 'id', 'gid', 'objectid', 'featureid'}
+            target_fields = target_layer.fields()
+
+            for field_index in range(target_fields.count()):
+                field_name = target_fields.at(field_index).name()
+                if field_name.lower() in fid_field_names:
+                    continue
+
+                source_field_idx = source_field_name_to_index.get(field_name.lower(), -1)
+                if source_field_idx < 0:
+                    continue
+
+                source_value = source_feature[source_field_idx]
+                if self._is_missing_attribute_value(source_value):
+                    continue
+
+                attribute_map[field_index] = source_value
+
+            context = None
+            if hasattr(target_layer, "createExpressionContext"):
+                try:
+                    context = target_layer.createExpressionContext()
+                except Exception:
+                    context = None
+
+            return QgsVectorLayerUtils.createFeature(
+                target_layer,
+                geometry,
+                attribute_map,
+                context,
+            )
+
         except Exception as e:
             print(f"Error creating feature with target structure: {e}")
             return None
@@ -1658,13 +1668,23 @@ class ImportSummaryDockWidget(QDockWidget):
         """
         Apply target-layer default expressions for missing feature attributes.
 
-        During import validation we create features programmatically (without opening
-        QGIS edit forms), so form defaults are not automatically injected. This method
-        mirrors QGIS behavior by evaluating default expressions for empty attributes.
+        Kept for compatibility with callers that already built a feature manually.
+        Prefer :meth:`_create_feature_with_target_structure`, which delegates to
+        ``QgsVectorLayerUtils.createFeature`` so QGIS applies defaults the same way
+        as interactive digitizing.
         """
         try:
             if not hasattr(target_layer, "defaultValueDefinition") or not hasattr(target_layer, "defaultValue"):
                 return
+
+            context = None
+            if hasattr(target_layer, "createExpressionContext"):
+                try:
+                    context = target_layer.createExpressionContext()
+                    if context is not None:
+                        context.setFeature(feature)
+                except Exception:
+                    context = None
 
             fields = target_layer.fields()
             for field_index in range(fields.count()):
@@ -1680,11 +1700,20 @@ class ImportSummaryDockWidget(QDockWidget):
                 if not expression:
                     continue
 
+                if default_definition and hasattr(default_definition, "applyOnUpdate"):
+                    try:
+                        if default_definition.applyOnUpdate():
+                            continue
+                    except Exception:
+                        pass
+
                 computed_default = None
                 try:
-                    computed_default = target_layer.defaultValue(field_index, feature)
+                    if context is not None:
+                        computed_default = target_layer.defaultValue(field_index, feature, context)
+                    else:
+                        computed_default = target_layer.defaultValue(field_index, feature)
                 except TypeError:
-                    # Compatibility with signatures that only expect field index.
                     computed_default = target_layer.defaultValue(field_index)
                 except Exception:
                     computed_default = None
@@ -1694,7 +1723,6 @@ class ImportSummaryDockWidget(QDockWidget):
 
                 feature[field_name] = computed_default
         except Exception as e:
-            # Default evaluation failures should not block validation; keep copied values.
             print(f"Warning: could not apply layer default values: {e}")
 
     @staticmethod
@@ -1702,9 +1730,19 @@ class ImportSummaryDockWidget(QDockWidget):
         """Return True when a field value should be considered empty for default injection."""
         if value is None:
             return True
+        try:
+            if hasattr(value, "isNull") and callable(value.isNull) and value.isNull():
+                return True
+        except Exception:
+            pass
         if isinstance(value, str):
             stripped = value.strip()
             return stripped == "" or stripped.lower() == "null"
+        try:
+            if str(value) == "NULL":
+                return True
+        except Exception:
+            pass
         return False
 
     def _open_filtered_attribute_table(self, warning_data: WarningData) -> None:
