@@ -700,8 +700,10 @@ class ArcheoSyncPlugin(QObject):
             # Process CSV files if any are selected
             if selected_csv_files:
                 csv_result = self._process_csv_files(selected_csv_files)
-                if csv_result:
+                if csv_result is not None:
                     summary_data['csv_points_count'] = csv_result
+                    csv_stats = self._csv_import_service.get_last_import_stats()
+                    summary_data['csv_duplicates'] = csv_stats.get('csv_duplicates', 0)
             
             # Process completed projects if any are selected
             if selected_completed_projects:
@@ -710,7 +712,8 @@ class ArcheoSyncPlugin(QObject):
                     summary_data.update(project_stats)
             
             # Show summary dialog if any data was imported
-            if (summary_data['csv_points_count'] > 0 or 
+            if (summary_data['csv_points_count'] > 0 or
+                summary_data['csv_duplicates'] > 0 or
                 summary_data['features_count'] > 0 or 
                 summary_data['objects_count'] > 0 or 
                 summary_data['small_finds_count'] > 0):
@@ -805,7 +808,6 @@ class ArcheoSyncPlugin(QObject):
             import_result = self._csv_import_service.import_csv_files(csv_files, column_mapping)
 
         if import_result.is_valid:
-            # Return the number of imported features
             return self._csv_import_service.get_last_import_count()
         else:
             QMessageBox.critical(

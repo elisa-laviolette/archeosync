@@ -1153,3 +1153,196 @@ class TestCSVImportService:
             info = self.csv_service._resolve_topo_date_field_info({}, ["points.csv"])
 
         assert info == {"name": "DateLeve", "uri_type": "date"}
+
+    def test_build_topo_duplicate_key_requires_identifier_and_geometry(self):
+        """Duplicate keys are only built when identifier, geometry, and date are present."""
+        geom = Mock()
+        geom.isEmpty.return_value = False
+        geom.isMultipart.return_value = False
+        geom.asPoint.return_value = Mock(
+            x=Mock(return_value=100.0),
+            y=Mock(return_value=200.0),
+            z=Mock(return_value=10.5),
+        )
+
+        key = self.csv_service._build_topo_duplicate_key(
+            "P-42", geom, "2025-06-07", require_date=True
+        )
+        assert key == ("p-42", "100.0:200.0:10.5", "2025-06-07")
+
+        assert self.csv_service._build_topo_duplicate_key("", geom, "2025-06-07", require_date=True) is None
+        assert self.csv_service._build_topo_duplicate_key("P-42", None, "2025-06-07", require_date=True) is None
+        assert self.csv_service._build_topo_duplicate_key("P-42", geom, None, require_date=True) is None
+
+    def test_build_topo_duplicate_key_without_date_field(self):
+        """When no survey date field exists, duplicates match on identifier and geometry only."""
+        geom = Mock()
+        geom.isEmpty.return_value = False
+        geom.isMultipart.return_value = False
+        geom.asPoint.return_value = Mock(
+            x=Mock(return_value=1.0),
+            y=Mock(return_value=2.0),
+            z=Mock(return_value=3.0),
+        )
+
+        key = self.csv_service._build_topo_duplicate_key("Pt-1", geom, None, require_date=False)
+        assert key == ("pt-1", "1.0:2.0:3.0")
+
+    def test_collect_topo_duplicate_keys_from_definitive_layer(self):
+        """Existing definitive topo points contribute duplicate lookup keys."""
+        try:
+            from qgis.PyQt.QtCore import QVariant as _QVariant
+        except ImportError:
+            _QVariant = None
+
+        ptid_field = Mock()
+        ptid_field.name.return_value = "PtID"
+        ptid_field.type.return_value = getattr(_QVariant, "String", 10)
+        ptid_field.typeName.return_value = "String"
+        date_field = Mock()
+        date_field.name.return_value = "Date"
+        date_field.type.return_value = getattr(_QVariant, "Date", 14)
+        date_field.typeName.return_value = "Date"
+
+        feature = Mock()
+        geometry = Mock()
+        geometry.isEmpty.return_value = False
+        geometry.isMultipart.return_value = False
+        geometry.asPoint.return_value = Mock(
+            x=Mock(return_value=100.0),
+            y=Mock(return_value=200.0),
+            z=Mock(return_value=10.5),
+        )
+        feature.geometry.return_value = geometry
+        feature.attribute.side_effect = lambda idx: "US-1" if idx == 0 else "2025-06-07"
+
+        fields = Mock()
+        fields.indexOf = Mock(side_effect=lambda name: {"PtID": 0, "Date": 1}.get(name, -1))
+        fields.__iter__ = Mock(side_effect=lambda: iter([ptid_field, date_field]))
+
+        definitive_layer = Mock()
+        definitive_layer.fields.return_value = fields
+        definitive_layer.getFeatures.return_value = [feature]
+
+        keys = self.csv_service._collect_topo_duplicate_keys_from_layer(
+            definitive_layer,
+            identifier_field="PtID",
+            date_field_name="Date",
+            require_date=True,
+        )
+        assert keys == {("us-1", "100.0:200.0:10.5", "2025-06-07")}
+
+    @patch('archeosync.services.csv_import_service.QgsVectorLayer')
+    @patch('archeosync.services.csv_import_service.QgsFeature')
+    @patch('archeosync.services.csv_import_service.QgsGeometry')
+    @patch('archeosync.services.csv_import_service.QgsPointXY')
+    @patch('qgis.core.QgsProject')
+    def test_import_csv_files_skips_duplicate_topo_points(
+        self, mock_project, mock_point, mock_geometry, mock_feature, mock_layer
+    ):
+        """Rows matching identifier, geometry, and survey day in the definitive layer are ignored."""
+        csv1 = self._create_test_csv(
+            "survey_2025-06-07.csv",
+            ["X", "Y", "Z", "PtID"],
+            [
+                ["100.0", "200.0", "10.5", "US-1"],
+                ["101.0", "201.0", "11.0", "US-2"],
+            ],
+        )
+
+        mock_layer_instance = Mock()
+        mock_layer.return_value = mock_layer_instance
+        mock_layer_instance.isValid.return_value = True
+        mock_fields = []
+        for name in ("x", "y", "z", "ptid", "identifier", "Date"):
+            field = Mock()
+            field.name.return_value = name
+            mock_fields.append(field)
+        mock_layer_instance.fields.return_value = mock_fields
+        mock_layer_instance.startEditing = Mock()
+        mock_layer_instance.addFeature = Mock()
+        mock_layer_instance.commitChanges = Mock()
+
+        mock_feature_instance = Mock()
+        mock_feature.return_value = mock_feature_instance
+        mock_feature_instance.setId = Mock()
+        mock_feature_instance.setGeometry = Mock()
+        mock_feature_instance.setAttribute = Mock()
+        mock_feature_instance.attribute = Mock(return_value=None)
+        mock_feature_instance.fields.return_value = mock_fields
+
+        def _geometry_from_wkt(wkt):
+            coords = wkt.replace("POINT Z (", "").replace(")", "").split()
+            geometry = Mock()
+            geometry.isEmpty.return_value = False
+            geometry.isMultipart.return_value = False
+            geometry.asPoint.return_value = Mock(
+                x=Mock(return_value=float(coords[0])),
+                y=Mock(return_value=float(coords[1])),
+                z=Mock(return_value=float(coords[2])),
+            )
+            return geometry
+
+        mock_geometry.fromPointXY = Mock(side_effect=lambda point: _geometry_from_wkt(
+            f"POINT Z ({point.x()} {point.y()} 0)"
+        ))
+        mock_geometry.fromWkt.side_effect = _geometry_from_wkt
+        mock_point.return_value = Mock()
+
+        mock_project_instance = Mock()
+        mock_project.instance.return_value = mock_project_instance
+        mock_project_instance.addMapLayer = Mock()
+        mock_project_instance.crs.return_value = Mock(authid=Mock(return_value="EPSG:4326"))
+
+        try:
+            from qgis.PyQt.QtCore import QVariant as _QVariant
+        except ImportError:
+            _QVariant = None
+
+        ptid_field = Mock()
+        ptid_field.name.return_value = "PtID"
+        ptid_field.type.return_value = getattr(_QVariant, "String", 10)
+        ptid_field.typeName.return_value = "String"
+        date_field = Mock()
+        date_field.name.return_value = "Date"
+        date_field.type.return_value = getattr(_QVariant, "Date", 14)
+        date_field.typeName.return_value = "Date"
+
+        existing_feature = Mock()
+        existing_geometry = Mock()
+        existing_geometry.isEmpty.return_value = False
+        existing_geometry.isMultipart.return_value = False
+        existing_geometry.asPoint.return_value = Mock(
+            x=Mock(return_value=100.0),
+            y=Mock(return_value=200.0),
+            z=Mock(return_value=10.5),
+        )
+        existing_feature.geometry.return_value = existing_geometry
+
+        existing_feature.attribute.side_effect = lambda idx: "US-1" if idx == 0 else "2025-06-07"
+
+        definitive_fields = Mock()
+        definitive_fields.indexOf = Mock(side_effect=lambda name: {"PtID": 0, "Date": 1}.get(name, -1))
+        definitive_fields.__iter__ = Mock(side_effect=lambda: iter([ptid_field, date_field]))
+
+        definitive_layer = Mock()
+        definitive_layer.fields.return_value = definitive_fields
+        definitive_layer.wkbType.return_value = 1001
+        definitive_layer.getFeatures.return_value = [existing_feature]
+
+        def _get_value(key, default=None):
+            if key == "total_station_points_layer":
+                return "topo_layer_id"
+            if key == "csv_topo_identifier_column":
+                return "PtID"
+            return default
+
+        self.mock_settings_manager.get_value.side_effect = _get_value
+        mock_project.instance.return_value.mapLayer.return_value = definitive_layer
+
+        result = self.csv_service.import_csv_files([csv1])
+
+        assert result.is_valid is True
+        assert mock_layer_instance.addFeature.call_count == 1
+        assert self.csv_service.get_last_import_count() == 1
+        assert self.csv_service.get_last_import_stats()["csv_duplicates"] == 1

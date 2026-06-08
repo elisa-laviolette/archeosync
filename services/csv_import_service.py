@@ -15,6 +15,9 @@ via ``csv_topo_date_field``), ``Imported_CSV_Points`` receives that field with t
 name and QGIS type. The attribute is filled from each CSV basename for rows that do not
 already provide a value.
 
+Rows that match an existing definitive topo point on identifier (``PtID``, ``identifier``,
+etc.), geometry, and survey day are excluded before the temporary layer is created.
+
 Key Features:
 - Validates CSV files have required X, Y, Z columns (case-insensitive)
 - Maps columns across multiple CSV files
@@ -41,7 +44,7 @@ Usage:
 
 import csv
 import os
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional, Any, Set, Tuple, Union
 
 try:
     from .csv_filename_date import parse_date_from_filename
@@ -448,6 +451,230 @@ class CSVImportService(ICSVImportService):
         except ImportError:
             return iso_date
 
+    def _field_is_text_like(self, field: Any) -> bool:
+        """Return True when a QgsField holds textual identifier values."""
+        try:
+            if field.type() == QVariant.String:
+                return True
+        except Exception:
+            pass
+        type_name = (field.typeName() or "").strip().lower()
+        return type_name in (
+            "string",
+            "str",
+            "text",
+            "varchar",
+            "character varying",
+            "char",
+        )
+
+    def _get_field_index_case_insensitive(self, layer: Any, field_name: str) -> int:
+        """Return a field index, matching field names case-insensitively when needed."""
+        if not layer or not field_name:
+            return -1
+        try:
+            field_idx = layer.fields().indexOf(field_name)
+            if field_idx >= 0:
+                return field_idx
+            target = field_name.lower()
+            for field in layer.fields():
+                if field.name().lower() == target:
+                    return layer.fields().indexOf(field.name())
+        except Exception:
+            return -1
+        return -1
+
+    def _guess_topo_identifier_field(self, layer: Any) -> Optional[str]:
+        """
+        Guess the topo point identifier field on a layer (``PtID``, ``identifier``, etc.).
+        """
+        if layer is None:
+            return None
+        try:
+            id_candidates = []
+            for field in layer.fields():
+                field_name = field.name().lower()
+                if "id" in field_name and self._field_is_text_like(field):
+                    id_candidates.append(field.name())
+
+            if id_candidates:
+                return id_candidates[0]
+
+            for field in layer.fields():
+                field_name = field.name().lower()
+                if self._field_is_text_like(field) and (
+                    field_name in ("identifier", "identifiant", "code", "name", "nom")
+                    or field_name.endswith("_id")
+                    or field_name.endswith("_code")
+                ):
+                    return field.name()
+        except Exception:
+            return None
+        return None
+
+    def _normalize_topo_identifier_value(self, value: Any) -> Optional[str]:
+        """Normalize topo point identifiers for duplicate comparison."""
+        if value is None:
+            return None
+        normalized = str(value).strip()
+        return normalized.lower() if normalized else None
+
+    def _normalize_point_geometry_key(self, geometry: Any) -> Optional[str]:
+        """Build a stable geometry key for point duplicate comparison."""
+        if geometry is None:
+            return None
+        try:
+            if geometry.isEmpty():
+                return None
+        except Exception:
+            return None
+
+        try:
+            if geometry.isMultipart():
+                points = geometry.asMultiPoint()
+                if not points:
+                    return None
+                point = points[0]
+            else:
+                point = geometry.asPoint()
+
+            x = round(float(point.x()), 4)
+            y = round(float(point.y()), 4)
+            try:
+                z = round(float(point.z()), 4)
+                return f"{x}:{y}:{z}"
+            except Exception:
+                return f"{x}:{y}"
+        except Exception:
+            try:
+                return geometry.asWkt()
+            except Exception:
+                return None
+
+    def _normalize_survey_date_key(self, value: Any) -> Optional[str]:
+        """Normalize survey dates to ``yyyy-MM-dd`` for duplicate comparison."""
+        if self._is_empty_attribute_value(value):
+            return None
+        try:
+            from qgis.PyQt.QtCore import QDate, QDateTime
+
+            if isinstance(value, QDateTime):
+                qdate = value.date()
+                return qdate.toString("yyyy-MM-dd") if qdate.isValid() else None
+            if isinstance(value, QDate):
+                return value.toString("yyyy-MM-dd") if value.isValid() else None
+        except ImportError:
+            pass
+        except Exception:
+            pass
+
+        text = str(value).strip()
+        if not text:
+            return None
+        if len(text) >= 10 and text[4] == "-" and text[7] == "-":
+            return text[:10]
+        try:
+            from qgis.PyQt.QtCore import QDate
+
+            for fmt in ("yyyy-MM-dd", "dd/MM/yyyy", "yyyy/MM/dd", "dd-MM-yyyy"):
+                qdate = QDate.fromString(text, fmt)
+                if qdate.isValid():
+                    return qdate.toString("yyyy-MM-dd")
+        except ImportError:
+            pass
+        except Exception:
+            pass
+        return text
+
+    def _build_topo_duplicate_key(
+        self,
+        identifier_value: Any,
+        geometry: Any,
+        date_key: Optional[str],
+        *,
+        require_date: bool,
+    ) -> Optional[Union[Tuple[str, str, str], Tuple[str, str]]]:
+        """
+        Build a duplicate lookup key from identifier, point geometry, and optional survey day.
+        """
+        normalized_identifier = self._normalize_topo_identifier_value(identifier_value)
+        geometry_key = self._normalize_point_geometry_key(geometry)
+        if not normalized_identifier or not geometry_key:
+            return None
+        if require_date:
+            if not date_key:
+                return None
+            return (normalized_identifier, geometry_key, date_key)
+        return (normalized_identifier, geometry_key)
+
+    def _resolve_row_survey_date_key(
+        self,
+        row: Dict[str, str],
+        file_index: int,
+        column_mapping: Dict[str, List[Optional[str]]],
+        file_survey_date: Optional[str],
+        date_field_name: Optional[str],
+    ) -> Optional[str]:
+        """Resolve the survey date key for a CSV row before features are created."""
+        if not date_field_name:
+            return None
+
+        target = date_field_name.strip().lower()
+        for column_name, column_list in column_mapping.items():
+            if column_name.strip().lower() != target:
+                continue
+            if file_index >= len(column_list):
+                continue
+            col_name = column_list[file_index]
+            if col_name and col_name in row and not self._is_empty_attribute_value(row[col_name]):
+                return self._normalize_survey_date_key(row[col_name])
+
+        if file_survey_date:
+            return self._normalize_survey_date_key(file_survey_date)
+        return None
+
+    def _collect_topo_duplicate_keys_from_layer(
+        self,
+        layer: Any,
+        identifier_field: str,
+        date_field_name: Optional[str],
+        *,
+        require_date: bool,
+    ) -> Set[Union[Tuple[str, str, str], Tuple[str, str]]]:
+        """Collect duplicate lookup keys from an existing topo points layer."""
+        keys: Set[Union[Tuple[str, str, str], Tuple[str, str]]] = set()
+        if layer is None or not identifier_field:
+            return keys
+
+        identifier_idx = self._get_field_index_case_insensitive(layer, identifier_field)
+        if identifier_idx < 0:
+            return keys
+
+        date_idx = (
+            self._get_field_index_case_insensitive(layer, date_field_name)
+            if date_field_name
+            else -1
+        )
+
+        try:
+            for feature in layer.getFeatures():
+                identifier_value = feature.attribute(identifier_idx)
+                date_key = None
+                if require_date and date_idx >= 0:
+                    date_key = self._normalize_survey_date_key(feature.attribute(date_idx))
+                duplicate_key = self._build_topo_duplicate_key(
+                    identifier_value,
+                    feature.geometry(),
+                    date_key,
+                    require_date=require_date,
+                )
+                if duplicate_key is not None:
+                    keys.add(duplicate_key)
+        except Exception:
+            return keys
+
+        return keys
+
     def _apply_filename_date_to_feature(
         self,
         feature: Any,
@@ -807,9 +1034,31 @@ class CSVImportService(ICSVImportService):
 
             layer_field_names = {f.name() for f in layer.fields()}
 
+            import_date_field_name = (
+                import_date_field_info["name"] if import_date_field_info else None
+            )
+            require_survey_date = import_date_field_info is not None
+            definitive_layer = self._get_configured_total_station_points_layer()
+            existing_topo_duplicate_keys: Set[
+                Union[Tuple[str, str, str], Tuple[str, str]]
+            ] = set()
+            imported_topo_duplicate_keys: Set[
+                Union[Tuple[str, str, str], Tuple[str, str]]
+            ] = set()
+            if definitive_layer is not None:
+                identifier_field = self._guess_topo_identifier_field(definitive_layer)
+                if identifier_field:
+                    existing_topo_duplicate_keys = self._collect_topo_duplicate_keys_from_layer(
+                        definitive_layer,
+                        identifier_field,
+                        import_date_field_name,
+                        require_date=require_survey_date,
+                    )
+
             layer.startEditing()
 
             feature_id = 1
+            duplicates_count = 0
             for file_index, csv_file in enumerate(csv_files):
                 file_survey_date = parse_date_from_filename(csv_file)
                 try:
@@ -832,6 +1081,37 @@ class CSVImportService(ICSVImportService):
                                 geometry = self._build_point_geometry(
                                     x, y, z, use_pointz=use_pointz_geometry
                                 )
+
+                                identifier_value = self._identifier_attribute_value_for_row(
+                                    column_mapping,
+                                    field_types,
+                                    file_index,
+                                    row,
+                                    has_identifier_column=has_id,
+                                    configured_source_key=effective_key,
+                                )
+                                survey_date_key = self._resolve_row_survey_date_key(
+                                    row,
+                                    file_index,
+                                    column_mapping,
+                                    file_survey_date,
+                                    import_date_field_name,
+                                )
+                                duplicate_key = self._build_topo_duplicate_key(
+                                    identifier_value,
+                                    geometry,
+                                    survey_date_key,
+                                    require_date=require_survey_date,
+                                )
+                                if duplicate_key is not None and (
+                                    duplicate_key in existing_topo_duplicate_keys
+                                    or duplicate_key in imported_topo_duplicate_keys
+                                ):
+                                    duplicates_count += 1
+                                    continue
+                                if duplicate_key is not None:
+                                    imported_topo_duplicate_keys.add(duplicate_key)
+
                                 feature.setGeometry(geometry)
 
                                 for column_name, column_list in column_mapping.items():
@@ -891,6 +1171,9 @@ class CSVImportService(ICSVImportService):
 
             self._last_imported_files = csv_files
             self._last_import_count = feature_id - 1
+            self._last_import_stats = {
+                "csv_duplicates": duplicates_count,
+            }
 
             return ValidationResult(
                 True,
@@ -908,6 +1191,15 @@ class CSVImportService(ICSVImportService):
             Number of features imported, or 0 if no import has been performed
         """
         return getattr(self, '_last_import_count', 0)
+
+    def get_last_import_stats(self) -> Dict[str, int]:
+        """
+        Get import statistics from the last CSV import operation.
+
+        Returns:
+            Dictionary containing ``csv_duplicates`` and related counters.
+        """
+        return getattr(self, "_last_import_stats", {})
     
     def get_last_imported_files(self) -> List[str]:
         """
