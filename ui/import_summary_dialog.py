@@ -48,13 +48,35 @@ from qgis.PyQt.QtCore import Qt, QTimer
 try:
     from ..core.interfaces import ISettingsManager, ILayerService
     from ..core.data_structures import WarningData, ImportSummaryData
-    from ..core.ui_responsiveness import maybe_yield_to_ui, reset_yield_counter
+    from ..core.ui_responsiveness import flush_ui_updates, maybe_yield_to_ui, reset_yield_counter
     from ..core.warning_detection_runner import dispatch_warning_detection_step
+    from ..services.import_validation_service import (
+        IMPORT_LAYER_MAPPINGS,
+        ImportFeatureCopier,
+        LayerCopyJob,
+        block_job_target_signals,
+        build_layer_copy_jobs,
+        ensure_job_expression_context,
+        load_job_source_features,
+        load_job_source_features_chunk,
+        unblock_job_target_signals,
+    )
 except ImportError:
     from core.interfaces import ISettingsManager, ILayerService
     from core.data_structures import WarningData, ImportSummaryData
-    from core.ui_responsiveness import maybe_yield_to_ui, reset_yield_counter
+    from core.ui_responsiveness import flush_ui_updates, maybe_yield_to_ui, reset_yield_counter
     from core.warning_detection_runner import dispatch_warning_detection_step
+    from services.import_validation_service import (
+        IMPORT_LAYER_MAPPINGS,
+        ImportFeatureCopier,
+        LayerCopyJob,
+        block_job_target_signals,
+        build_layer_copy_jobs,
+        ensure_job_expression_context,
+        load_job_source_features,
+        load_job_source_features_chunk,
+        unblock_job_target_signals,
+    )
 
 
 def _align_center_flag():
@@ -219,6 +241,14 @@ class ImportSummaryDockWidget(QDockWidget):
         self._layer_service = layer_service
         self._parent = parent
         
+        self._validation_running = False
+        self._validation_jobs: List[LayerCopyJob] = []
+        self._validation_job_index = 0
+        self._validation_copied_counts: Dict[str, int] = {}
+        self._validation_missing_configurations: List[str] = []
+        self._validation_canvas_rendering_was_enabled: Optional[bool] = None
+        self._feature_copier = ImportFeatureCopier()
+
         # Initialize UI
         self._setup_ui()
         self._setup_connections()
@@ -340,10 +370,11 @@ class ImportSummaryDockWidget(QDockWidget):
 
         Args:
             busy: When True, display the progress bar and disable refresh/validate/cancel
-                until analysis completes.
+                until analysis or validation completes.
             total_steps: When greater than zero, show determinate progress (0..total_steps).
         """
         self._warnings_analysis_running = busy
+        self._validation_running = busy
         if hasattr(self, "_warnings_analysis_container"):
             self._warnings_analysis_container.setVisible(busy)
         if hasattr(self, "_warnings_analysis_progress"):
@@ -370,7 +401,7 @@ class ImportSummaryDockWidget(QDockWidget):
             and self._warnings_analysis_progress.maximum() > 0
         ):
             self._warnings_analysis_progress.setValue(completed_steps)
-        maybe_yield_to_ui(force=True)
+        flush_ui_updates(self._warnings_analysis_container)
     
     def _create_summary_content(self, parent_layout: QtWidgets.QVBoxLayout) -> None:
         """Create the summary content section."""
@@ -803,39 +834,278 @@ class ImportSummaryDockWidget(QDockWidget):
     
     def _handle_validate(self) -> None:
         """Handle the validate button click - copy features from temporary to definitive layers."""
+        if self._validation_running:
+            return
         try:
-            # Check for warnings and ask for confirmation if any exist
             if self._has_warnings():
                 if not self._confirm_validation_with_warnings():
-                    return  # User cancelled validation
-            
-            # Copy features from temporary layers to definitive layers
-            self._copy_temporary_to_definitive_layers()
-            
-            # Delete temporary layers after successful copying
-            self._delete_temporary_layers()
-            
-            # Archive imported files and folders after successful validation
-            self._archive_imported_data()
-            
-            # Delete the dock widget from the interface
-            if self._iface:
-                self._iface.removeDockWidget(self)
-            
-            # Delete the widget
-            self.deleteLater()
-            
+                    return
+
+            self._start_async_validation()
         except Exception as e:
-            print(f"Error during validation: {e}")
-            import traceback
-            traceback.print_exc()
-            
-            # Show error message to user
-            QMessageBox.critical(
-                self,
-                self.tr("Validation Error"),
-                self.tr(f"An error occurred during validation: {str(e)}")
+            self._handle_validation_failure(e)
+
+    def _start_async_validation(self) -> None:
+        """
+        Begin incremental validation on the Qt main thread.
+
+        One feature is copied per ``QTimer`` tick so the progress bar can repaint
+        between copies. Default value expressions are still evaluated per feature
+        via ``QgsVectorLayerUtils.createFeature``.
+        """
+        from qgis.core import QgsProject
+
+        project = QgsProject.instance()
+        self._validation_jobs = build_layer_copy_jobs(
+            project.mapLayers(),
+            self._get_definitive_layer_id,
+        )
+        self._validation_job_index = 0
+        self._validation_copied_counts = {}
+        self._validation_missing_configurations = self._collect_missing_layer_configurations()
+
+        total_features = self._validation_total_feature_count()
+        if total_features <= 0:
+            self._complete_validation_with_no_copied_features()
+            return
+
+        for job in self._validation_jobs:
+            block_job_target_signals(job)
+
+        self._set_map_canvas_rendering(False)
+        self._set_warnings_analysis_busy(True, total_steps=total_features)
+        self._update_warnings_analysis_progress(
+            0,
+            self.tr("Preparing validation... (0/{total})").format(total=total_features),
+        )
+        flush_ui_updates(self._warnings_analysis_container)
+        QTimer.singleShot(0, self._run_validation_batch_step)
+
+    def _collect_missing_layer_configurations(self) -> List[str]:
+        """Return settings keys for import layers present but not configured."""
+        from qgis.core import QgsProject
+
+        project_layers = QgsProject.instance().mapLayers()
+        temp_names = {layer.name() for layer in project_layers.values()}
+        configured_keys = {job.definitive_layer_key for job in self._validation_jobs}
+        missing: List[str] = []
+
+        for temp_layer_name, definitive_layer_key in IMPORT_LAYER_MAPPINGS.items():
+            if temp_layer_name not in temp_names:
+                continue
+            if definitive_layer_key in configured_keys:
+                continue
+            if not self._get_definitive_layer_id(definitive_layer_key):
+                missing.append(definitive_layer_key)
+
+        return missing
+
+    def _validation_processed_feature_count(self) -> int:
+        """Count features fully copied across finished and current jobs."""
+        processed = 0
+        for index, job in enumerate(self._validation_jobs):
+            if index < self._validation_job_index:
+                processed += job.feature_count
+            elif index == self._validation_job_index:
+                processed += job.feature_index
+        return processed
+
+    def _validation_progress_value(self) -> int:
+        """
+        Progress bar value including partial loading of the active job.
+
+        While features are still being read from disk, advance the bar so the
+        user sees movement before the first copy starts.
+        """
+        processed = self._validation_processed_feature_count()
+        if self._validation_job_index < len(self._validation_jobs):
+            job = self._validation_jobs[self._validation_job_index]
+            if not job.load_complete and job.source_features is not None:
+                processed += len(job.source_features)
+        return processed
+
+    def _validation_total_feature_count(self) -> int:
+        return sum(job.feature_count for job in self._validation_jobs)
+
+    def _sync_validation_progress_maximum(self) -> None:
+        """Refresh the progress bar maximum when loaded counts differ from estimates."""
+        if not hasattr(self, "_warnings_analysis_progress"):
+            return
+        total = self._validation_total_feature_count()
+        if total > 0 and self._warnings_analysis_progress.maximum() != total:
+            self._warnings_analysis_progress.setMaximum(total)
+
+    def _set_map_canvas_rendering(self, enabled: bool) -> None:
+        """Suspend map redraws during validation to keep the UI responsive."""
+        if not self._iface:
+            return
+        try:
+            canvas = self._iface.mapCanvas()
+            if canvas is None:
+                return
+            if not enabled:
+                self._validation_canvas_rendering_was_enabled = canvas.renderFlag()
+                canvas.setRenderFlag(False)
+            elif self._validation_canvas_rendering_was_enabled is not None:
+                canvas.setRenderFlag(self._validation_canvas_rendering_was_enabled)
+                self._validation_canvas_rendering_was_enabled = None
+                canvas.refresh()
+        except Exception:
+            pass
+
+    def _run_validation_batch_step(self) -> None:
+        """Load or copy one small chunk, then yield back to the Qt event loop."""
+        try:
+            if self._validation_job_index >= len(self._validation_jobs):
+                self._finalize_validation_success()
+                return
+
+            job = self._validation_jobs[self._validation_job_index]
+            total = self._validation_total_feature_count()
+
+            if not job.load_complete:
+                load_job_source_features_chunk(job)
+                loaded = len(job.source_features or [])
+                self._sync_validation_progress_maximum()
+                total = self._validation_total_feature_count()
+                self._update_warnings_analysis_progress(
+                    self._validation_progress_value(),
+                    self.tr("Loading {layer}... ({current}/{total})").format(
+                        layer=job.temp_layer_name,
+                        current=loaded,
+                        total=job.feature_count,
+                    ),
+                )
+                QTimer.singleShot(0, self._run_validation_batch_step)
+                return
+
+            ensure_job_expression_context(job)
+
+            processed = self._validation_processed_feature_count()
+            self._update_warnings_analysis_progress(
+                self._validation_progress_value(),
+                self.tr("Validating import... ({current}/{total})").format(
+                    current=processed,
+                    total=total,
+                ),
             )
+
+            batch_result = self._feature_copier.copy_features_batch(
+                source_features=job.source_features or [],
+                target_layer=job.target_layer,
+                start_index=job.feature_index,
+                field_mapping=job.field_mapping,
+                expression_context=job.expression_context,
+            )
+
+            job.feature_index = batch_result.next_index
+            job.copied_count += batch_result.copied_count
+            job.added_feature_ids.extend(batch_result.added_feature_ids)
+
+            if batch_result.error_count > 0:
+                print(
+                    f"Validation copy on '{job.temp_layer_name}': "
+                    f"{batch_result.error_count} feature error(s) in batch"
+                )
+
+            processed = self._validation_processed_feature_count()
+            self._update_warnings_analysis_progress(
+                self._validation_progress_value(),
+                self.tr("Validating import... ({current}/{total})").format(
+                    current=processed,
+                    total=total,
+                ),
+            )
+
+            if job.feature_index >= job.feature_count:
+                unblock_job_target_signals(job)
+                self._feature_copier.select_copied_features(
+                    job.target_layer,
+                    job.added_feature_ids,
+                )
+                self._validation_copied_counts[job.temp_layer_name] = job.copied_count
+                print(
+                    f"Copied {job.copied_count} features from "
+                    f"'{job.temp_layer_name}' to '{job.target_layer.name()}'"
+                )
+                self._validation_job_index += 1
+                self._sync_validation_progress_maximum()
+
+            QTimer.singleShot(0, self._run_validation_batch_step)
+        except Exception as e:
+            self._handle_validation_failure(e)
+
+    def _complete_validation_with_no_copied_features(self) -> None:
+        """Show feedback when no features could be copied."""
+        if self._validation_missing_configurations:
+            QMessageBox.information(
+                self,
+                self.tr("No Layers to Validate"),
+                self.tr(
+                    "Note: Some layers could not be copied because definitive layers "
+                    "are not configured.\n\n"
+                    "Please configure the definitive layers in the settings dialog first."
+                ),
+            )
+        else:
+            QMessageBox.information(
+                self,
+                self.tr("No Layers to Validate"),
+                self.tr("No temporary import layers with features were found to validate."),
+            )
+
+    def _unblock_all_validation_layer_signals(self) -> None:
+        """Restore QgsVectorLayer signal delivery after validation."""
+        for job in self._validation_jobs:
+            unblock_job_target_signals(job)
+
+    def _finalize_validation_success(self) -> None:
+        """Show the success summary, then archive data and close the dock."""
+        self._unblock_all_validation_layer_signals()
+        self._set_map_canvas_rendering(True)
+        self._set_warnings_analysis_busy(False)
+
+        if self._validation_copied_counts:
+            success_message = self.tr("Features copied successfully!\n\n")
+            for layer_name, count in self._validation_copied_counts.items():
+                success_message += f"• {layer_name}: {count} features\n"
+            success_message += f"\n{self.tr('The definitive layers are now in edit mode.')}\n"
+            success_message += (
+                f"{self.tr('The newly copied features are selected for easy identification.')}\n"
+            )
+            success_message += f"{self.tr('Please review the copied features and:')}\n"
+            success_message += f"• {self.tr('Save changes if you want to keep them')}\n"
+            success_message += f"• {self.tr('Cancel changes if you want to discard them')}"
+
+            QMessageBox.information(
+                self,
+                self.tr("Validation Complete"),
+                success_message,
+            )
+        elif self._validation_missing_configurations:
+            self._complete_validation_with_no_copied_features()
+
+        self._delete_temporary_layers()
+        self._archive_imported_data()
+
+        if self._iface:
+            self._iface.removeDockWidget(self)
+        self.deleteLater()
+
+    def _handle_validation_failure(self, error: Exception) -> None:
+        """Roll back UI state and show a validation error."""
+        self._unblock_all_validation_layer_signals()
+        self._set_map_canvas_rendering(True)
+        self._set_warnings_analysis_busy(False)
+        print(f"Error during validation: {error}")
+        import traceback
+
+        traceback.print_exc()
+        QMessageBox.critical(
+            self,
+            self.tr("Validation Error"),
+            self.tr(f"An error occurred during validation: {str(error)}"),
+        )
     
     def _has_warnings(self) -> bool:
         """Check if there are any warnings present in the summary data."""
@@ -1381,90 +1651,69 @@ class ImportSummaryDockWidget(QDockWidget):
         parent_layout.insertWidget(insert_index, scroll_area)
     
     def _copy_temporary_to_definitive_layers(self) -> None:
-        """Copy features from temporary layers to definitive layers and keep them in edit mode."""
-        try:
-            from qgis.core import QgsProject
-            
-            project = QgsProject.instance()
-            
-            # Define layer mappings: temporary layer name -> definitive layer setting key
-            layer_mappings = {
-                "New Objects": "objects_layer",
-                "New Features": "features_layer", 
-                "New Small Finds": "small_finds_layer",
-                "Imported_CSV_Points": "total_station_points_layer"
-            }
-            
-            copied_counts = {}
-            missing_configurations = []
-            
-            for temp_layer_name, definitive_layer_key in layer_mappings.items():
-                # Find the temporary layer
-                temp_layer = None
-                for layer in project.mapLayers().values():
-                    if layer.name() == temp_layer_name:
-                        temp_layer = layer
-                        break
-                
-                if not temp_layer:
-                    print(f"Temporary layer '{temp_layer_name}' not found")
-                    continue
-                
-                # Get the definitive layer ID from settings
-                definitive_layer_id = self._get_definitive_layer_id(definitive_layer_key)
-                if not definitive_layer_id:
-                    print(f"Definitive layer setting '{definitive_layer_key}' not configured")
-                    missing_configurations.append(definitive_layer_key)
-                    continue
-                
-                # Find the definitive layer
-                definitive_layer = None
-                for layer in project.mapLayers().values():
-                    if layer.id() == definitive_layer_id:
-                        definitive_layer = layer
-                        break
-                
-                if not definitive_layer:
-                    print(f"Definitive layer with ID '{definitive_layer_id}' not found")
-                    continue
-                
-                # Copy features from temporary to definitive layer
-                copied_count = self._copy_features_between_layers(temp_layer, definitive_layer)
-                copied_counts[temp_layer_name] = copied_count
-                
-                print(f"Copied {copied_count} features from '{temp_layer_name}' to '{definitive_layer.name()}'")
-            
-            # Show success message with information about edit mode
-            if copied_counts:
-                success_message = self.tr("Features copied successfully!\n\n")
-                for layer_name, count in copied_counts.items():
-                    success_message += f"• {layer_name}: {count} features\n"
-                success_message += f"\n{self.tr('The definitive layers are now in edit mode.')}\n"
-                success_message += f"{self.tr('The newly copied features are selected for easy identification.')}\n"
-                success_message += f"{self.tr('Please review the copied features and:')}\n"
-                success_message += f"• {self.tr('Save changes if you want to keep them')}\n"
-                success_message += f"• {self.tr('Cancel changes if you want to discard them')}"
-                
-                QMessageBox.information(
-                    self,
-                    self.tr("Validation Complete"),
-                    success_message
+        """
+        Synchronously copy all temporary layers (used by unit tests).
+
+        Production validation uses :meth:`_start_async_validation` instead.
+        """
+        from qgis.core import QgsProject
+
+        project = QgsProject.instance()
+        jobs = build_layer_copy_jobs(project.mapLayers(), self._get_definitive_layer_id)
+        self._validation_jobs = jobs
+        copied_counts: Dict[str, int] = {}
+        missing_configurations = self._collect_missing_layer_configurations()
+
+        for job in jobs:
+            load_job_source_features(job)
+            while job.feature_index < job.feature_count:
+                batch_result = self._feature_copier.copy_features_batch(
+                    source_features=job.source_features,
+                    target_layer=job.target_layer,
+                    start_index=job.feature_index,
+                    field_mapping=job.field_mapping,
                 )
-            else:
-                # Show message if no layers were configured
-                if missing_configurations:
-                    QMessageBox.information(
-                        self,
-                        self.tr("No Layers to Validate"),
-                        self.tr("Note: Some layers could not be copied because definitive layers are not configured.\n\n"
-                               "Please configure the definitive layers in the settings dialog first.")
-                    )
-            
-        except Exception as e:
-            print(f"Error copying temporary to definitive layers: {e}")
-            import traceback
-            traceback.print_exc()
-            raise
+                job.feature_index = batch_result.next_index
+                job.copied_count += batch_result.copied_count
+                job.added_feature_ids.extend(batch_result.added_feature_ids)
+
+            self._feature_copier.select_copied_features(
+                job.target_layer,
+                job.added_feature_ids,
+            )
+            copied_counts[job.temp_layer_name] = job.copied_count
+            print(
+                f"Copied {job.copied_count} features from "
+                f"'{job.temp_layer_name}' to '{job.target_layer.name()}'"
+            )
+
+        if copied_counts:
+            success_message = self.tr("Features copied successfully!\n\n")
+            for layer_name, count in copied_counts.items():
+                success_message += f"• {layer_name}: {count} features\n"
+            success_message += f"\n{self.tr('The definitive layers are now in edit mode.')}\n"
+            success_message += (
+                f"{self.tr('The newly copied features are selected for easy identification.')}\n"
+            )
+            success_message += f"{self.tr('Please review the copied features and:')}\n"
+            success_message += f"• {self.tr('Save changes if you want to keep them')}\n"
+            success_message += f"• {self.tr('Cancel changes if you want to discard them')}"
+
+            QMessageBox.information(
+                self,
+                self.tr("Validation Complete"),
+                success_message,
+            )
+        elif missing_configurations:
+            QMessageBox.information(
+                self,
+                self.tr("No Layers to Validate"),
+                self.tr(
+                    "Note: Some layers could not be copied because definitive layers "
+                    "are not configured.\n\n"
+                    "Please configure the definitive layers in the settings dialog first."
+                ),
+            )
     
     def _delete_temporary_layers(self) -> None:
         """Delete temporary layers after features have been copied to definitive layers."""
@@ -1519,12 +1768,12 @@ class ImportSummaryDockWidget(QDockWidget):
             traceback.print_exc()
             # Don't raise the exception - this is not critical for the validation process
     
-    def _get_definitive_layer_id(self, layer_setting_key: str) -> Optional[str]:
+    def _get_definitive_layer_id(self, layer_setting_key: str, default: Any = "") -> Optional[str]:
         """Get the definitive layer ID from settings."""
         try:
             if self._settings_manager:
                 # Use the settings manager to get the layer ID
-                layer_id = self._settings_manager.get_value(layer_setting_key, "")
+                layer_id = self._settings_manager.get_value(layer_setting_key, default)
                 return layer_id if layer_id else None
             else:
                 # Fallback to direct QSettings access if no settings manager is provided
@@ -1540,145 +1789,50 @@ class ImportSummaryDockWidget(QDockWidget):
             return None
     
     def _copy_features_between_layers(self, source_layer, target_layer) -> int:
-        """Copy features from source layer to target layer and keep target in edit mode without committing."""
-        try:
-            # Start editing the target layer
-            if not target_layer.isEditable():
-                target_layer.startEditing()
-            
-            copied_count = 0
-            error_count = 0
-            newly_added_features = []  # Track newly added features for selection
-            
-            # Get all features from source layer
-            source_features = list(source_layer.getFeatures())
-            
-            for i, source_feature in enumerate(source_features):
-                try:
-                    # Create a new feature with the target layer's field structure
-                    new_feature = self._create_feature_with_target_structure(source_feature, target_layer)
-                    
-                    if new_feature:
-                        # Add the feature to the target layer
-                        success = target_layer.addFeature(new_feature)
-                        if success:
-                            copied_count += 1
-                            # Store the newly added feature for selection
-                            newly_added_features.append(new_feature)
-                        else:
-                            error_count += 1
-                            error_msg = target_layer.lastError()
-                            print(f"Failed to add feature {i+1} to {target_layer.name()}: {error_msg}")
-                    else:
-                        error_count += 1
-                        print(f"Failed to create feature {i+1} for {target_layer.name()}")
-                        
-                except Exception as e:
-                    error_count += 1
-                    print(f"Error processing feature {i+1}: {e}")
-            
-            # Select the newly added features
-            if newly_added_features:
-                try:
-                    # Clear any existing selection
-                    target_layer.removeSelection()
-                    
-                    # Select all newly added features
-                    for feature in newly_added_features:
-                        target_layer.select(feature.id())
-                    
-                    print(f"Selected {len(newly_added_features)} newly copied features in {target_layer.name()}")
-                except Exception as e:
-                    print(f"Warning: Could not select newly added features: {e}")
-            
-            # DO NOT commit changes - keep the layer in edit mode for user review
-            # The user can decide whether to save or cancel the changes
-            
-            # Log summary
-            if error_count > 0:
-                print(f"Copied {copied_count} features to {target_layer.name()}, {error_count} errors occurred")
-                print(f"Layer {target_layer.name()} is in edit mode - review changes and save/cancel as needed")
-            else:
-                print(f"Successfully copied {copied_count} features to {target_layer.name()}")
-                print(f"Layer {target_layer.name()} is in edit mode - review changes and save/cancel as needed")
-            
-            return copied_count
-            
-        except Exception as e:
-            print(f"Error copying features between layers: {e}")
-            # Try to rollback changes if there was an error
-            if target_layer.isEditable():
-                target_layer.rollBack()
-            raise
-    
+        """Copy all features between two layers (unit-test helper)."""
+        source_features = list(source_layer.getFeatures())
+        field_mapping = self._feature_copier.build_field_mapping(
+            source_features[0].fields() if source_features else source_layer.fields(),
+            target_layer,
+        )
+        added_ids: List[int] = []
+        copied_count = 0
+        start_index = 0
+
+        while start_index < len(source_features):
+            batch_result = self._feature_copier.copy_features_batch(
+                source_features=source_features,
+                target_layer=target_layer,
+                start_index=start_index,
+                field_mapping=field_mapping,
+            )
+            start_index = batch_result.next_index
+            copied_count += batch_result.copied_count
+            added_ids.extend(batch_result.added_feature_ids)
+
+        self._feature_copier.select_copied_features(target_layer, added_ids)
+        return copied_count
+
     def _create_feature_with_target_structure(self, source_feature, target_layer):
         """
         Create a new feature with the target layer's field structure.
 
-        Copies matching attributes from the source feature, lets QGIS apply default
-        expressions for remaining empty fields, then restores imported values so
-        layer defaults cannot replace attributes that were already present on the
-        temporary import layer.
+        Delegates to :class:`ImportFeatureCopier` so validation and tests share the
+        same default-value replay logic.
         """
         try:
-            from qgis.core import QgsGeometry, QgsVectorLayerUtils
-
-            geometry = (
-                source_feature.geometry()
-                if source_feature.geometry() and not source_feature.geometry().isEmpty()
-                else QgsGeometry()
-            )
-
-            attribute_map = {}
-            source_fields = source_feature.fields()
-            source_field_name_to_index = {
-                source_fields.at(i).name().lower(): i
-                for i in range(source_fields.count())
-            }
-            fid_field_names = {'fid', 'id', 'gid', 'objectid', 'featureid'}
-            target_fields = target_layer.fields()
-
-            for field_index in range(target_fields.count()):
-                field_name = target_fields.at(field_index).name()
-                if field_name.lower() in fid_field_names:
-                    continue
-
-                source_field_idx = source_field_name_to_index.get(field_name.lower(), -1)
-                if source_field_idx < 0:
-                    continue
-
-                source_value = source_feature[source_field_idx]
-                if self._is_missing_attribute_value(source_value):
-                    continue
-
-                attribute_map[field_index] = source_value
-
-            context = None
-            if hasattr(target_layer, "createExpressionContext"):
-                try:
-                    context = target_layer.createExpressionContext()
-                except Exception:
-                    context = None
-
-            new_feature = QgsVectorLayerUtils.createFeature(
-                target_layer,
-                geometry,
-                attribute_map,
-                context,
-            )
-
-            # Imported attributes must win over layer default expressions. QGIS may
-            # re-evaluate defaults (e.g. CASE WHEN "field" IS NULL THEN X ELSE "field"
-            # END) against a feature that does not yet carry the source value, which
-            # replaces valid imported integers with the fallback literal.
-            for field_index, source_value in attribute_map.items():
-                new_feature.setAttribute(field_index, source_value)
-
-            return new_feature
-
-        except Exception as e:
-            print(f"Error creating feature with target structure: {e}")
-            return None
+            copier = self._feature_copier
+        except (AttributeError, RuntimeError):
+            copier = ImportFeatureCopier()
+        field_mapping = copier.build_field_mapping(
+            source_feature.fields(),
+            target_layer,
+        )
+        return copier.create_feature_with_target_structure(
+            source_feature,
+            target_layer,
+            field_mapping,
+        )
 
     def _apply_default_values_from_target_layer(self, target_layer, feature) -> None:
         """
@@ -1744,22 +1898,7 @@ class ImportSummaryDockWidget(QDockWidget):
     @staticmethod
     def _is_missing_attribute_value(value: Any) -> bool:
         """Return True when a field value should be considered empty for default injection."""
-        if value is None:
-            return True
-        try:
-            if hasattr(value, "isNull") and callable(value.isNull) and value.isNull():
-                return True
-        except Exception:
-            pass
-        if isinstance(value, str):
-            stripped = value.strip()
-            return stripped == "" or stripped.lower() == "null"
-        try:
-            if str(value) == "NULL":
-                return True
-        except Exception:
-            pass
-        return False
+        return ImportFeatureCopier.is_missing_attribute_value(value)
 
     def _open_filtered_attribute_table(self, warning_data: WarningData) -> None:
         """

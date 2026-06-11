@@ -43,10 +43,11 @@ class TestOutOfBoundsDetectorService(unittest.TestCase):
             'objects_layer': 'test_layer_id'
         }.get(key, default)
         
+        self.layer_service.get_layer_by_name.return_value = None
+
         self.service = OutOfBoundsDetectorService(
             settings_manager=self.settings_manager,
             layer_service=self.layer_service,
-            translation_service=self.translation_service
         )
     
     def test_init_with_default_distance(self):
@@ -54,7 +55,6 @@ class TestOutOfBoundsDetectorService(unittest.TestCase):
         service = OutOfBoundsDetectorService(
             settings_manager=self.settings_manager,
             layer_service=self.layer_service,
-            translation_service=self.translation_service
         )
         self.assertEqual(service._max_distance_meters, 0.2)
     
@@ -65,7 +65,6 @@ class TestOutOfBoundsDetectorService(unittest.TestCase):
         service = OutOfBoundsDetectorService(
             settings_manager=self.settings_manager,
             layer_service=self.layer_service,
-            translation_service=self.translation_service
         )
         self.assertEqual(service._max_distance_meters, 0.5)
     
@@ -404,7 +403,85 @@ class TestOutOfBoundsDetectorService(unittest.TestCase):
         self.assertIn("3 features", result)
         self.assertIn("Test Area", result)
         self.assertIn("30.0 cm", result)  # 0.3 meters = 30 cm
-        self.translation_service.translate.assert_called_once()
+
+    def test_skips_definitive_layers_during_import_when_temp_layer_missing(self):
+        """Only pending temp import layers are checked while an import is in progress."""
+        self.settings_manager.get_value.side_effect = lambda key, default=None: {
+            'enable_bounds_warnings': True,
+            'bounds_max_distance': 0.2,
+            'recording_areas_layer': 'recording_layer_id',
+            'objects_layer': 'objects_layer_id',
+            'features_layer': 'features_layer_id',
+            'small_finds_layer': 'small_finds_layer_id',
+        }.get(key, default)
+
+        recording_layer = Mock()
+        recording_layer.name.return_value = "Recording Areas"
+        recording_layer.featureCount.return_value = 0
+
+        temp_objects_layer = Mock()
+        temp_objects_layer.name.return_value = "New Objects"
+        temp_objects_layer.id.return_value = 'temp_objects_layer_id'
+
+        features_layer = Mock()
+        features_layer.name.return_value = "Features"
+        features_layer.getFeatures.side_effect = AssertionError(
+            "Definitive features layer must not be scanned during object import"
+        )
+
+        self.layer_service.get_layer_by_name.side_effect = lambda name: {
+            "New Objects": temp_objects_layer,
+            "New Features": None,
+            "New Small Finds": None,
+        }.get(name)
+
+        self.layer_service.get_layer_by_id.side_effect = lambda layer_id: {
+            'recording_layer_id': recording_layer,
+            'temp_objects_layer_id': temp_objects_layer,
+            'features_layer_id': features_layer,
+        }.get(layer_id)
+
+        with patch.object(
+            self.service,
+            '_detect_out_of_bounds_in_layer',
+            return_value=[],
+        ) as detect_mock:
+            warnings = self.service.detect_out_of_bounds_features()
+
+        self.assertEqual(warnings, [])
+        detect_mock.assert_called_once_with(
+            'temp_objects_layer_id', recording_layer, "Objects"
+        )
+
+    def test_skips_recording_area_index_when_layer_has_no_geometry(self):
+        """Avoid building the recording-area index when no feature has geometry."""
+        layer = Mock()
+        layer.name.return_value = "New Objects"
+        layer.fields.return_value = Mock()
+        layer.fields.return_value.indexOf.return_value = 0
+
+        feature_without_geometry = Mock()
+        feature_without_geometry.geometry.return_value = None
+        layer.getFeatures.return_value = [feature_without_geometry]
+
+        recording_areas_layer = Mock()
+        recording_areas_layer.getFeatures.side_effect = AssertionError(
+            "Recording areas must not be indexed when there is nothing to check"
+        )
+
+        self.layer_service.get_layer_by_id.return_value = layer
+
+        with patch.object(self.service, '_get_recording_area_field', return_value='recording_area_field'), \
+             patch.object(self.service, '_get_relation_for_layer') as relation_mock:
+            relation_mock.return_value.fieldPairs.return_value = {
+                'recording_area_field': 'id',
+            }
+            warnings = self.service._detect_out_of_bounds_in_layer(
+                'layer_id', recording_areas_layer, "Objects"
+            )
+
+        self.assertEqual(warnings, [])
+        recording_areas_layer.getFeatures.assert_not_called()
 
 
 if __name__ == '__main__':

@@ -31,6 +31,15 @@ except ImportError:
 
 class TestImportSummaryDialog(unittest.TestCase):
     """Test cases for ImportSummaryDialog."""
+
+    @staticmethod
+    def _mock_feature_for_layer_copy():
+        """Minimal feature mock for ``build_layer_copy_jobs`` field mapping."""
+        mock_fields = Mock()
+        mock_fields.count.return_value = 0
+        mock_feature = Mock()
+        mock_feature.fields.return_value = mock_fields
+        return mock_feature
     
     def setUp(self):
         """Set up test fixtures."""
@@ -543,58 +552,70 @@ class TestImportSummaryDialog(unittest.TestCase):
     
     def test_copy_temporary_to_definitive_layers_includes_csv_points(self):
         """Test that the copy temporary to definitive layers method includes the CSV points layer."""
-        with patch('qgis.core.QgsProject') as mock_project_class:
-            
-            # Create mock project and layers
+        try:
+            from services.import_validation_service import CopyBatchResult
+        except ImportError:
+            from ..services.import_validation_service import CopyBatchResult
+
+        with patch('qgis.core.QgsProject') as mock_project_class, \
+             patch.object(
+                 self.dialog._feature_copier,
+                 'copy_features_batch',
+                 return_value=CopyBatchResult(2, 2, 0, [1, 2]),
+             ) as mock_batch, \
+             patch.object(self.dialog._feature_copier, 'select_copied_features') as mock_select, \
+             patch('qgis.PyQt.QtWidgets.QMessageBox.information'):
             mock_project = Mock()
             mock_project_class.instance.return_value = mock_project
-            
-            # Create mock temporary CSV layer
+
             mock_csv_layer = Mock()
             mock_csv_layer.name.return_value = "Imported_CSV_Points"
-            mock_csv_layer.getFeatures.return_value = [Mock(), Mock()]  # 2 features
-            
-            # Create mock definitive total station points layer
+            mock_csv_layer.featureCount.return_value = 2
+            mock_csv_layer.fields.return_value = Mock(count=Mock(return_value=0))
+            mock_csv_layer.getFeatures.return_value = [
+                self._mock_feature_for_layer_copy(),
+                self._mock_feature_for_layer_copy(),
+            ]
+
             mock_definitive_layer = Mock()
             mock_definitive_layer.name.return_value = "Total Station Points"
             mock_definitive_layer.id.return_value = "definitive_layer_id"
-            mock_definitive_layer.isEditable.return_value = False
-            mock_definitive_layer.startEditing = Mock()
-            mock_definitive_layer.addFeature = Mock(return_value=True)
-            mock_definitive_layer.removeSelection = Mock()
-            mock_definitive_layer.select = Mock()
-            
-            # Set up the project to return our mock layers
-            # The method iterates through project.mapLayers().values() and looks for layers by name
+            mock_definitive_layer.fields.return_value = Mock(count=Mock(return_value=0))
+
             mock_project.mapLayers.return_value = {
                 "csv_layer_id": mock_csv_layer,
-                "definitive_layer_id": mock_definitive_layer
+                "definitive_layer_id": mock_definitive_layer,
             }
-            
-            # Mock settings manager to return the definitive layer ID for total_station_points_layer
+
             def mock_get_value(key, default=None):
                 if key == 'total_station_points_layer':
                     return "definitive_layer_id"
                 return default
-            
+
             self.dialog._settings_manager.get_value = mock_get_value
-            
-            # Call the copy method
+
             self.dialog._copy_temporary_to_definitive_layers()
-            
-            # Verify that the CSV layer was processed
+
             mock_csv_layer.getFeatures.assert_called_once()
-            
-            # Verify that the definitive layer was put in edit mode
-            mock_definitive_layer.startEditing.assert_called_once()
-            
-            # Verify that features were added to the definitive layer
-            self.assertEqual(mock_definitive_layer.addFeature.call_count, 2)
+            mock_batch.assert_called_once()
+            self.assertIs(mock_batch.call_args.kwargs['target_layer'], mock_definitive_layer)
+            mock_select.assert_called_once_with(mock_definitive_layer, [1, 2])
 
     def test_copy_temporary_to_definitive_layers_processes_all_import_layers(self):
         """Validation copy must process objects, features, small finds, and topo points."""
+        try:
+            from services.import_validation_service import CopyBatchResult
+        except ImportError:
+            from ..services.import_validation_service import CopyBatchResult
+
         with patch('qgis.core.QgsProject') as mock_project_class, \
-             patch.object(self.dialog, '_copy_features_between_layers', return_value=1) as mock_copy:
+             patch.object(
+                 self.dialog._feature_copier,
+                 'copy_features_batch',
+                 return_value=CopyBatchResult(1, 1, 0, [1]),
+             ) as mock_copy, \
+             patch.object(self.dialog._feature_copier, 'select_copied_features'), \
+             patch('qgis.PyQt.QtWidgets.QMessageBox.information'):
             mock_project = Mock()
             mock_project_class.instance.return_value = mock_project
 
@@ -610,11 +631,15 @@ class TestImportSummaryDialog(unittest.TestCase):
             for layer_name, (_setting_key, definitive_id) in mapping.items():
                 temp_layer = Mock()
                 temp_layer.name.return_value = layer_name
+                temp_layer.featureCount.return_value = 1
+                temp_layer.fields.return_value = Mock(count=Mock(return_value=0))
+                temp_layer.getFeatures.return_value = [self._mock_feature_for_layer_copy()]
                 temp_layers[layer_name] = temp_layer
 
                 definitive_layer = Mock()
                 definitive_layer.id.return_value = definitive_id
                 definitive_layer.name.return_value = f"def_{layer_name}"
+                definitive_layer.fields.return_value = Mock(count=Mock(return_value=0))
                 definitive_layers[definitive_id] = definitive_layer
 
             all_layers = {}
@@ -646,28 +671,30 @@ class TestImportSummaryDialog(unittest.TestCase):
     
     def test_validate_button_success(self):
         """Test that validate button properly deletes the dock widget on success."""
-        with patch.object(self.dialog, '_copy_temporary_to_definitive_layers') as mock_copy, \
-             patch.object(self.dialog, '_delete_temporary_layers') as mock_delete, \
-             patch.object(self.dialog, '_archive_imported_data') as mock_archive, \
-             patch.object(self.dialog, 'deleteLater') as mock_delete_later:
-            
-            # Call the validate method
+        with patch.object(self.dialog, '_has_warnings', return_value=False), \
+             patch.object(self.dialog, '_finalize_validation_success') as mock_finalize, \
+             patch.object(self.dialog, '_start_async_validation', side_effect=mock_finalize):
             self.dialog._handle_validate()
-            
-            # Verify all the validation steps were called
-            mock_copy.assert_called_once()
+
+            mock_finalize.assert_called_once()
+
+    def test_finalize_validation_success_cleans_up(self):
+        """Successful validation archives data and removes the dock widget."""
+        self.dialog._validation_copied_counts = {"New Objects": 2}
+        with patch.object(self.dialog, '_delete_temporary_layers') as mock_delete, \
+             patch.object(self.dialog, '_archive_imported_data') as mock_archive, \
+             patch.object(self.dialog, 'deleteLater') as mock_delete_later, \
+             patch('qgis.PyQt.QtWidgets.QMessageBox.information'):
+            self.dialog._finalize_validation_success()
+
             mock_delete.assert_called_once()
             mock_archive.assert_called_once()
-            
-            # Verify the dock widget was removed from the interface
             self.mock_iface.removeDockWidget.assert_called_once_with(self.dialog)
-            
-            # Verify the widget was deleted
             mock_delete_later.assert_called_once()
     
     def test_validate_button_error_handling(self):
         """Test that validate button handles errors gracefully."""
-        with patch.object(self.dialog, '_copy_temporary_to_definitive_layers', side_effect=Exception("Test error")), \
+        with patch.object(self.dialog, '_start_async_validation', side_effect=Exception("Test error")), \
              patch('qgis.PyQt.QtWidgets.QMessageBox.critical') as mock_critical:
             
             # Call the validate method
@@ -799,19 +826,9 @@ class TestImportSummaryDialog(unittest.TestCase):
         
         with patch.object(self.dialog, '_has_warnings', return_value=True), \
              patch.object(self.dialog, '_confirm_validation_with_warnings', return_value=True), \
-             patch.object(self.dialog, '_copy_temporary_to_definitive_layers') as mock_copy, \
-             patch.object(self.dialog, '_delete_temporary_layers') as mock_delete, \
-             patch.object(self.dialog, '_archive_imported_data') as mock_archive, \
-             patch.object(self.dialog, 'deleteLater') as mock_delete_later:
-            
-            # Call the validate method
+             patch.object(self.dialog, '_start_async_validation') as mock_start:
             self.dialog._handle_validate()
-            
-            # Verify that all validation steps were executed
-            mock_copy.assert_called_once()
-            mock_delete.assert_called_once()
-            mock_archive.assert_called_once()
-            mock_delete_later.assert_called_once()
+            mock_start.assert_called_once()
     
     def test_validate_with_warnings_user_cancels(self):
         """Test validation when warnings exist and user cancels."""
@@ -821,19 +838,9 @@ class TestImportSummaryDialog(unittest.TestCase):
         
         with patch.object(self.dialog, '_has_warnings', return_value=True), \
              patch.object(self.dialog, '_confirm_validation_with_warnings', return_value=False), \
-             patch.object(self.dialog, '_copy_temporary_to_definitive_layers') as mock_copy, \
-             patch.object(self.dialog, '_delete_temporary_layers') as mock_delete, \
-             patch.object(self.dialog, '_archive_imported_data') as mock_archive, \
-             patch.object(self.dialog, 'deleteLater') as mock_delete_later:
-            
-            # Call the validate method
+             patch.object(self.dialog, '_start_async_validation') as mock_start:
             self.dialog._handle_validate()
-            
-            # Verify that no validation steps were executed
-            mock_copy.assert_not_called()
-            mock_delete.assert_not_called()
-            mock_archive.assert_not_called()
-            mock_delete_later.assert_not_called()
+            mock_start.assert_not_called()
     
     def test_validate_without_warnings(self):
         """Test validation when no warnings exist."""
@@ -843,22 +850,10 @@ class TestImportSummaryDialog(unittest.TestCase):
         
         with patch.object(self.dialog, '_has_warnings', return_value=False), \
              patch.object(self.dialog, '_confirm_validation_with_warnings') as mock_confirm, \
-             patch.object(self.dialog, '_copy_temporary_to_definitive_layers') as mock_copy, \
-             patch.object(self.dialog, '_delete_temporary_layers') as mock_delete, \
-             patch.object(self.dialog, '_archive_imported_data') as mock_archive, \
-             patch.object(self.dialog, 'deleteLater') as mock_delete_later:
-            
-            # Call the validate method
+             patch.object(self.dialog, '_start_async_validation') as mock_start:
             self.dialog._handle_validate()
-            
-            # Verify that confirmation was not called
             mock_confirm.assert_not_called()
-            
-            # Verify that all validation steps were executed
-            mock_copy.assert_called_once()
-            mock_delete.assert_called_once()
-            mock_archive.assert_called_once()
-            mock_delete_later.assert_called_once()
+            mock_start.assert_called_once()
 
 
 class TestImportSummaryFeatureCopy(unittest.TestCase):

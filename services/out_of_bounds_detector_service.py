@@ -43,6 +43,19 @@ except ImportError:
 from qgis.core import QgsProject, QgsGeometry, QgsPointXY
 from qgis.PyQt.QtCore import QObject
 
+# Temporary import layers created during field-data import (see import_validation_service).
+_TEMP_IMPORT_LAYER_NAMES = {
+    "objects_layer": "New Objects",
+    "features_layer": "New Features",
+    "small_finds_layer": "New Small Finds",
+}
+
+_LAYER_TYPE_LABELS = {
+    "objects_layer": "Objects",
+    "features_layer": "Features",
+    "small_finds_layer": "Small Finds",
+}
+
 
 class OutOfBoundsDetectorService(QObject):
     """
@@ -87,17 +100,15 @@ class OutOfBoundsDetectorService(QObject):
         try:
             # Get configuration from settings
             recording_areas_layer_id = self._settings_manager.get_value('recording_areas_layer')
-            objects_layer_id = self._settings_manager.get_value('objects_layer')
-            features_layer_id = self._settings_manager.get_value('features_layer')
-            small_finds_layer_id = self._settings_manager.get_value('small_finds_layer')
-            total_station_points_layer_id = self._settings_manager.get_value('total_station_points_layer')
             
             print(f"[DEBUG] Layer IDs from settings:")
             print(f"[DEBUG]   recording_areas_layer_id: {recording_areas_layer_id}")
-            print(f"[DEBUG]   objects_layer_id: {objects_layer_id}")
-            print(f"[DEBUG]   features_layer_id: {features_layer_id}")
-            print(f"[DEBUG]   small_finds_layer_id: {small_finds_layer_id}")
-            print(f"[DEBUG]   total_station_points_layer_id: {total_station_points_layer_id}")
+            for setting_key, temp_name in _TEMP_IMPORT_LAYER_NAMES.items():
+                print(
+                    f"[DEBUG]   {setting_key}: "
+                    f"{self._settings_manager.get_value(setting_key)} "
+                    f"(temp: {temp_name})"
+                )
             
             if not recording_areas_layer_id:
                 print(f"[DEBUG] No recording areas layer configured, returning empty warnings")
@@ -111,60 +122,15 @@ class OutOfBoundsDetectorService(QObject):
             
             print(f"[DEBUG] Successfully got recording areas layer: {recording_areas_layer.name()}")
             print(f"[DEBUG] Recording areas layer feature count: {recording_areas_layer.featureCount()}")
-            
-            # Check objects layer - look for temporary layer first
-            if objects_layer_id:
-                print(f"[DEBUG] Checking objects layer...")
-                # Try to find the temporary "New Objects" layer first
-                temp_objects_layer = self._layer_service.get_layer_by_name("New Objects")
-                if temp_objects_layer:
-                    print(f"[DEBUG] Found temporary 'New Objects' layer: {temp_objects_layer.name()}")
-                    objects_warnings = self._detect_out_of_bounds_in_layer(
-                        temp_objects_layer.id(), recording_areas_layer, "Objects"
-                    )
-                else:
-                    print(f"[DEBUG] No temporary 'New Objects' layer found, using configured layer: {objects_layer_id}")
-                    objects_warnings = self._detect_out_of_bounds_in_layer(
-                        objects_layer_id, recording_areas_layer, "Objects"
-                    )
-                print(f"[DEBUG] Objects layer returned {len(objects_warnings)} warnings")
-                warnings.extend(objects_warnings)
-            
-            # Check features layer - look for temporary layer first
-            if features_layer_id:
-                print(f"[DEBUG] Checking features layer...")
-                # Try to find the temporary "New Features" layer first
-                temp_features_layer = self._layer_service.get_layer_by_name("New Features")
-                if temp_features_layer:
-                    print(f"[DEBUG] Found temporary 'New Features' layer: {temp_features_layer.name()}")
-                    features_warnings = self._detect_out_of_bounds_in_layer(
-                        temp_features_layer.id(), recording_areas_layer, "Features"
-                    )
-                else:
-                    print(f"[DEBUG] No temporary 'New Features' layer found, using configured layer: {features_layer_id}")
-                    features_warnings = self._detect_out_of_bounds_in_layer(
-                        features_layer_id, recording_areas_layer, "Features"
-                    )
-                print(f"[DEBUG] Features layer returned {len(features_warnings)} warnings")
-                warnings.extend(features_warnings)
-            
-            # Check small finds layer - look for temporary layer first
-            if small_finds_layer_id:
-                print(f"[DEBUG] Checking small finds layer...")
-                # Try to find the temporary "New Small Finds" layer first
-                temp_small_finds_layer = self._layer_service.get_layer_by_name("New Small Finds")
-                if temp_small_finds_layer:
-                    print(f"[DEBUG] Found temporary 'New Small Finds' layer: {temp_small_finds_layer.name()}")
-                    small_finds_warnings = self._detect_out_of_bounds_in_layer(
-                        temp_small_finds_layer.id(), recording_areas_layer, "Small Finds"
-                    )
-                else:
-                    print(f"[DEBUG] No temporary 'New Small Finds' layer found, using configured layer: {small_finds_layer_id}")
-                    small_finds_warnings = self._detect_out_of_bounds_in_layer(
-                        small_finds_layer_id, recording_areas_layer, "Small Finds"
-                    )
-                print(f"[DEBUG] Small finds layer returned {len(small_finds_warnings)} warnings")
-                warnings.extend(small_finds_warnings)
+
+            layers_to_check = self._resolve_layers_to_check()
+            for layer_id, layer_type in layers_to_check:
+                print(f"[DEBUG] Checking {layer_type} layer ({layer_id})...")
+                layer_warnings = self._detect_out_of_bounds_in_layer(
+                    layer_id, recording_areas_layer, layer_type
+                )
+                print(f"[DEBUG] {layer_type} layer returned {len(layer_warnings)} warnings")
+                warnings.extend(layer_warnings)
             
             print(f"[DEBUG] Total out-of-bounds warnings found: {len(warnings)}")
             
@@ -174,8 +140,38 @@ class OutOfBoundsDetectorService(QObject):
             traceback.print_exc()
         
         return warnings
+
+    def _resolve_layers_to_check(self) -> List[Tuple[str, str]]:
+        """
+        Resolve which object/feature/small-find layers should be scanned.
+
+        During import, only temporary ``New *`` layers that exist are checked so
+        definitive project layers are not scanned unnecessarily. When no temp
+        import layer is present (e.g. manual refresh), configured definitive
+        layers are used instead.
+        """
+        temp_import_in_progress = any(
+            self._layer_service.get_layer_by_name(temp_name)
+            for temp_name in _TEMP_IMPORT_LAYER_NAMES.values()
+        )
+
+        layers_to_check: List[Tuple[str, str]] = []
+        for setting_key, temp_layer_name in _TEMP_IMPORT_LAYER_NAMES.items():
+            configured_layer_id = self._settings_manager.get_value(setting_key)
+            if not configured_layer_id:
+                continue
+
+            temp_layer = self._layer_service.get_layer_by_name(temp_layer_name)
+            if temp_layer:
+                layers_to_check.append((temp_layer.id(), _LAYER_TYPE_LABELS[setting_key]))
+                continue
+
+            if not temp_import_in_progress:
+                layers_to_check.append((configured_layer_id, _LAYER_TYPE_LABELS[setting_key]))
+
+        return layers_to_check
     
-    def _detect_out_of_bounds_in_layer(self, 
+    def _detect_out_of_bounds_in_layer(self,
                                      layer_id: str, 
                                      recording_areas_layer: Any, 
                                      layer_type: str) -> List[Union[str, WarningData]]:
@@ -300,42 +296,52 @@ class OutOfBoundsDetectorService(QObject):
                 return warnings
             
             print(f"[DEBUG] Recording area lookup field: {referenced_field_name} (index: {referenced_field_idx})")
-            
-            recording_areas_by_value = {}
-            for ra_feature in recording_areas_layer.getFeatures():
-                maybe_yield_to_ui()
-                ra_value = ra_feature.attribute(referenced_field_idx)
-                if ra_value is not None and ra_value != "":
-                    recording_areas_by_value[ra_value] = ra_feature
-            
-            # Check each feature in the layer
-            out_of_bounds_features = []
+
+            # Collect only features that have geometry and a recording area reference.
+            features_to_check = []
             feature_count = 0
             max_features = 10000  # Safety limit
+
+            print(f"[DEBUG] Collecting features with geometry...")
+            for feature in layer.getFeatures():
+                maybe_yield_to_ui(every=50)
+                feature_count += 1
+                if feature_count > max_features:
+                    print(f"[DEBUG] Warning: Too many features ({feature_count}), limiting to {max_features}")
+                    break
+
+                if not feature.geometry() or feature.geometry().isEmpty():
+                    continue
+
+                recording_area_value = feature.attribute(recording_area_field_idx)
+                if not recording_area_value:
+                    continue
+
+                features_to_check.append((feature, recording_area_value))
+
+            print(f"[DEBUG] Features with geometry and recording area: {len(features_to_check)}")
+            if not features_to_check:
+                print(f"[DEBUG] No features to check, skipping recording-area lookup")
+                return warnings
+
+            needed_recording_area_values = {value for _, value in features_to_check}
+            recording_areas_by_value = {}
+            for ra_feature in recording_areas_layer.getFeatures():
+                maybe_yield_to_ui(every=50)
+                ra_value = ra_feature.attribute(referenced_field_idx)
+                if ra_value in needed_recording_area_values:
+                    recording_areas_by_value[ra_value] = ra_feature
+            
+            # Check each feature with geometry
+            out_of_bounds_features = []
             processed_features = 0
-            features_with_geometry = 0
             features_with_recording_area = 0
             features_outside = 0
             
             print(f"[DEBUG] Starting feature processing...")
             
-            for feature in layer.getFeatures():
-                maybe_yield_to_ui()
-                feature_count += 1
-                if feature_count > max_features:
-                    print(f"[DEBUG] Warning: Too many features ({feature_count}), limiting to {max_features}")
-                    break
-                    
-                if not feature.geometry() or feature.geometry().isEmpty():
-                    continue
-                
-                features_with_geometry += 1
-                
-                # Get the recording area value from the feature
-                recording_area_value = feature.attribute(recording_area_field_idx)
-                if not recording_area_value:
-                    continue
-                
+            for feature, recording_area_value in features_to_check:
+                maybe_yield_to_ui(every=50)
                 features_with_recording_area += 1
                 
                 # Find the recording area feature that matches this value
@@ -345,14 +351,8 @@ class OutOfBoundsDetectorService(QObject):
                     if recording_area_feature is not None
                     else None
                 )
-                if recording_area_feature is not None:
-                    print(
-                        f"[DEBUG] Found recording area feature: {recording_area_value} -> "
-                        f"{recording_area_feature.attribute(referenced_field_idx)}"
-                    )
                 
                 if not recording_area_geometry or recording_area_geometry.isEmpty():
-                    print(f"[DEBUG] No recording area geometry found for value: {recording_area_value}")
                     continue
                 
                 feature_geometry = feature.geometry()
@@ -362,9 +362,7 @@ class OutOfBoundsDetectorService(QObject):
                     features_outside += 1
                     # Calculate the distance to the recording area boundary
                     distance = recording_area_geometry.distance(feature_geometry)
-                    maybe_yield_to_ui(force=True)
-                    
-                    print(f"[DEBUG] Feature outside recording area: distance = {distance:.3f}m")
+                    maybe_yield_to_ui(every=50)
                     
                     if distance > self._max_distance_meters:
                         # Get recording area name
@@ -389,9 +387,8 @@ class OutOfBoundsDetectorService(QObject):
                     print(f"[DEBUG] Processed {processed_features} features...")
             
             print(f"[DEBUG] Feature processing complete:")
-            print(f"[DEBUG]   Total features: {feature_count}")
-            print(f"[DEBUG]   Features with geometry: {features_with_geometry}")
-            print(f"[DEBUG]   Features with recording area: {features_with_recording_area}")
+            print(f"[DEBUG]   Total features scanned: {feature_count}")
+            print(f"[DEBUG]   Features with geometry and recording area: {features_with_recording_area}")
             print(f"[DEBUG]   Features outside recording areas: {features_outside}")
             print(f"[DEBUG]   Out-of-bounds features (beyond {self._max_distance_meters}m): {len(out_of_bounds_features)}")
             
