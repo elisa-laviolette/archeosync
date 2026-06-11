@@ -15,6 +15,7 @@ __copyright__ = 'Copyright 2025, Elisa Caron-Laviolette'
 import pytest
 import sys
 import os
+import xml.etree.ElementTree as ET
 from unittest.mock import Mock, patch, MagicMock
 import unittest
 
@@ -40,6 +41,56 @@ class TestProjectCreationServiceBasic:
             assert QGISProjectCreationService is not None
         except ImportError:
             pytest.skip("ProjectCreationService module not available")
+
+    def test_inject_map_view_into_qgs_xml(self, tmp_path):
+        """Map canvas extent and rotation must be written into the .qgs file."""
+        try:
+            from services.project_creation_service import QGISProjectCreationService
+        except ImportError:
+            pytest.skip("ProjectCreationService module not available")
+
+        service = QGISProjectCreationService(Mock(), Mock(), Mock(), Mock())
+        qgs_path = tmp_path / "zone.qgs"
+        qgs_path.write_text(
+            """<qgis>
+  <projectCrs>
+    <spatialrefsys>
+      <authid>EPSG:2154</authid>
+      <description>RGF93 v1 / Lambert-93</description>
+    </spatialrefsys>
+  </projectCrs>
+  <relations/>
+</qgis>""",
+            encoding="utf-8",
+        )
+
+        service._inject_map_view_into_qgs_xml(
+            str(qgs_path),
+            {
+                'xmin': 100.0,
+                'ymin': 200.0,
+                'xmax': 300.0,
+                'ymax': 400.0,
+                'rotation': 33.5,
+                'map_units': 'meters',
+            },
+        )
+
+        root = ET.fromstring(qgs_path.read_text(encoding="utf-8"))
+        mapcanvas = root.find("mapcanvas")
+        assert mapcanvas is not None
+        assert mapcanvas.get("name") == "theMapCanvas"
+        assert mapcanvas.find("rotation").text == "33.5"
+        assert mapcanvas.find("extent/xmin").text == "100.0"
+        assert mapcanvas.find("extent/ymax").text == "400.0"
+        assert mapcanvas.find("destinationsrs/spatialrefsys/authid").text == "EPSG:2154"
+
+        view_settings = root.find("ProjectViewSettings")
+        assert view_settings is not None
+        assert view_settings.get("rotation") == "33.5"
+        default_extent = view_settings.find("DefaultViewExtent")
+        assert default_extent is not None
+        assert default_extent.get("xmax") == "300.0"
 
 
 @pytest.mark.qgis
@@ -665,9 +716,11 @@ class TestProjectCreationService:
         mock_project = Mock()
         mock_bookmark_manager = Mock()
         mock_bookmark = Mock()
+        mock_view_settings = Mock()
         
         # Set up the bookmark manager
         mock_project.bookmarkManager.return_value = mock_bookmark_manager
+        mock_project.viewSettings.return_value = mock_view_settings
         
         # Mock QgsBookmark and QgsReferencedRectangle
         with patch('qgis.core.QgsBookmark', return_value=mock_bookmark), \
@@ -684,12 +737,18 @@ class TestProjectCreationService:
             mock_referenced_rect_class.return_value = mock_bounding_box
             
             # Call the method
-            self.project_service._create_recording_area_bookmark(mock_project, feature_data, "Test Area")
+            self.project_service._create_recording_area_bookmark(
+                mock_project, feature_data, "Test Area", map_rotation=42.5
+            )
             
             # Verify bookmark was created and configured
             mock_bookmark.setName.assert_called_once_with("Test Area")
             mock_bookmark.setExtent.assert_called_once_with(mock_bounding_box)
+            mock_bookmark.setRotation.assert_called_once_with(42.5)
             mock_bookmark_manager.addBookmark.assert_called_once_with(mock_bookmark)
+            mock_project.viewSettings.assert_called_once()
+            mock_view_settings.setDefaultViewExtent.assert_called_once_with(mock_bounding_box)
+            mock_view_settings.setDefaultRotation.assert_called_once_with(42.5)
 
     def test_apply_configured_field_defaults_sets_expected_expressions(self):
         """Configured fields should receive default expressions used by recording forms."""

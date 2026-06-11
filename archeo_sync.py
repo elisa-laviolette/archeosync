@@ -465,7 +465,8 @@ class ArcheoSyncPlugin(QObject):
                         extra_layers=extra_layers,
                         destination_folder=destination_folder,
                         project_name=project_name,
-                        next_values=next_values[i] if i < len(next_values) else {}
+                        next_values=next_values[i] if i < len(next_values) else {},
+                        source_map_rotation=self._iface.mapCanvas().rotation(),
                     )
                     
                     if success:

@@ -228,7 +228,7 @@ Service for detecting duplicate objects with the same recording area and number:
 
 ### QGISProjectCreationService
 QGIS-specific implementation for field project creation and packaging including:
-- **Per recording area**: Automatic empty layer creation ("Objects", "Features")
+- **Per recording area**: Automatic empty layer creation ("Objects", "Features"); spatial bookmark on the recording area geometry; initial map view (`QgsProjectViewSettings` + injected `mapcanvas` extent/rotation in the `.qgs` XML) set from that bookmark and from the main project canvas rotation so the field project opens zoomed and oriented like the source project
 - **Global project**: Extent-clipped copies of existing data; read-only context layers
 - Layer configuration for offline editing with extra layers support
 - Project packaging with area of interest

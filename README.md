@@ -101,6 +101,8 @@ Choose **Per recording area** (default) or **Global project** at the top of the 
 4. Configure the next values for objects and features
 5. Click OK to create QGIS field projects for each selected recording area
 
+On first open, each per-recording-area field project zooms to a spatial bookmark on the recording area geometry and keeps the map rotation from the main project canvas.
+
 #### Global project
 
 1. Open **Plugins > ArcheoSync > Prepare Recording** and select **Global project**

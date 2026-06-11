@@ -39,6 +39,7 @@ The service provides:
 - Comprehensive error handling
 """
 
+import copy
 import os
 import re
 import uuid
@@ -111,7 +112,8 @@ class QGISProjectCreationService(QObject):
                            extra_layers: Optional[List[str]] = None,
                            destination_folder: str = "",
                            project_name: str = "",
-                           next_values: Dict[str, str] = None) -> bool:
+                           next_values: Dict[str, str] = None,
+                           source_map_rotation: Optional[float] = None) -> bool:
         """
         Create a QGIS field project for a specific recording area.
         
@@ -125,6 +127,7 @@ class QGISProjectCreationService(QObject):
             destination_folder: Folder where to save the field project
             project_name: Name for the field project
             next_values: Dictionary containing first_number, level values (optional)
+            source_map_rotation: Map canvas rotation (degrees) from the main project (optional)
             
         Returns:
             True if project creation was successful, False otherwise
@@ -310,8 +313,13 @@ class QGISProjectCreationService(QObject):
             if next_values:
                 self._set_project_variables(project, next_values, recording_area_variable_value)
 
-            # Create bookmark for recording area
-            self._create_recording_area_bookmark(project, feature_data, feature_data['display_name'])
+            # Create bookmark and initial map view for recording area
+            map_view_payload = self._create_recording_area_bookmark(
+                project,
+                feature_data,
+                feature_data['display_name'],
+                map_rotation=source_map_rotation if source_map_rotation is not None else 0.0,
+            )
 
             # Recreate QGIS relations from the main project into the field project.
             # This is necessary so Relation widgets in forms remain valid after export.
@@ -350,6 +358,8 @@ class QGISProjectCreationService(QObject):
                 target_project=project,
                 source_to_target_layer_ids=source_to_target_layer_ids,
             )
+            if map_view_payload:
+                self._inject_map_view_into_qgs_xml(project_path, map_view_payload)
 
             print(f"Successfully created field project: {project_path}")
             return True
@@ -1093,6 +1103,123 @@ class QGISProjectCreationService(QObject):
             print(f"[DEBUG] Injected {len(relations_payload)} relation(s) directly into .qgs XML")
         except Exception as e:
             print(f"[DEBUG] Failed to inject relations into .qgs XML: {str(e)}")
+
+    def _inject_map_view_into_qgs_xml(
+        self,
+        qgs_path: str,
+        view_payload: Dict[str, Any],
+    ) -> None:
+        """
+        Inject map canvas extent and rotation directly into the generated .qgs file.
+
+        QGIS restores the main map view from the ``mapcanvas`` element when present.
+        Programmatic ``viewSettings()`` updates alone are not always serialized or
+        applied reliably across QGIS versions, so we mirror the desktop save format.
+        """
+        try:
+            if not qgs_path or not os.path.exists(qgs_path) or not view_payload:
+                return
+
+            xmin = view_payload.get('xmin')
+            ymin = view_payload.get('ymin')
+            xmax = view_payload.get('xmax')
+            ymax = view_payload.get('ymax')
+            if None in (xmin, ymin, xmax, ymax):
+                return
+
+            rotation = float(view_payload.get('rotation', 0.0) or 0.0)
+            map_units = view_payload.get('map_units') or 'meters'
+
+            tree = ET.parse(qgs_path)
+            root = tree.getroot()
+            spatial_ref_node = root.find('projectCrs/spatialrefsys')
+
+            view_settings_node = root.find('ProjectViewSettings')
+            if view_settings_node is None:
+                view_settings_node = ET.Element('ProjectViewSettings')
+                root.append(view_settings_node)
+            else:
+                for child in list(view_settings_node):
+                    if child.tag in ('DefaultViewExtent', 'PresetFullExtent'):
+                        view_settings_node.remove(child)
+
+            view_settings_node.set('UseProjectScales', '0')
+            view_settings_node.set('rotation', repr(rotation))
+
+            default_extent = ET.SubElement(
+                view_settings_node,
+                'DefaultViewExtent',
+                {
+                    'xmin': repr(xmin),
+                    'ymin': repr(ymin),
+                    'xmax': repr(xmax),
+                    'ymax': repr(ymax),
+                },
+            )
+            if spatial_ref_node is not None:
+                default_extent.append(copy.deepcopy(spatial_ref_node))
+
+            mapcanvas_node = None
+            for candidate in root.findall('mapcanvas'):
+                if candidate.get('name') in (None, 'theMapCanvas'):
+                    mapcanvas_node = candidate
+                    break
+
+            if mapcanvas_node is None:
+                mapcanvas_node = ET.Element('mapcanvas')
+                relations_node = root.find('relations')
+                if relations_node is not None:
+                    root.insert(list(root).index(relations_node) + 1, mapcanvas_node)
+                else:
+                    root.append(mapcanvas_node)
+            else:
+                for child in list(mapcanvas_node):
+                    if child.tag in ('extent', 'rotation', 'units', 'destinationsrs', 'rendermaptile'):
+                        mapcanvas_node.remove(child)
+
+            mapcanvas_node.set('annotationsVisible', '1')
+            mapcanvas_node.set('name', 'theMapCanvas')
+
+            units_el = ET.SubElement(mapcanvas_node, 'units')
+            units_el.text = map_units
+
+            extent_el = ET.SubElement(mapcanvas_node, 'extent')
+            for tag, value in (
+                ('xmin', xmin),
+                ('ymin', ymin),
+                ('xmax', xmax),
+                ('ymax', ymax),
+            ):
+                coord_el = ET.SubElement(extent_el, tag)
+                coord_el.text = repr(value)
+
+            rotation_el = ET.SubElement(mapcanvas_node, 'rotation')
+            rotation_el.text = repr(rotation)
+
+            destinationsrs_el = ET.SubElement(mapcanvas_node, 'destinationsrs')
+            if spatial_ref_node is not None:
+                destinationsrs_el.append(copy.deepcopy(spatial_ref_node))
+
+            render_tile_el = ET.SubElement(mapcanvas_node, 'rendermaptile')
+            render_tile_el.text = '0'
+
+            tree.write(qgs_path, encoding='utf-8', xml_declaration=False)
+            print(
+                f"[DEBUG] Injected map view into .qgs XML "
+                f"(extent={xmin},{ymin},{xmax},{ymax}, rotation={rotation})"
+            )
+        except Exception as e:
+            print(f"[DEBUG] Failed to inject map view into .qgs XML: {str(e)}")
+
+    def _map_units_label_for_crs(self, crs: Any) -> str:
+        """Return the QGIS map-units label stored in .qgs mapcanvas nodes."""
+        try:
+            from qgis.core import QgsUnitTypes
+            if crs and crs.isValid():
+                return QgsUnitTypes.toString(crs.mapUnits())
+        except Exception:
+            pass
+        return 'meters'
 
     def _filter_expression_uses_qgis_syntax(self, filter_expression: str) -> bool:
         """Return True when the expression uses QGIS tokens (e.g. $geometry, $id)."""
@@ -2584,9 +2711,22 @@ class QGISProjectCreationService(QObject):
         except Exception as e:
             print(f"Error setting project variables: {str(e)}") 
 
-    def _create_recording_area_bookmark(self, project: QgsProject, feature_data: Dict[str, Any], recording_area_name: str) -> None:
+    def _create_recording_area_bookmark(
+        self,
+        project: QgsProject,
+        feature_data: Dict[str, Any],
+        recording_area_name: str,
+        map_rotation: float = 0.0,
+    ) -> Optional[Dict[str, Any]]:
         """
-        Create a bookmark for the recording area that zooms to the feature's geometry.
+        Create a bookmark for the recording area and configure the initial map view.
+
+        The bookmark extent is also written as the project's default view extent so
+        the field project opens zoomed on the recording area. The map rotation is
+        taken from the main project canvas when provided.
+
+        Returns:
+            Payload used to inject ``mapcanvas`` view state into the saved .qgs file.
         """
         try:
             # Get the geometry as a QgsGeometry object
@@ -2602,7 +2742,7 @@ class QGISProjectCreationService(QObject):
                 from qgis.core import QgsBookmark, QgsReferencedRectangle
             except ImportError:
                 print("Bookmark API not available in this QGIS version, skipping bookmark creation.")
-                return
+                return None
 
             # Create a referenced rectangle with the project CRS
             bounding_box = geom.boundingBox()
@@ -2612,10 +2752,41 @@ class QGISProjectCreationService(QObject):
             bookmark = QgsBookmark()
             bookmark.setName(recording_area_name)
             bookmark.setExtent(referenced_rect)
+            if hasattr(bookmark, 'setRotation'):
+                bookmark.setRotation(map_rotation)
             # Add the bookmark to the project's bookmark manager
             project.bookmarkManager().addBookmark(bookmark)
+            self._set_recording_area_initial_map_view(project, referenced_rect, map_rotation)
             print(f"Created bookmark for {recording_area_name} with extent: {bounding_box}")
+            return {
+                'xmin': bounding_box.xMinimum(),
+                'ymin': bounding_box.yMinimum(),
+                'xmax': bounding_box.xMaximum(),
+                'ymax': bounding_box.yMaximum(),
+                'rotation': map_rotation,
+                'map_units': self._map_units_label_for_crs(project_crs),
+            }
         except Exception as e:
             print(f"Error creating recording area bookmark: {str(e)}")
+            return None
+
+    def _set_recording_area_initial_map_view(
+        self,
+        project: QgsProject,
+        referenced_rect: Any,
+        map_rotation: float = 0.0,
+    ) -> None:
+        """Set default view extent and rotation for first project open."""
+        view_settings_factory = getattr(project, 'viewSettings', None)
+        if not callable(view_settings_factory):
+            return
+        try:
+            view_settings = view_settings_factory()
+            view_settings.setDefaultViewExtent(referenced_rect)
+            view_settings.setDefaultRotation(map_rotation)
+            if hasattr(view_settings, 'setRestoreProjectExtentOnProjectLoad'):
+                view_settings.setRestoreProjectExtentOnProjectLoad(False)
+        except Exception as e:
+            print(f"Error setting initial map view for recording area project: {str(e)}")
 
  

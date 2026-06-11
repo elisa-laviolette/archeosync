@@ -555,7 +555,8 @@ class IProjectCreationService(ABC):
                            extra_layers: Optional[List[str]] = None,
                            destination_folder: str = "",
                            project_name: str = "",
-                           next_values: Dict[str, str] = None) -> bool:
+                           next_values: Dict[str, str] = None,
+                           source_map_rotation: Optional[float] = None) -> bool:
         """
         Create a QGIS field project for a specific recording area.
         
@@ -570,6 +571,7 @@ class IProjectCreationService(ABC):
             destination_folder: Folder where to save the field project
             project_name: Name for the field project
             next_values: Dictionary containing first_number, level values (optional)
+            source_map_rotation: Map canvas rotation (degrees) from the main project (optional)
             
         Returns:
             True if project creation was successful, False otherwise
