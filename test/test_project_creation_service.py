@@ -143,6 +143,156 @@ class TestProjectCreationService:
         mock_export.assert_called_once()
         mock_layer.setSubsetString.assert_not_called()
 
+    def test_get_source_layer_active_filter_prefers_subset_string(self):
+        mock_layer = Mock(spec=QgsVectorLayer)
+        mock_layer.subsetString.return_value = '"status" = \'active\''
+        mock_layer.filterExpression.return_value = '"ignored" = 1'
+
+        result = self.project_service._get_source_layer_active_filter(mock_layer)
+
+        assert result == '"status" = \'active\''
+
+    def test_get_source_layer_active_filter_uses_filter_expression_when_no_subset(self):
+        mock_layer = Mock(spec=QgsVectorLayer)
+        mock_layer.subsetString.return_value = ""
+        mock_layer.filterExpression.return_value = '"status" = \'active\''
+
+        result = self.project_service._get_source_layer_active_filter(mock_layer)
+
+        assert result == '"status" = \'active\''
+
+    def test_combine_export_filter_expressions(self):
+        combined = self.project_service._combine_export_filter_expressions(
+            '"zone" = \'A\'',
+            'intersects($geometry, geom_from_wkt(\'POINT(0 0)\'))',
+        )
+
+        assert combined == (
+            '("zone" = \'A\') AND '
+            "(intersects($geometry, geom_from_wkt('POINT(0 0)')))"
+        )
+
+    def test_create_filtered_layer_combines_with_existing_layer_filter(self):
+        """Global export must keep the main-project layer filter when adding rows."""
+        mock_layer = Mock(spec=QgsVectorLayer)
+        mock_layer.subsetString.return_value = '"status" = \'active\''
+        mock_layer.filterExpression.return_value = ""
+        mock_layer.getFeatures.return_value = []
+        self.layer_service.get_layer_by_id.return_value = mock_layer
+
+        with patch.object(
+            self.project_service,
+            "_copy_layer_to_geopackage",
+            return_value=True,
+        ), patch(
+            "services.project_creation_service.QgsVectorLayer"
+        ) as mock_vector_layer_cls:
+            mock_vector_layer_cls.return_value.isValid.return_value = True
+            result = self.project_service._create_filtered_layer(
+                "layer1",
+                "/tmp/out.gpkg",
+                "Objects",
+                '"zone_id" IN (1, 2)',
+                Mock(),
+            )
+
+        assert result is True
+        assert mock_layer.setSubsetString.call_args_list[0][0][0] == (
+            '("status" = \'active\') AND ("zone_id" IN (1, 2))'
+        )
+        assert mock_layer.setSubsetString.call_args_list[-1][0][0] == '"status" = \'active\''
+
+    def test_export_layer_with_feature_request_combines_layer_filter(self):
+        mock_layer = Mock(spec=QgsVectorLayer)
+        mock_layer.subsetString.return_value = '"status" = \'active\''
+        mock_layer.filterExpression.return_value = ""
+        self.layer_service.get_layer_by_id.return_value = mock_layer
+
+        with patch.object(
+            self.project_service,
+            "_build_memory_layer_from_feature_iterator",
+            return_value=Mock(spec=QgsVectorLayer, featureCount=Mock(return_value=1)),
+        ) as mock_build, patch.object(
+            self.project_service,
+            "_export_memory_layer_to_project",
+            return_value=True,
+        ):
+            result = self.project_service._export_layer_with_feature_request(
+                "layer1",
+                "/tmp/out.gpkg",
+                "Objects",
+                Mock(),
+                filter_expression="intersects($geometry, geom_from_wkt('POINT(0 0)'))",
+            )
+
+        assert result is True
+        request = mock_build.call_args[0][1]
+        assert request.filterExpression() == (
+            '("status" = \'active\') AND '
+            "(intersects($geometry, geom_from_wkt('POINT(0 0)')))"
+        )
+
+    def test_create_extent_intersect_layer_copy_combines_layer_filter(self):
+        extent = QgsGeometry.fromWkt("POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))")
+        mock_layer = Mock(spec=QgsVectorLayer)
+        mock_layer.subsetString.return_value = '"status" = \'active\''
+        mock_layer.filterExpression.return_value = ""
+        self.layer_service.get_layer_by_id.return_value = mock_layer
+        self.layer_service.transform_geometry_to_layer_crs.return_value = extent
+
+        with patch.object(
+            self.project_service,
+            "_export_layer_with_feature_request",
+            return_value=True,
+        ) as mock_export:
+            result = self.project_service._create_extent_intersect_layer_copy(
+                source_layer_id="objects",
+                output_path="/tmp/objects.gpkg",
+                layer_name="Objects",
+                extent_geometry=extent,
+                project=Mock(),
+            )
+
+        assert result is True
+        mock_export.assert_called_once()
+        assert mock_export.call_args[1]["filter_expression"] == (
+            '("status" = \'active\') AND '
+            "(intersects($geometry, geom_from_wkt('POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))')))"
+        )
+
+    def test_create_alternative_objects_layer_copy_respects_layer_filter(self):
+        mock_layer = Mock(spec=QgsVectorLayer)
+        mock_layer.subsetString.return_value = '"status" = \'active\''
+        mock_layer.filterExpression.return_value = ""
+        self.layer_service.get_layer_by_id.return_value = mock_layer
+
+        with patch.object(
+            self.project_service,
+            "_get_relationship_filter_expression_for_ids",
+            return_value='"zone_id" IN (1, 2)',
+        ), patch.object(
+            self.project_service,
+            "_copy_layer_to_geopackage",
+            return_value=True,
+        ), patch(
+            "services.project_creation_service.QgsVectorLayer"
+        ) as mock_vector_layer_cls:
+            mock_vector_layer_cls.return_value.isValid.return_value = True
+            result = self.project_service._create_alternative_objects_layer_copy(
+                source_layer_id="alt",
+                recording_areas_layer_id="ra",
+                recording_area_ids=[1, 2],
+                output_path="/tmp/alt.gpkg",
+                layer_name="Alt Objects",
+                project=Mock(),
+            )
+
+        assert result is True
+        assert mock_layer.setSubsetString.call_args_list[0][0][0] == (
+            '("status" = \'active\') AND ("zone_id" IN (1, 2))'
+        )
+        assert mock_layer.setSubsetString.call_args_list[-1][0][0] == '"status" = \'active\''
+
     def test_export_extra_layer_for_global_project_non_spatial_uses_full_copy(self):
         self.layer_service.is_valid_no_geometry_layer.return_value = True
         with patch.object(

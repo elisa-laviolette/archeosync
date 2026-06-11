@@ -191,6 +191,7 @@ QGIS-specific implementation for layer operations including:
 ### Global field projects
 **Creation (`QGISProjectCreationService.create_global_field_project`)**:
 - Clips configured vector layers (objects, features, small finds, recording areas) to a user-defined extent (layer source: union of selected features, or union of all features when nothing is selected—not the layer bounding box). Recording areas are exported with the same SQL primary-key subset + Geopackage copy as per-zone projects (`id IN (...)`); spatial clipping for other layers uses `QgsFeatureRequest` when needed so PostgreSQL is not sent QGIS-only `$geometry` SQL. Attribute-only extra layers (e.g. lookup tables) are copied in full.
+- Respects any **layer filter** already applied in the main project (subset string or filter expression) when exporting objects and alternative objects, combined with extent or recording-area constraints.
 - Exports optional **alternative objects** table (no geometry) filtered by recording areas in the extent
 - Includes **extra field layers** and **recording areas** as read-only context (`setReadOnly`, `archeosync/readonly` custom property)
 - No project variables or form default injection

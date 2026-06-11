@@ -109,6 +109,7 @@ On first open, each per-recording-area field project zooms to a spatial bookmark
 2. Enter a **project name** and define an **extent** (manual coordinates or from a map layer; if the layer has a selection, the union of selected geometries is used, otherwise the union of all features on that layer)
 3. Optional: configure **Alternative Objects Layer** (no geometry) in settings — exported as a separate Geopackage for table-based recording
 4. Click **Prepare Global Project** to create one project with configured layers clipped to the extent, plus read-only **recording areas** and **extra field layers** for context (no project variables or form defaults)
+5. If **Objects** or **Alternative Objects** layers have a filter in the main project, only entities matching that filter are exported (in addition to extent and recording-area constraints)
 
 **Project Naming** (per recording area): When a level is defined, field project names will be the display name of the recording area followed by '_' and the content of the Next level column. For example: "Test Area_A" or "Excavation Site_Level 1". If no level is defined, only the recording area name is used.
 

@@ -1225,6 +1225,39 @@ class QGISProjectCreationService(QObject):
         """Return True when the expression uses QGIS tokens (e.g. $geometry, $id)."""
         return "$" in filter_expression
 
+    def _get_source_layer_active_filter(self, source_layer: QgsVectorLayer) -> Optional[str]:
+        """
+        Return the active filter configured on a layer in the main project.
+
+        Prefers the provider subset string; falls back to the QGIS filter expression.
+        """
+        if not source_layer:
+            return None
+        subset = (source_layer.subsetString() or "").strip()
+        if subset:
+            return subset
+        if hasattr(source_layer, "filterExpression"):
+            expression = (source_layer.filterExpression() or "").strip()
+            if expression:
+                return expression
+        return None
+
+    def _combine_export_filter_expressions(
+        self,
+        *filter_expressions: Optional[str],
+    ) -> Optional[str]:
+        """Combine export filters with AND, preserving each non-empty expression."""
+        parts = [
+            expression.strip()
+            for expression in filter_expressions
+            if expression and expression.strip()
+        ]
+        if not parts:
+            return None
+        if len(parts) == 1:
+            return parts[0]
+        return " AND ".join(f"({part})" for part in parts)
+
     def _export_memory_layer_to_project(
         self,
         memory_layer: QgsVectorLayer,
@@ -1322,10 +1355,14 @@ class QGISProjectCreationService(QObject):
             request = QgsFeatureRequest()
             if feature_ids is not None:
                 request.setFilterFids(feature_ids)
-            elif filter_expression:
-                request.setFilterExpression(filter_expression)
             else:
-                return False
+                combined_filter = self._combine_export_filter_expressions(
+                    self._get_source_layer_active_filter(source_layer),
+                    filter_expression,
+                )
+                if not combined_filter:
+                    return False
+                request.setFilterExpression(combined_filter)
 
             memory_layer = self._build_memory_layer_from_feature_iterator(
                 source_layer,
@@ -1360,7 +1397,22 @@ class QGISProjectCreationService(QObject):
             if not source_layer:
                 return False
 
-            if self._filter_expression_uses_qgis_syntax(filter_expression):
+            layer_filter = self._get_source_layer_active_filter(source_layer)
+            combined_filter = self._combine_export_filter_expressions(
+                layer_filter,
+                filter_expression,
+            )
+            if not combined_filter:
+                return False
+
+            layer_uses_expression_filter = (
+                not (source_layer.subsetString() or "").strip()
+                and bool(layer_filter)
+            )
+            if (
+                self._filter_expression_uses_qgis_syntax(combined_filter)
+                or layer_uses_expression_filter
+            ):
                 return self._export_layer_with_feature_request(
                     source_layer_id,
                     output_path,
@@ -1369,22 +1421,33 @@ class QGISProjectCreationService(QObject):
                     filter_expression=filter_expression,
                 )
 
-            # Apply SQL-compatible provider subset filter
-            source_layer.setSubsetString(filter_expression)
+            original_subset = source_layer.subsetString()
+            original_filter_expression = ""
+            if hasattr(source_layer, "filterExpression"):
+                original_filter_expression = source_layer.filterExpression() or ""
 
-            # Count features for debug output
-            filtered_count = 0
-            for feature in source_layer.getFeatures():
-                filtered_count += 1
-            print(f"[DEBUG] Filtering layer '{layer_name}' with expression: {filter_expression}")
-            print(f"[DEBUG] Number of features after filtering: {filtered_count}")
-            
-            # Copy layer
-            success = self._copy_layer_to_geopackage(source_layer, output_path, layer_name)
-            
-            # Reset filter
-            source_layer.setSubsetString("")
-            
+            try:
+                # Apply SQL-compatible provider subset filter
+                source_layer.setSubsetString(combined_filter)
+                if hasattr(source_layer, "setFilterExpression"):
+                    source_layer.setFilterExpression("")
+
+                # Count features for debug output
+                filtered_count = 0
+                for feature in source_layer.getFeatures():
+                    filtered_count += 1
+                print(
+                    f"[DEBUG] Filtering layer '{layer_name}' with expression: {combined_filter}"
+                )
+                print(f"[DEBUG] Number of features after filtering: {filtered_count}")
+
+                # Copy layer
+                success = self._copy_layer_to_geopackage(source_layer, output_path, layer_name)
+            finally:
+                source_layer.setSubsetString(original_subset)
+                if hasattr(source_layer, "setFilterExpression"):
+                    source_layer.setFilterExpression(original_filter_expression)
+
             if success:
                 # Add to project
                 layer = QgsVectorLayer(output_path, layer_name, "ogr")
@@ -1393,7 +1456,7 @@ class QGISProjectCreationService(QObject):
                     layer.triggerRepaint()
                     project.addMapLayer(layer)
                     return True
-            
+
             return False
         except Exception as e:
             print(f"Error creating filtered layer: {str(e)}")
