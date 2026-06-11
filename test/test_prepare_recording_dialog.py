@@ -43,6 +43,7 @@ class TestPrepareRecordingDialog(unittest.TestCase):
         self.mock_layer_service.get_layer_by_id.return_value = None
         self.mock_layer_service.get_related_objects_info.return_value = {'last_number': '', 'last_level': ''}
         self.mock_layer_service.calculate_next_level.return_value = ''
+        self.mock_layer_service.get_raster_layers.return_value = []
         self.mock_layer_service.get_raster_layers_overlapping_feature.return_value = []
         
         self.dialog = PrepareRecordingDialog(
@@ -937,20 +938,25 @@ class TestPrepareRecordingDialog(unittest.TestCase):
         mock_feature = Mock()
         mock_feature.id.return_value = 1
         mock_feature.attribute.return_value = 'Test Area'
+        mock_geometry = Mock()
+        mock_geometry.boundingBox.return_value = Mock()
+        mock_feature.geometry.return_value = mock_geometry
         
         # Mock overlapping raster layers
-        self.mock_layer_service.get_raster_layers_overlapping_feature.return_value = [
+        self.mock_layer_service.get_raster_layers.return_value = [
             {
                 'id': 'raster1',
                 'name': 'Test Raster 1',
                 'width': 100,
-                'height': 200
+                'height': 200,
+                'extent': Mock(intersects=lambda other: True),
             },
             {
                 'id': 'raster2',
                 'name': 'Test Raster 2',
                 'width': 150,
-                'height': 250
+                'height': 250,
+                'extent': Mock(intersects=lambda other: True),
             }
         ]
         
@@ -1001,9 +1007,12 @@ class TestPrepareRecordingDialog(unittest.TestCase):
         mock_feature = Mock()
         mock_feature.id.return_value = 1
         mock_feature.attribute.return_value = 'Test Area'
+        mock_geometry = Mock()
+        mock_geometry.boundingBox.return_value = Mock()
+        mock_feature.geometry.return_value = mock_geometry
         
         # Mock no overlapping raster layers
-        self.mock_layer_service.get_raster_layers_overlapping_feature.return_value = []
+        self.mock_layer_service.get_raster_layers.return_value = []
         
         features = [mock_feature]
         
@@ -1039,14 +1048,18 @@ class TestPrepareRecordingDialog(unittest.TestCase):
         mock_feature = Mock()
         mock_feature.id.return_value = 1
         mock_feature.attribute.return_value = 'Test Area'
+        mock_geometry = Mock()
+        mock_geometry.boundingBox.return_value = Mock()
+        mock_feature.geometry.return_value = mock_geometry
         
         # Mock overlapping raster layers
-        self.mock_layer_service.get_raster_layers_overlapping_feature.return_value = [
+        self.mock_layer_service.get_raster_layers.return_value = [
             {
                 'id': 'raster1',
                 'name': 'Test Raster 1',
                 'width': 100,
-                'height': 200
+                'height': 200,
+                'extent': Mock(intersects=lambda other: True),
             }
         ]
         
@@ -1089,18 +1102,25 @@ class TestPrepareRecordingDialog(unittest.TestCase):
         mock_feature1 = Mock()
         mock_feature1.id.return_value = 1
         mock_feature1.attribute.return_value = 'Test Area 1'
+        mock_geometry1 = Mock()
+        mock_geometry1.boundingBox.return_value = Mock()
+        mock_feature1.geometry.return_value = mock_geometry1
         
         mock_feature2 = Mock()
         mock_feature2.id.return_value = 2
         mock_feature2.attribute.return_value = 'Test Area 2'
+        mock_geometry2 = Mock()
+        mock_geometry2.boundingBox.return_value = Mock()
+        mock_feature2.geometry.return_value = mock_geometry2
         
         # Mock overlapping raster layers
-        self.mock_layer_service.get_raster_layers_overlapping_feature.return_value = [
+        self.mock_layer_service.get_raster_layers.return_value = [
             {
                 'id': 'raster1',
                 'name': 'Test Raster 1',
                 'width': 100,
-                'height': 200
+                'height': 200,
+                'extent': Mock(intersects=lambda other: True),
             }
         ]
         
@@ -1124,27 +1144,82 @@ class TestPrepareRecordingDialog(unittest.TestCase):
         self.assertEqual(results[0]['background_image'], 'raster1')
         self.assertEqual(results[1]['background_image'], '')
 
+    def test_init_defers_entity_loading(self):
+        """Dialog should appear before heavy per-feature preparation work runs."""
+        with patch.object(
+            prepare_recording_dialog_module.PrepareRecordingDialog,
+            '_schedule_selected_count_update',
+        ) as mock_schedule:
+            dialog = PrepareRecordingDialog(
+                layer_service=self.mock_layer_service,
+                settings_manager=self.mock_settings_manager,
+            )
+            mock_schedule.assert_called_once()
+            dialog.close()
+
+    def test_populate_entities_table_fetches_rasters_once(self):
+        """Raster layers must be loaded once per table population, not per recording area."""
+        self.mock_layer_service.get_raster_layers.return_value = [
+            {
+                'id': 'raster1',
+                'name': 'Raster 1',
+                'width': 10,
+                'height': 10,
+                'extent': Mock(intersects=lambda other: True),
+            }
+        ]
+
+        mock_feature1 = Mock()
+        mock_feature1.id.return_value = 1
+        mock_geometry1 = Mock()
+        mock_geometry1.boundingBox.return_value = Mock()
+        mock_feature1.geometry.return_value = mock_geometry1
+
+        mock_feature2 = Mock()
+        mock_feature2.id.return_value = 2
+        mock_geometry2 = Mock()
+        mock_geometry2.boundingBox.return_value = Mock()
+        mock_feature2.geometry.return_value = mock_geometry2
+
+        self.dialog._populate_entities_table([mock_feature1, mock_feature2])
+
+        self.mock_layer_service.get_raster_layers.assert_called_once()
+        self.assertEqual(
+            self.mock_layer_service.get_raster_layers_overlapping_feature.call_count,
+            0,
+        )
+
     def test_add_background_image_dropdown(self):
         """Test the _add_background_image_dropdown method directly."""
         # Mock overlapping raster layers
-        self.mock_layer_service.get_raster_layers_overlapping_feature.return_value = [
+        project_rasters = [
             {
                 'id': 'raster1',
                 'name': 'Test Raster 1',
                 'width': 100,
-                'height': 200
+                'height': 200,
+                'extent': Mock(intersects=lambda other: True),
             }
         ]
         
         # Mock feature
         mock_feature = Mock()
+        mock_geometry = Mock()
+        mock_geometry.boundingBox.return_value = Mock()
+        mock_feature.geometry.return_value = mock_geometry
         
         # Create a test table with one row and two columns
         self.dialog._entities_table.setRowCount(1)
         self.dialog._entities_table.setColumnCount(2)
         
         # Call the method
-        self.dialog._add_background_image_dropdown(0, 1, mock_feature, 'recording_layer_id')
+        self.dialog._add_background_image_dropdown(
+            0,
+            1,
+            mock_feature,
+            'recording_layer_id',
+            project_rasters=project_rasters,
+        )
         
         # Verify dropdown was created
         widget = self.dialog._entities_table.cellWidget(0, 1)

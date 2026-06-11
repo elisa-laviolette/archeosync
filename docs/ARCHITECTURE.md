@@ -292,6 +292,9 @@ Dialog for recording preparation showing selected entities in a table with:
 - Automatic calculation of appropriate values based on existing data and field types
 - "Background image" column with dropdown selection of overlapping raster layers
 - Real-time validation and error handling
+- Deferred population on show so the window appears immediately; related-object lookups and
+  raster overlap checks are cached per dialog open (`related_features_cache`, one
+  `get_raster_layers()` pass) to keep multi-area preparation responsive
 
 ### ImportDataDialog
 Dialog for importing data from CSV files and completed field projects with:

@@ -321,13 +321,19 @@ class ILayerService(ABC):
         pass
     
     @abstractmethod
-    def get_raster_layers_overlapping_feature(self, feature, recording_areas_layer_id: str) -> List[Dict[str, Any]]:
+    def get_raster_layers_overlapping_feature(
+        self,
+        feature,
+        recording_areas_layer_id: str,
+        project_rasters: Optional[List[Dict[str, Any]]] = None,
+    ) -> List[Dict[str, Any]]:
         """
         Get raster layers that overlap with a specific polygon feature.
         
         Args:
             feature: The polygon feature to check overlap with
             recording_areas_layer_id: The recording areas layer ID (for CRS transformation if needed)
+            project_rasters: Optional precomputed raster metadata from :meth:`get_raster_layers`
             
         Returns:
             List of dictionaries containing overlapping raster layer information

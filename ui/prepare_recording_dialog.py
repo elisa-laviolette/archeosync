@@ -30,14 +30,16 @@ Usage:
         pass
 """
 
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 from qgis.PyQt import QtWidgets
-from qgis.PyQt.QtCore import Qt
+from qgis.PyQt.QtCore import Qt, QTimer
 
 try:
     from ..core.interfaces import ILayerService, ISettingsManager
+    from ..core.ui_responsiveness import maybe_yield_to_ui
 except ImportError:
     from core.interfaces import ILayerService, ISettingsManager
+    from core.ui_responsiveness import maybe_yield_to_ui
 
 
 def _align_center_flag():
@@ -155,10 +157,12 @@ class PrepareRecordingDialog(QtWidgets.QDialog):
         # Store injected dependencies
         self._layer_service = layer_service
         self._settings_manager = settings_manager
+        self._selected_entity_count = 0
+        self._selected_count_update_scheduled = False
         
         # Initialize UI
         self._setup_ui()
-        self._update_selected_count()
+        self._schedule_selected_count_update()
     
     def _setup_ui(self) -> None:
         """Set up the user interface components."""
@@ -341,7 +345,7 @@ class PrepareRecordingDialog(QtWidgets.QDialog):
             self._refresh_extent_layer_combo()
             self._refresh_global_context_label()
         else:
-            self._update_selected_count()
+            self._schedule_selected_count_update()
         self._update_ok_button_state()
 
     def _on_extent_source_changed(self) -> None:
@@ -361,7 +365,32 @@ class PrepareRecordingDialog(QtWidgets.QDialog):
             ok_button.setEnabled(has_name and has_extent)
             ok_button.setText(self.tr("Prepare Global Project"))
             return
+        self._update_recording_area_ok_button_state()
+
+    def _schedule_selected_count_update(self) -> None:
+        """Defer per-recording-area preparation so the dialog can paint first."""
+        if self._selected_count_update_scheduled:
+            return
+        self._selected_count_update_scheduled = True
+        self._selected_count_label.setText(self.tr("Selected Entities: …"))
+        QTimer.singleShot(0, self._run_selected_count_update)
+
+    def _run_selected_count_update(self) -> None:
+        """Run the deferred selected-entity refresh."""
+        self._selected_count_update_scheduled = False
         self._update_selected_count()
+
+    def _update_recording_area_ok_button_state(self) -> None:
+        """Enable the OK button from the last known recording-area selection count."""
+        ok_button = self._button_box.button(_dialog_button_ok())
+        has_selection = self._selected_entity_count > 0
+        if has_selection:
+            ok_button.setVisible(True)
+            ok_button.setEnabled(True)
+            ok_button.setText(self.tr("Prepare Recording"))
+        else:
+            ok_button.setVisible(False)
+            ok_button.setEnabled(False)
 
     def _global_extent_is_valid(self) -> bool:
         """Return True when global extent inputs are valid."""
@@ -496,6 +525,7 @@ class PrepareRecordingDialog(QtWidgets.QDialog):
             # Get selected features
             selected_features = recording_layer.selectedFeatures()
             selected_count = len(selected_features)
+            self._selected_entity_count = selected_count
             
             # Update count label
             self._selected_count_label.setText(self.tr(f"Selected Entities: {selected_count}"))
@@ -503,17 +533,7 @@ class PrepareRecordingDialog(QtWidgets.QDialog):
             # Populate table with actual features
             self._populate_entities_table(selected_features)
             
-            # Show/hide and enable/disable OK button based on selection
-            has_selection = selected_count > 0
-            ok_button = self._button_box.button(_dialog_button_ok())
-            
-            if has_selection:
-                ok_button.setVisible(True)
-                ok_button.setEnabled(True)
-                ok_button.setText(self.tr("Prepare Recording"))
-            else:
-                ok_button.setVisible(False)
-                ok_button.setEnabled(False)
+            self._update_recording_area_ok_button_state()
                 
         except Exception as e:
             print("PrepareRecordingDialog error:", e)
@@ -535,9 +555,12 @@ class PrepareRecordingDialog(QtWidgets.QDialog):
         # Get the recording areas layer for display expression
         recording_areas_layer_id = self._settings_manager.get_value('recording_areas_layer', '')
         recording_layer = self._layer_service.get_layer_by_id(recording_areas_layer_id) if recording_areas_layer_id else None
+        related_features_cache: Dict[Tuple[str, int], List[Any]] = {}
+        project_rasters = self._layer_service.get_raster_layers() if recording_areas_layer_id else []
         
         # Add features to table
         for feature in features:
+            maybe_yield_to_ui(every=1)
             row = self._entities_table.rowCount()
             self._entities_table.insertRow(row)
             
@@ -582,7 +605,12 @@ class PrepareRecordingDialog(QtWidgets.QDialog):
             if objects_layer_id and number_field:
                 # Get related objects info
                 related_info = self._layer_service.get_related_objects_info(
-                    feature, objects_layer_id, number_field, level_field, recording_areas_layer_id
+                    feature,
+                    objects_layer_id,
+                    number_field,
+                    level_field,
+                    recording_areas_layer_id,
+                    related_features_cache=related_features_cache,
                 )
                 
                 # Add last number
@@ -608,12 +636,18 @@ class PrepareRecordingDialog(QtWidgets.QDialog):
                 # Get related objects info (if not already done)
                 if not (objects_layer_id and number_field):
                     related_info = self._layer_service.get_related_objects_info(
-                        feature, objects_layer_id, number_field, level_field, recording_areas_layer_id
+                        feature,
+                        objects_layer_id,
+                        number_field,
+                        level_field,
+                        recording_areas_layer_id,
+                        related_features_cache=related_features_cache,
                     )
                 highest_last_level = self._get_highest_last_level_across_configured_layers(
                     feature=feature,
                     recording_areas_layer_id=recording_areas_layer_id,
-                    default_last_level=related_info['last_level']
+                    default_last_level=related_info['last_level'],
+                    related_features_cache=related_features_cache,
                 )
                 
                 # Add last level
@@ -631,7 +665,13 @@ class PrepareRecordingDialog(QtWidgets.QDialog):
                 col_index += 1
             
             # Add background image dropdown
-            self._add_background_image_dropdown(row, col_index, feature, recording_areas_layer_id)
+            self._add_background_image_dropdown(
+                row,
+                col_index,
+                feature,
+                recording_areas_layer_id,
+                project_rasters=project_rasters,
+            )
         
         # Resize columns to content
         self._entities_table.resizeColumnsToContents()
@@ -640,7 +680,8 @@ class PrepareRecordingDialog(QtWidgets.QDialog):
         self,
         feature,
         recording_areas_layer_id: str,
-        default_last_level: str
+        default_last_level: str,
+        related_features_cache: Optional[Dict[Tuple[str, int], List[Any]]] = None,
     ) -> str:
         """
         Return highest last level among configured objects/features/small_finds layers.
@@ -665,7 +706,8 @@ class PrepareRecordingDialog(QtWidgets.QDialog):
                 layer_id,
                 None,
                 configured_level_field,
-                recording_areas_layer_id
+                recording_areas_layer_id,
+                related_features_cache=related_features_cache,
             )
             last_level = str(layer_info.get('last_level', '') or '')
             if last_level:
@@ -675,7 +717,14 @@ class PrepareRecordingDialog(QtWidgets.QDialog):
             return default_last_level
         return max(level_values)
     
-    def _add_background_image_dropdown(self, row: int, col: int, feature, recording_areas_layer_id: str) -> None:
+    def _add_background_image_dropdown(
+        self,
+        row: int,
+        col: int,
+        feature,
+        recording_areas_layer_id: str,
+        project_rasters: Optional[List[Dict[str, Any]]] = None,
+    ) -> None:
         """
         Add a background image dropdown widget to the specified table cell.
         
@@ -684,6 +733,7 @@ class PrepareRecordingDialog(QtWidgets.QDialog):
             col: Table column index
             feature: The feature to get overlapping raster layers for
             recording_areas_layer_id: The recording areas layer ID
+            project_rasters: Optional precomputed raster metadata for the project
         """
         # Create combo box widget
         combo_box = QtWidgets.QComboBox()
@@ -693,8 +743,9 @@ class PrepareRecordingDialog(QtWidgets.QDialog):
         
         # Get overlapping raster layers
         if recording_areas_layer_id:
-            overlapping_raster_layers = self._layer_service.get_raster_layers_overlapping_feature(
-                feature, recording_areas_layer_id
+            overlapping_raster_layers = self._filter_rasters_overlapping_feature(
+                feature,
+                project_rasters or [],
             )
             
             # Add raster layers to dropdown
@@ -704,6 +755,26 @@ class PrepareRecordingDialog(QtWidgets.QDialog):
         
         # Set the combo box as the cell widget
         self._entities_table.setCellWidget(row, col, combo_box)
+
+    def _filter_rasters_overlapping_feature(
+        self,
+        feature,
+        project_rasters: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """Return raster layers whose extent intersects the feature bounding box."""
+        feature_geometry = feature.geometry()
+        if not feature_geometry:
+            return []
+
+        feature_extent = feature_geometry.boundingBox()
+        overlapping = []
+        for raster_layer in project_rasters:
+            raster_extent = raster_layer.get('extent')
+            if raster_extent is None:
+                continue
+            if feature_extent.intersects(raster_extent):
+                overlapping.append(raster_layer)
+        return overlapping
     
     def get_next_values_for_feature(self, feature_index: int) -> Dict[str, str]:
         """
@@ -779,4 +850,4 @@ class PrepareRecordingDialog(QtWidgets.QDialog):
         if self._mode_global_radio.isChecked():
             self._update_ok_button_state()
         else:
-            self._update_selected_count() 
+            self._schedule_selected_count_update() 

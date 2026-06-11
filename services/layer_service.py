@@ -63,7 +63,8 @@ class QGISLayerService(ILayerService):
     
     def __init__(self):
         """Initialize the layer service."""
-        pass
+        self._recording_area_relation_cache: Dict[Tuple[str, str], Any] = {}
+        self._layer_fields_cache: Dict[str, Optional[List[Dict[str, Any]]]] = {}
 
     def _vector_layer_has_no_geometry(self, layer: QgsVectorLayer) -> bool:
         """
@@ -144,51 +145,43 @@ class QGISLayerService(ILayerService):
         
         return raster_layers
     
-    def get_raster_layers_overlapping_feature(self, feature, recording_areas_layer_id: str) -> List[Dict[str, Any]]:
+    def get_raster_layers_overlapping_feature(
+        self,
+        feature,
+        recording_areas_layer_id: str,
+        project_rasters: Optional[List[Dict[str, Any]]] = None,
+    ) -> List[Dict[str, Any]]:
         """
         Get raster layers that overlap with a specific polygon feature.
         
         Args:
             feature: The polygon feature to check overlap with
             recording_areas_layer_id: The recording areas layer ID (for CRS transformation if needed)
+            project_rasters: Optional precomputed raster metadata from :meth:`get_raster_layers`
+                to avoid scanning the project for every feature
             
         Returns:
             List of dictionaries containing overlapping raster layer information
         """
-        overlapping_raster_layers = []
-        project = QgsProject.instance()
-        
-        # Get the recording areas layer for CRS information
-        recording_layer = self.get_layer_by_id(recording_areas_layer_id)
-        if not recording_layer:
-            return overlapping_raster_layers
-        
-        # Get feature geometry
         feature_geometry = feature.geometry()
         if not feature_geometry:
-            return overlapping_raster_layers
-        
-        # Get feature extent
+            return []
+
         feature_extent = feature_geometry.boundingBox()
-        
-        for layer in project.mapLayers().values():
-            if isinstance(layer, QgsRasterLayer):
-                # Get raster extent
-                raster_extent = layer.extent()
-                
-                # Check if extents overlap
-                if feature_extent.intersects(raster_extent):
-                    layer_info = {
-                        'id': layer.id(),
-                        'name': layer.name(),
-                        'source': layer.source(),
-                        'crs': layer.crs().authid() if layer.crs() else 'Unknown',
-                        'width': layer.width(),
-                        'height': layer.height(),
-                        'extent': raster_extent
-                    }
-                    overlapping_raster_layers.append(layer_info)
-        
+        raster_layers = project_rasters if project_rasters is not None else self.get_raster_layers()
+        if not raster_layers and recording_areas_layer_id:
+            recording_layer = self.get_layer_by_id(recording_areas_layer_id)
+            if not recording_layer:
+                return []
+
+        overlapping_raster_layers = []
+        for layer_info in raster_layers:
+            raster_extent = layer_info.get('extent')
+            if raster_extent is None:
+                continue
+            if feature_extent.intersects(raster_extent):
+                overlapping_raster_layers.append(layer_info)
+
         return overlapping_raster_layers
     
     def get_polygon_and_multipolygon_layers(self) -> List[Dict[str, Any]]:
@@ -426,13 +419,16 @@ class QGISLayerService(ILayerService):
     def get_layer_fields(self, layer_id: str) -> Optional[List[Dict[str, Any]]]:
         """
         Get field information from a layer.
-        
+
         Args:
             layer_id: The layer ID to get fields for
-            
+
         Returns:
             List of field information dictionaries or None if layer not found
         """
+        if layer_id in self._layer_fields_cache:
+            return self._layer_fields_cache[layer_id]
+
         layer = self.get_layer_by_id(layer_id)
         if layer is None:
             return None
@@ -455,8 +451,33 @@ class QGISLayerService(ILayerService):
                 'is_temporal': is_temporal_field(type_name=type_name, type_id=type_id),
             }
             fields.append(field_info)
-        
+
+        self._layer_fields_cache[layer_id] = fields
         return fields
+
+    def _find_relation_to_recording_area(
+        self,
+        child_layer_id: str,
+        recording_areas_layer_id: str,
+    ):
+        """Return the QgsRelation linking a child layer to recording areas, with caching."""
+        cache_key = (child_layer_id, recording_areas_layer_id)
+        if cache_key in self._recording_area_relation_cache:
+            return self._recording_area_relation_cache[cache_key]
+
+        relation = None
+        project = QgsProject.instance()
+        relation_manager = project.relationManager()
+        for candidate in relation_manager.relations().values():
+            if (
+                candidate.referencingLayerId() == child_layer_id
+                and candidate.referencedLayerId() == recording_areas_layer_id
+            ):
+                relation = candidate
+                break
+
+        self._recording_area_relation_cache[cache_key] = relation
+        return relation
 
     def get_selected_features_count(self, layer_id: str) -> int:
         """
@@ -563,8 +584,15 @@ class QGISLayerService(ILayerService):
         
         return relations
 
-    def get_related_objects_info(self, recording_area_feature, objects_layer_id: str, 
-                                number_field: Optional[str], level_field: Optional[str], recording_areas_layer_id: Optional[str] = None) -> Dict[str, Any]:
+    def get_related_objects_info(
+        self,
+        recording_area_feature,
+        objects_layer_id: str,
+        number_field: Optional[str],
+        level_field: Optional[str],
+        recording_areas_layer_id: Optional[str] = None,
+        related_features_cache: Optional[Dict[Tuple[str, int], List[Any]]] = None,
+    ) -> Dict[str, Any]:
         """
         Get information about objects related to a recording area feature.
         
@@ -575,6 +603,8 @@ class QGISLayerService(ILayerService):
             level_field: The level field name (optional)
             recording_areas_layer_id: The recording areas layer ID (parent layer, required for relation lookup)
                 - This is now required because QgsFeature does not provide a .layer() method.
+            related_features_cache: Optional cache keyed by ``(child_layer_id, recording_area_feature.id())``
+                so repeated lookups during dialog preparation reuse ``getRelatedFeatures`` results.
         
         Returns:
             Dictionary with 'last_number' and 'last_level' values, or empty strings if not found
@@ -586,19 +616,21 @@ class QGISLayerService(ILayerService):
         objects_layer = self.get_layer_by_id(objects_layer_id)
         if not objects_layer:
             return {'last_number': '', 'last_level': ''}
-        
-        # Get relationships where objects layer is the referencing layer (child)
-        project = QgsProject.instance()
-        relation_manager = project.relationManager()
-        
-        related_objects = []
-        for relation in relation_manager.relations().values():
-            if (relation.referencingLayerId() == objects_layer_id and 
-                relation.referencedLayerId() == recording_areas_layer_id):
-                # Get related features
-                related_features = relation.getRelatedFeatures(recording_area_feature)
-                related_objects.extend(related_features)
-                break
+
+        cache_key = (objects_layer_id, recording_area_feature.id())
+        if related_features_cache is not None and cache_key in related_features_cache:
+            related_objects = related_features_cache[cache_key]
+        else:
+            relation = self._find_relation_to_recording_area(
+                objects_layer_id,
+                recording_areas_layer_id,
+            )
+            if relation is None:
+                related_objects = []
+            else:
+                related_objects = list(relation.getRelatedFeatures(recording_area_feature))
+            if related_features_cache is not None:
+                related_features_cache[cache_key] = related_objects
         
         if not related_objects:
             return {'last_number': '', 'last_level': ''}

@@ -132,6 +132,34 @@ class TestLayerService(unittest.TestCase):
             layers = self.layer_service.get_raster_layers_overlapping_feature(mock_feature, "nonexistent_recording_layer")
             self.assertEqual(len(layers), 0)
 
+    def test_get_raster_layers_overlapping_feature_uses_precomputed_rasters(self):
+        """Precomputed raster metadata must avoid scanning the whole project again."""
+        mock_feature = Mock()
+        mock_extent = Mock()
+        mock_extent.intersects.return_value = True
+        mock_geometry = Mock()
+        mock_geometry.boundingBox.return_value = mock_extent
+        mock_feature.geometry.return_value = mock_geometry
+
+        project_rasters = [{
+            'id': 'raster_layer_1',
+            'name': 'Raster Layer 1',
+            'width': 100,
+            'height': 100,
+            'extent': Mock(intersects=lambda other: True),
+        }]
+
+        with patch('services.layer_service.QgsProject') as mock_project:
+            mock_project.instance.return_value.mapLayers.return_value = {}
+            layers = self.layer_service.get_raster_layers_overlapping_feature(
+                mock_feature,
+                "recording_areas",
+                project_rasters=project_rasters,
+            )
+
+        self.assertEqual(len(layers), 1)
+        self.assertEqual(layers[0]['id'], 'raster_layer_1')
+
     def test_get_raster_layers_overlapping_feature_no_overlap(self):
         """Test getting raster layers overlapping a feature when no overlap exists."""
         # Create mock feature with geometry

@@ -1177,6 +1177,57 @@ class TestQGISLayerService(unittest.TestCase):
                 self.assertEqual(result['last_number'], '')
                 self.assertEqual(result['last_level'], '10')  # Numerically highest
 
+    @patch('services.layer_service.QgsProject')
+    def test_get_related_objects_info_reuses_related_features_cache(self, mock_project):
+        """Related features must be fetched once per recording area and child layer pair."""
+        mock_feature = Mock()
+        mock_feature.id.return_value = 42
+
+        mock_obj_feature = Mock()
+        mock_obj_feature.attribute.return_value = 7
+
+        mock_relation = Mock()
+        mock_relation.referencingLayerId.return_value = 'objects_layer_id'
+        mock_relation.referencedLayerId.return_value = 'recording_layer_id'
+        mock_relation.getRelatedFeatures.return_value = [mock_obj_feature]
+
+        mock_project_instance = Mock()
+        mock_relation_manager = Mock()
+        mock_relation_manager.relations.return_value = {'relation1': mock_relation}
+        mock_project_instance.relationManager.return_value = mock_relation_manager
+        mock_project.instance.return_value = mock_project_instance
+
+        mock_layer = Mock()
+        mock_fields = Mock()
+        mock_fields.indexOf.return_value = 0
+        mock_layer.fields.return_value = mock_fields
+
+        related_features_cache = {}
+
+        with patch.object(self.layer_service, 'get_layer_by_id', return_value=mock_layer):
+            with patch.object(self.layer_service, 'get_layer_fields', return_value=[]):
+                first = self.layer_service.get_related_objects_info(
+                    mock_feature,
+                    'objects_layer_id',
+                    'number_field',
+                    None,
+                    'recording_layer_id',
+                    related_features_cache=related_features_cache,
+                )
+                second = self.layer_service.get_related_objects_info(
+                    mock_feature,
+                    'objects_layer_id',
+                    'number_field',
+                    None,
+                    'recording_layer_id',
+                    related_features_cache=related_features_cache,
+                )
+
+        self.assertEqual(first['last_number'], '7')
+        self.assertEqual(second['last_number'], '7')
+        mock_relation.getRelatedFeatures.assert_called_once_with(mock_feature)
+        self.assertIn(('objects_layer_id', 42), related_features_cache)
+
     def test_calculate_next_level_empty_last_level(self):
         """Test calculating next level when last level is empty."""
         # Mock field info for string field
