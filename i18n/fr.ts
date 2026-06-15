@@ -1174,6 +1174,41 @@ Veuillez d’abord configurer les couches définitives dans la boîte de dialogu
         <source>Failed to revert settings: {str(e)}</source>
         <translation>Échec du retour aux paramètres par défaut : {str(e)}</translation>
     </message>
+    <message>
+        <location filename="../ui/settings_dialog.py"/>
+        <source>Map Themes</source>
+        <translation>Thèmes de carte</translation>
+    </message>
+    <message>
+        <location filename="../ui/settings_dialog.py"/>
+        <source>Configure optional map themes to apply to the main QGIS project at the start of each workflow. Themes are defined in the current project via View → Map Themes.</source>
+        <translation>Configurez des thèmes de carte optionnels à appliquer au projet QGIS principal au début de chaque workflow. Les thèmes sont définis dans le projet courant via Affichage → Thèmes de carte.</translation>
+    </message>
+    <message>
+        <location filename="../ui/settings_dialog.py"/>
+        <source>Before an import:</source>
+        <translation>Avant un import :</translation>
+    </message>
+    <message>
+        <location filename="../ui/settings_dialog.py"/>
+        <source>Before a global project preparation:</source>
+        <translation>Avant une préparation de projet global :</translation>
+    </message>
+    <message>
+        <location filename="../ui/settings_dialog.py"/>
+        <source>Before a recording area project preparation:</source>
+        <translation>Avant une préparation de projet(s) par zone(s) :</translation>
+    </message>
+    <message>
+        <location filename="../ui/settings_dialog.py"/>
+        <source>-- None --</source>
+        <translation>-- Aucun --</translation>
+    </message>
+    <message>
+        <location filename="../ui/settings_dialog.py"/>
+        <source>Refresh theme list</source>
+        <translation>Actualiser la liste des thèmes</translation>
+    </message>
 </context>
 <context>
     <name>SkippedNumbersDetectorService</name>

@@ -151,3 +151,83 @@ class TestArcheoSyncRunImportData:
         args, _kwargs = show_summary.call_args
         assert args[0]["objects_count"] == 3
         assert args[0]["csv_points_count"] == 0
+
+
+@pytest.mark.unit
+class TestArcheoSyncMapThemes:
+    """Tests for configured map theme application on the main project."""
+
+    def setup_method(self):
+        try:
+            from archeo_sync import ArcheoSyncPlugin
+            self.plugin_cls = ArcheoSyncPlugin
+        except ImportError:
+            self.plugin_cls = None
+
+    def _plugin(self):
+        plugin = self.plugin_cls.__new__(self.plugin_cls)
+        plugin._settings_manager = Mock()
+        plugin._map_theme_service = Mock()
+        plugin._iface = Mock()
+        return plugin
+
+    @pytest.mark.skipif(
+        not QGIS_AVAILABLE,
+        reason="ArcheoSyncPlugin import requires QGIS",
+    )
+    def test_apply_configured_map_theme_calls_service(self):
+        plugin = self._plugin()
+        plugin._settings_manager.get_value.return_value = "Field"
+
+        plugin._apply_configured_map_theme("import_map_theme")
+
+        plugin._map_theme_service.apply_theme_to_current_project.assert_called_once_with(
+            "Field",
+            plugin._iface,
+        )
+
+    @pytest.mark.skipif(
+        not QGIS_AVAILABLE,
+        reason="ArcheoSyncPlugin import requires QGIS",
+    )
+    def test_apply_configured_map_theme_skips_when_empty(self):
+        plugin = self._plugin()
+        plugin._settings_manager.get_value.return_value = ""
+
+        plugin._apply_configured_map_theme("import_map_theme")
+
+        plugin._map_theme_service.apply_theme_to_current_project.assert_not_called()
+
+    @pytest.mark.skipif(
+        not QGIS_AVAILABLE,
+        reason="ArcheoSyncPlugin import requires QGIS",
+    )
+    def test_handle_import_data_accepted_applies_import_theme(self):
+        plugin = self._plugin()
+        dialog = Mock()
+        dialog.get_selected_csv_files.return_value = []
+        dialog.get_selected_completed_projects.return_value = []
+
+        with patch.object(plugin, "_apply_configured_map_theme") as apply_theme:
+            plugin._handle_import_data_accepted(dialog)
+
+        apply_theme.assert_called_once_with("import_map_theme")
+
+    @pytest.mark.skipif(
+        not QGIS_AVAILABLE,
+        reason="ArcheoSyncPlugin import requires QGIS",
+    )
+    def test_handle_global_prepare_recording_accepted_applies_global_theme(self):
+        plugin = self._plugin()
+        dialog = Mock()
+        dialog.get_global_project_options.return_value = {}
+
+        with patch.object(plugin, "_apply_configured_map_theme") as apply_theme:
+            with patch("qgis.PyQt.QtWidgets.QMessageBox"):
+                plugin._handle_global_prepare_recording_accepted(
+                    dialog=dialog,
+                    destination_folder="/tmp",
+                    recording_areas_layer_id="layer1",
+                )
+
+        apply_theme.assert_called_once_with("global_preparation_map_theme")

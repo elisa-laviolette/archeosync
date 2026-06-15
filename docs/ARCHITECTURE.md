@@ -184,6 +184,18 @@ QGIS-specific implementation for layer operations including:
 - Empty layer creation for QField offline editing
 - Layer structure copying with styling preservation
 
+### QGISMapThemeService (`services/map_theme_service.py`)
+Applies QGIS map themes (`QgsMapThemeCollection`) to the **main project only** at workflow entry points:
+- `list_map_themes(project)` — theme names from the current project
+- `apply_theme_to_current_project(theme_name, iface)` — no-op when empty; warns and skips when the theme is missing
+
+Configured via optional settings keys (empty = disabled):
+- `import_map_theme` — applied at the start of import processing
+- `global_preparation_map_theme` — applied at the start of global field project preparation
+- `recording_area_preparation_map_theme` — applied at the start of per-recording-area preparation (after selection validation, before project creation)
+
+Field projects inherit visual consistency through existing style copying; themes are not injected into generated `.qgs` files.
+
 ### Field project metadata (`services/field_project_metadata.py`)
 - **`archeosync_project.json`**: Written beside each generated `.qgs` with `project_kind` (`global` | `recording_area`), extent WKT, CRS, and (for global projects) `import_layers` mapping import keys to the source project's layer display names
 - Legacy projects without metadata are treated as per-recording-area imports
@@ -269,10 +281,12 @@ QGIS-specific implementation for CSV import operations including:
 ### SettingsDialog
 Dialog for managing plugin configuration with:
 - **Dependency Injection**: All services injected through interfaces for testability
-- **Tabbed Interface**: Organized into 3 logical tabs for better user experience
+- **Tabbed Interface**: Organized into logical tabs; each tab is wrapped in a vertical `QScrollArea` for tall content
   - **Folders Tab**: All folder-related settings (field projects, total station, archives)
   - **Layers Tab**: Layer selection, field configuration, and extra layers
+  - **Error detection Tab**: Warning toggles and thresholds
   - **Raster Tab**: Raster processing configuration (clipping offset, brightness, contrast, saturation)
+  - **Map Themes Tab**: Optional map themes applied to the main QGIS project at the start of import, global preparation, and recording-area preparation workflows
 - **Layer Configuration**: Comprehensive layer management for archaeological data
   - **Recording Areas Layer**: Polygon layer for archaeological recording areas
   - **Objects Layer**: Polygon/multipolygon layer for archaeological objects with number and level field configuration

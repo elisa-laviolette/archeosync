@@ -13,7 +13,7 @@ Key Features:
 - Revert functionality for cancelled changes
 - Responsive UI with conditional visibility
 - QGIS layer selection for recording areas
-- Organized into 3 tabs: Folders, Layers & Fields, and Raster
+- Organized into 5 tabs: Folders, Layers & Fields, Error detection, Raster, and Map Themes
 
 Architecture Benefits:
 - Single Responsibility: Only handles UI presentation
@@ -52,6 +52,7 @@ The dialog provides:
 from typing import Optional, Dict, Any, List
 from qgis.PyQt import QtWidgets
 from qgis.PyQt.QtCore import Qt
+from qgis.core import QgsProject
 import functools
 
 try:
@@ -96,6 +97,26 @@ def _no_selection_mode():
         return selection_mode.NoSelection
 
     raise AttributeError("QAbstractItemView no-selection mode is not available.")
+
+
+def _scroll_bar_as_needed_policy():
+    """Return ScrollBarAsNeeded policy compatible with Qt5 and Qt6."""
+    if hasattr(Qt, "ScrollBarAsNeeded"):
+        return Qt.ScrollBarAsNeeded
+    scroll_policy = getattr(Qt, "ScrollBarPolicy", None)
+    if scroll_policy is not None and hasattr(scroll_policy, "ScrollBarAsNeeded"):
+        return scroll_policy.ScrollBarAsNeeded
+    raise AttributeError("Qt ScrollBarAsNeeded policy is not available.")
+
+
+def _scroll_bar_always_off_policy():
+    """Return ScrollBarAlwaysOff policy compatible with Qt5 and Qt6."""
+    if hasattr(Qt, "ScrollBarAlwaysOff"):
+        return Qt.ScrollBarAlwaysOff
+    scroll_policy = getattr(Qt, "ScrollBarPolicy", None)
+    if scroll_policy is not None and hasattr(scroll_policy, "ScrollBarAlwaysOff"):
+        return scroll_policy.ScrollBarAlwaysOff
+    raise AttributeError("Qt ScrollBarAlwaysOff policy is not available.")
 
 
 def _dialog_button_ok_cancel():
@@ -264,14 +285,19 @@ class SettingsDialog(QtWidgets.QDialog):
         self._create_layers_fields_tab()
         self._create_warnings_tab()
         self._create_raster_tab()
+        self._create_map_themes_tab()
         
         # Add button box
         self._create_button_box(main_layout)
 
-        # Debug: print slider ids
-        print("Slider object ids:")
-        for name, slider in self._sliders.items():
-            print(f"  {name}: id={id(slider)}")
+    def _wrap_in_scroll_area(self, content: QtWidgets.QWidget) -> QtWidgets.QScrollArea:
+        """Wrap tab content in a vertically scrollable area."""
+        scroll_area = QtWidgets.QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(_scroll_bar_always_off_policy())
+        scroll_area.setVerticalScrollBarPolicy(_scroll_bar_as_needed_policy())
+        scroll_area.setWidget(content)
+        return scroll_area
     
     def _create_folders_tab(self) -> None:
         """Create the folders configuration tab."""
@@ -337,7 +363,7 @@ class SettingsDialog(QtWidgets.QDialog):
         folders_layout.addStretch()
         
         # Add tab to widget
-        self._tab_widget.addTab(folders_widget, self.tr("Folders"))
+        self._tab_widget.addTab(self._wrap_in_scroll_area(folders_widget), self.tr("Folders"))
     
     def _create_layers_fields_tab(self) -> None:
         """Create the layers and fields configuration tab."""
@@ -405,7 +431,7 @@ class SettingsDialog(QtWidgets.QDialog):
         layers_layout.addStretch()
         
         # Add tab to widget
-        self._tab_widget.addTab(layers_widget, self.tr("Layers & Fields"))
+        self._tab_widget.addTab(self._wrap_in_scroll_area(layers_widget), self.tr("Layers & Fields"))
     
     def _create_warnings_tab(self) -> None:
         """Create the warnings configuration tab."""
@@ -529,7 +555,7 @@ class SettingsDialog(QtWidgets.QDialog):
         warnings_layout.addStretch()
         
         # Add tab to widget
-        self._tab_widget.addTab(warnings_widget, self.tr("Error detection"))
+        self._tab_widget.addTab(self._wrap_in_scroll_area(warnings_widget), self.tr("Error detection"))
     
     def _create_raster_tab(self) -> None:
         """Create the raster configuration tab."""
@@ -578,7 +604,92 @@ class SettingsDialog(QtWidgets.QDialog):
         raster_layout.addStretch()
         
         # Add tab to widget
-        self._tab_widget.addTab(raster_widget, self.tr("Raster"))
+        self._tab_widget.addTab(self._wrap_in_scroll_area(raster_widget), self.tr("Raster"))
+
+    def _create_map_themes_tab(self) -> None:
+        """Create the map themes configuration tab."""
+        themes_widget = QtWidgets.QWidget()
+        themes_layout = QtWidgets.QVBoxLayout(themes_widget)
+
+        description_label = QtWidgets.QLabel(
+            self.tr(
+                "Configure optional map themes to apply to the main QGIS project at the "
+                "start of each workflow. Themes are defined in the current project via "
+                "View → Map Themes."
+            )
+        )
+        description_label.setWordWrap(True)
+        description_label.setStyleSheet("color: gray; font-size: 11px; margin-bottom: 10px;")
+        themes_layout.addWidget(description_label)
+
+        form_layout = QtWidgets.QFormLayout()
+
+        self._import_map_theme_combo = self._create_map_theme_combo()
+        form_layout.addRow(self.tr("Before an import:"), self._import_map_theme_combo)
+
+        self._global_preparation_map_theme_combo = self._create_map_theme_combo()
+        form_layout.addRow(
+            self.tr("Before a global project preparation:"),
+            self._global_preparation_map_theme_combo,
+        )
+
+        self._recording_area_preparation_map_theme_combo = self._create_map_theme_combo()
+        form_layout.addRow(
+            self.tr("Before a recording area project preparation:"),
+            self._recording_area_preparation_map_theme_combo,
+        )
+
+        themes_layout.addLayout(form_layout)
+
+        refresh_button = QtWidgets.QPushButton(self.tr("Refresh theme list"))
+        refresh_button.clicked.connect(self._refresh_map_theme_combos)
+        themes_layout.addWidget(refresh_button)
+        themes_layout.addStretch()
+
+        self._tab_widget.addTab(self._wrap_in_scroll_area(themes_widget), self.tr("Map Themes"))
+
+    def _create_map_theme_combo(self) -> QtWidgets.QComboBox:
+        """Create a combo box for optional map theme selection."""
+        combo_box = QtWidgets.QComboBox()
+        combo_box.setMinimumWidth(300)
+        combo_box.addItem(self.tr("-- None --"), "")
+        return combo_box
+
+    def _refresh_map_theme_combos(self) -> None:
+        """Refresh map theme choices from the current QgsProject."""
+        theme_names = []
+        try:
+            project = QgsProject.instance()
+            collection = project.mapThemeCollection()
+            if collection is not None:
+                theme_names = list(collection.mapThemes())
+        except Exception as exc:
+            print(f"Warning: failed to list map themes: {exc}")
+
+        combos = (
+            self._import_map_theme_combo,
+            self._global_preparation_map_theme_combo,
+            self._recording_area_preparation_map_theme_combo,
+        )
+        for combo_box in combos:
+            current_theme = combo_box.currentData()
+            combo_box.clear()
+            combo_box.addItem(self.tr("-- None --"), "")
+            for theme_name in sorted(theme_names):
+                combo_box.addItem(theme_name, theme_name)
+            if current_theme:
+                index = combo_box.findData(current_theme)
+                if index >= 0:
+                    combo_box.setCurrentIndex(index)
+
+    def _set_map_theme_combo_value(self, combo_box: QtWidgets.QComboBox, theme_name: str) -> None:
+        """Select a map theme in a combo box when it exists."""
+        if theme_name:
+            index = combo_box.findData(theme_name)
+            if index >= 0:
+                combo_box.setCurrentIndex(index)
+                return
+        combo_box.setCurrentIndex(0)
     
     def _create_folder_selector(self, placeholder: str) -> QtWidgets.QWidget:
         """Create a folder selection widget."""
@@ -1652,6 +1763,20 @@ class SettingsDialog(QtWidgets.QDialog):
             self._enable_duplicate_total_station_identifiers_warnings.setChecked(_to_bool(self._settings_manager.get_value('enable_duplicate_total_station_identifiers_warnings', True)))
             self._enable_skipped_numbers_warnings.setChecked(_to_bool(self._settings_manager.get_value('enable_skipped_numbers_warnings', True)))
             self._enable_missing_total_station_warnings.setChecked(_to_bool(self._settings_manager.get_value('enable_missing_total_station_warnings', True)))
+
+            # Load map theme settings
+            self._refresh_map_theme_combos()
+            import_map_theme = self._settings_manager.get_value('import_map_theme', '')
+            global_preparation_map_theme = self._settings_manager.get_value('global_preparation_map_theme', '')
+            recording_area_preparation_map_theme = self._settings_manager.get_value(
+                'recording_area_preparation_map_theme', ''
+            )
+            self._set_map_theme_combo_value(self._import_map_theme_combo, import_map_theme)
+            self._set_map_theme_combo_value(self._global_preparation_map_theme_combo, global_preparation_map_theme)
+            self._set_map_theme_combo_value(
+                self._recording_area_preparation_map_theme_combo,
+                recording_area_preparation_map_theme,
+            )
             
             # Store original values
             self._original_values = {
@@ -1696,6 +1821,9 @@ class SettingsDialog(QtWidgets.QDialog):
                 'enable_duplicate_total_station_identifiers_warnings': self._settings_manager.get_value('enable_duplicate_total_station_identifiers_warnings', True),
                 'enable_skipped_numbers_warnings': self._settings_manager.get_value('enable_skipped_numbers_warnings', True),
                 'enable_missing_total_station_warnings': self._settings_manager.get_value('enable_missing_total_station_warnings', True),
+                'import_map_theme': import_map_theme,
+                'global_preparation_map_theme': global_preparation_map_theme,
+                'recording_area_preparation_map_theme': recording_area_preparation_map_theme,
 
             }
             
@@ -1748,6 +1876,11 @@ class SettingsDialog(QtWidgets.QDialog):
                 'enable_duplicate_total_station_identifiers_warnings': self._enable_duplicate_total_station_identifiers_warnings.isChecked(),
                 'enable_skipped_numbers_warnings': self._enable_skipped_numbers_warnings.isChecked(),
                 'enable_missing_total_station_warnings': self._enable_missing_total_station_warnings.isChecked(),
+                'import_map_theme': self._import_map_theme_combo.currentData() or '',
+                'global_preparation_map_theme': self._global_preparation_map_theme_combo.currentData() or '',
+                'recording_area_preparation_map_theme': (
+                    self._recording_area_preparation_map_theme_combo.currentData() or ''
+                ),
 
             }
             
@@ -1927,6 +2060,19 @@ class SettingsDialog(QtWidgets.QDialog):
             self._enable_duplicate_total_station_identifiers_warnings.setChecked(_to_bool(self._original_values.get('enable_duplicate_total_station_identifiers_warnings', True)))
             self._enable_skipped_numbers_warnings.setChecked(_to_bool(self._original_values.get('enable_skipped_numbers_warnings', True)))
             self._enable_missing_total_station_warnings.setChecked(_to_bool(self._original_values.get('enable_missing_total_station_warnings', True)))
+
+            self._set_map_theme_combo_value(
+                self._import_map_theme_combo,
+                self._original_values.get('import_map_theme', ''),
+            )
+            self._set_map_theme_combo_value(
+                self._global_preparation_map_theme_combo,
+                self._original_values.get('global_preparation_map_theme', ''),
+            )
+            self._set_map_theme_combo_value(
+                self._recording_area_preparation_map_theme_combo,
+                self._original_values.get('recording_area_preparation_map_theme', ''),
+            )
             
             # Revert settings in manager
             for key, value in self._original_values.items():

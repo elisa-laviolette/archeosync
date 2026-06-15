@@ -47,7 +47,8 @@ from .services import (
     CSVImportService,
     QGISRasterProcessingService,
     QGISProjectCreationService,
-    FieldProjectImportService
+    FieldProjectImportService,
+    QGISMapThemeService,
 )
 
 # Layer names used for pending imports (must match import summary / field import services).
@@ -118,6 +119,12 @@ class ArcheoSyncPlugin(QObject):
         self._project_creation_service = None
         self._csv_import_service = None
         self._field_project_import_service = None
+        self._map_theme_service = None
+
+        try:
+            self._map_theme_service = QGISMapThemeService()
+        except Exception as exc:
+            print(f"Failed to initialize map theme service: {exc}")
 
         try:
             self._raster_processing_service = QGISRasterProcessingService()
@@ -421,6 +428,8 @@ class ArcheoSyncPlugin(QObject):
             
             # Get next values for all features
             next_values = dialog.get_all_next_values()
+
+            self._apply_configured_map_theme('recording_area_preparation_map_theme')
             
             # Display expression information for debugging
             if layer_display_expression and layer_display_expression.strip():
@@ -512,6 +521,8 @@ class ArcheoSyncPlugin(QObject):
         from qgis.PyQt.QtWidgets import QMessageBox
 
         try:
+            self._apply_configured_map_theme('global_preparation_map_theme')
+
             options = dialog.get_global_project_options()
             project_name = options.get('project_name', '').strip()
             if not project_name:
@@ -676,10 +687,20 @@ class ArcheoSyncPlugin(QObject):
             if layer is not None and hasattr(layer, "featureCount"):
                 summary_data[key] = int(layer.featureCount())
         return summary_data
+
+    def _apply_configured_map_theme(self, settings_key: str) -> None:
+        """Apply a configured map theme to the main QGIS project when set."""
+        if not self._map_theme_service:
+            return
+        theme = self._settings_manager.get_value(settings_key, '')
+        if theme:
+            self._map_theme_service.apply_theme_to_current_project(theme, self._iface)
     
     def _handle_import_data_accepted(self, dialog) -> None:
         """Handle the case when import data dialog is accepted."""
         try:
+            self._apply_configured_map_theme('import_map_theme')
+
             # Get selected items
             selected_csv_files = dialog.get_selected_csv_files()
             selected_completed_projects = dialog.get_selected_completed_projects()

@@ -776,6 +776,24 @@ class IRasterProcessingService(ABC):
         pass 
 
 
+class IMapThemeService(ABC):
+    """Interface for QGIS map theme operations on the current project."""
+
+    @abstractmethod
+    def list_map_themes(self, project: Any) -> List[str]:
+        """Return map theme names defined in the given QgsProject."""
+        pass
+
+    @abstractmethod
+    def apply_theme_to_current_project(self, theme_name: str, iface: Any) -> None:
+        """
+        Apply a named map theme to QgsProject.instance().
+
+        No-op when theme_name is empty. Logs a warning when the theme does not exist.
+        """
+        pass
+
+
 class IFieldProjectImportService(ABC):
     """Interface for field project import operations."""
     

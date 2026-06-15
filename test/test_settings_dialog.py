@@ -82,6 +82,22 @@ class TestSettingsDialogBasic:
         with patch.object(settings_dialog_module, "QtWidgets", fake_qt_widgets):
             assert settings_dialog_module._no_selection_mode() == "qt6-no-selection"
 
+    def test_scroll_bar_as_needed_policy_supports_qt5_style(self):
+        """The scroll policy helper should support Qt5's direct ScrollBarAsNeeded."""
+        import ui.settings_dialog as settings_dialog_module
+
+        fake_qt = type("FakeQt", (), {"ScrollBarAsNeeded": "qt5-as-needed"})
+        with patch.object(settings_dialog_module, "Qt", fake_qt):
+            assert settings_dialog_module._scroll_bar_as_needed_policy() == "qt5-as-needed"
+
+    def test_scroll_bar_always_off_policy_supports_qt5_style(self):
+        """The scroll policy helper should support Qt5's direct ScrollBarAlwaysOff."""
+        import ui.settings_dialog as settings_dialog_module
+
+        fake_qt = type("FakeQt", (), {"ScrollBarAlwaysOff": "qt5-always-off"})
+        with patch.object(settings_dialog_module, "Qt", fake_qt):
+            assert settings_dialog_module._scroll_bar_always_off_policy() == "qt5-always-off"
+
     def test_dialog_button_ok_cancel_supports_qt5_style(self):
         """The button helper should support Qt5's direct Ok/Cancel flags."""
         import ui.settings_dialog as settings_dialog_module
@@ -286,7 +302,10 @@ class TestSettingsDialog:
             'raster_brightness': 0,
             'raster_contrast': 0,
             'raster_saturation': 0,
-            'extra_field_layers': []
+            'extra_field_layers': [],
+            'import_map_theme': '',
+            'global_preparation_map_theme': '',
+            'recording_area_preparation_map_theme': '',
         }.get(key, default)
         
         # Mock the layer service to return empty list
@@ -348,11 +367,35 @@ class TestSettingsDialog:
         
         # Test that the tab widget exists and has the expected tabs
         assert hasattr(self.dialog, '_tab_widget')
-        assert self.dialog._tab_widget.count() == 4
+        assert self.dialog._tab_widget.count() == 5
         assert self.dialog._tab_widget.tabText(0) == "Folders"
         assert self.dialog._tab_widget.tabText(1) == "Layers & Fields"
-        assert self.dialog._tab_widget.tabText(2) == "Warnings"
+        assert self.dialog._tab_widget.tabText(2) == "Error detection"
         assert self.dialog._tab_widget.tabText(3) == "Raster"
+        assert self.dialog._tab_widget.tabText(4) == "Map Themes"
+
+    def test_map_themes_tab_ui_elements_exist(self):
+        """Test that the map themes tab UI elements exist."""
+        assert hasattr(self.dialog, '_import_map_theme_combo')
+        assert hasattr(self.dialog, '_global_preparation_map_theme_combo')
+        assert hasattr(self.dialog, '_recording_area_preparation_map_theme_combo')
+        assert self.dialog._import_map_theme_combo.itemText(0) == "-- None --"
+
+    def test_save_map_theme_settings(self):
+        """Saving settings should persist configured map theme keys."""
+        self.dialog._import_map_theme_combo.addItem("Field", "Field")
+        self.dialog._import_map_theme_combo.setCurrentIndex(1)
+        self.dialog._global_preparation_map_theme_combo.addItem("Global", "Global")
+        self.dialog._global_preparation_map_theme_combo.setCurrentIndex(1)
+        self.dialog._recording_area_preparation_map_theme_combo.addItem("Zone", "Zone")
+        self.dialog._recording_area_preparation_map_theme_combo.setCurrentIndex(1)
+
+        self.dialog._save_and_accept()
+
+        saved = {call.args[0]: call.args[1] for call in self.mock_settings.set_value.call_args_list}
+        assert saved.get('import_map_theme') == 'Field'
+        assert saved.get('global_preparation_map_theme') == 'Global'
+        assert saved.get('recording_area_preparation_map_theme') == 'Zone'
 
     def test_field_projects_input_properties(self):
         assert self.dialog._field_projects_widget.input_field.isReadOnly() is True
