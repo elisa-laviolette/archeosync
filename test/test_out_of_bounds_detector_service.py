@@ -152,7 +152,13 @@ class TestOutOfBoundsDetectorService(unittest.TestCase):
         
         # Create mock layers
         recording_layer = Mock()
-        objects_layer = Mock()
+        definitive_objects_layer = Mock()
+        definitive_objects_layer.id.return_value = 'objects_layer_id'
+        definitive_objects_layer.name.return_value = "Objects"
+
+        temp_objects_layer = Mock()
+        temp_objects_layer.id.return_value = 'temp_objects_layer_id'
+        temp_objects_layer.name.return_value = "New Objects"
         
         # Create mock geometries
         recording_geometry = QgsGeometry.fromPolygonXY([[QgsPointXY(0, 0), QgsPointXY(10, 0), QgsPointXY(10, 10), QgsPointXY(0, 10), QgsPointXY(0, 0)]])
@@ -170,18 +176,26 @@ class TestOutOfBoundsDetectorService(unittest.TestCase):
         
         # Set up layer mocks
         recording_layer.getFeatures.return_value = [recording_feature]
-        objects_layer.getFeatures.return_value = [feature]
-        objects_layer.fields.return_value = Mock()
-        objects_layer.fields.return_value.indexOf.return_value = 0
+        temp_objects_layer.getFeatures.return_value = [feature]
+        temp_objects_layer.fields.return_value = Mock()
+        temp_objects_layer.fields.return_value.indexOf.return_value = 0
         
+        self.layer_service.get_layer_by_name.side_effect = lambda name: {
+            "New Objects": temp_objects_layer,
+            "New Features": None,
+            "New Small Finds": None,
+            "Imported_CSV_Points": None,
+        }.get(name)
+
         self.layer_service.get_layer_by_id.side_effect = lambda layer_id: {
             'recording_layer_id': recording_layer,
-            'objects_layer_id': objects_layer
+            'temp_objects_layer_id': temp_objects_layer,
+            'objects_layer_id': definitive_objects_layer,
         }.get(layer_id)
         
         # Mock relation
         mock_relation = Mock()
-        mock_relation.referencingLayer.return_value = objects_layer
+        mock_relation.referencingLayer.return_value = definitive_objects_layer
         mock_relation.referencedLayer.return_value = recording_layer
         mock_relation.fieldPairs.return_value = {'recording_area_field': 'id'}
         
@@ -211,7 +225,13 @@ class TestOutOfBoundsDetectorService(unittest.TestCase):
         
         # Create mock layers
         recording_layer = Mock()
-        objects_layer = Mock()
+        definitive_objects_layer = Mock()
+        definitive_objects_layer.id.return_value = 'objects_layer_id'
+        definitive_objects_layer.name.return_value = "Objects"
+
+        temp_objects_layer = Mock()
+        temp_objects_layer.id.return_value = 'temp_objects_layer_id'
+        temp_objects_layer.name.return_value = "New Objects"
         
         # Create mock geometries
         recording_geometry = QgsGeometry.fromPolygonXY([[QgsPointXY(0, 0), QgsPointXY(10, 0), QgsPointXY(10, 10), QgsPointXY(0, 10), QgsPointXY(0, 0)]])
@@ -227,24 +247,34 @@ class TestOutOfBoundsDetectorService(unittest.TestCase):
         feature.geometry.return_value = feature_geometry
         feature.attribute.side_effect = lambda idx: 1 if idx == 0 else "123"  # recording area ID, then number
         feature.id.return_value = 1
+        feature.fields.return_value = Mock()
+        feature.fields.return_value.indexOf.return_value = 0
         
         # Set up layer mocks
         recording_layer.getFeatures.return_value = [recording_feature]
         recording_layer.fields.return_value = Mock()
         recording_layer.fields.return_value.indexOf.return_value = 0  # name field index
         
-        objects_layer.getFeatures.return_value = [feature]
-        objects_layer.fields.return_value = Mock()
-        objects_layer.fields.return_value.indexOf.return_value = 0
+        temp_objects_layer.getFeatures.return_value = [feature]
+        temp_objects_layer.fields.return_value = Mock()
+        temp_objects_layer.fields.return_value.indexOf.return_value = 0
         
+        self.layer_service.get_layer_by_name.side_effect = lambda name: {
+            "New Objects": temp_objects_layer,
+            "New Features": None,
+            "New Small Finds": None,
+            "Imported_CSV_Points": None,
+        }.get(name)
+
         self.layer_service.get_layer_by_id.side_effect = lambda layer_id: {
             'recording_layer_id': recording_layer,
-            'objects_layer_id': objects_layer
+            'temp_objects_layer_id': temp_objects_layer,
+            'objects_layer_id': definitive_objects_layer,
         }.get(layer_id)
         
         # Mock relation
         mock_relation = Mock()
-        mock_relation.referencingLayer.return_value = objects_layer
+        mock_relation.referencingLayer.return_value = definitive_objects_layer
         mock_relation.referencedLayer.return_value = recording_layer
         mock_relation.fieldPairs.return_value = {'recording_area_field': 'id'}
         
@@ -433,6 +463,7 @@ class TestOutOfBoundsDetectorService(unittest.TestCase):
             "New Objects": temp_objects_layer,
             "New Features": None,
             "New Small Finds": None,
+            "Imported_CSV_Points": None,
         }.get(name)
 
         self.layer_service.get_layer_by_id.side_effect = lambda layer_id: {
@@ -452,6 +483,168 @@ class TestOutOfBoundsDetectorService(unittest.TestCase):
         detect_mock.assert_called_once_with(
             'temp_objects_layer_id', recording_layer, "Objects"
         )
+
+    def test_skips_definitive_layers_when_only_csv_temp_layer_present(self):
+        """CSV-only import must not scan definitive object/feature/small-find layers."""
+        self.settings_manager.get_value.side_effect = lambda key, default=None: {
+            'enable_bounds_warnings': True,
+            'bounds_max_distance': 0.2,
+            'recording_areas_layer': 'recording_layer_id',
+            'objects_layer': 'objects_layer_id',
+            'features_layer': 'features_layer_id',
+            'small_finds_layer': 'small_finds_layer_id',
+            'total_station_points_layer': 'def_topo_id',
+        }.get(key, default)
+
+        recording_layer = Mock()
+        recording_layer.name.return_value = "Recording Areas"
+        recording_layer.featureCount.return_value = 0
+
+        temp_topo = Mock()
+        temp_topo.name.return_value = "Imported_CSV_Points"
+        temp_topo.id.return_value = 'temp_topo_id'
+
+        definitive_objects = Mock()
+        definitive_objects.getFeatures.side_effect = AssertionError(
+            "Definitive objects layer must not be scanned during CSV-only import"
+        )
+
+        self.layer_service.get_layer_by_name.side_effect = lambda name: {
+            "Imported_CSV_Points": temp_topo,
+            "New Objects": None,
+            "New Features": None,
+            "New Small Finds": None,
+        }.get(name)
+
+        self.layer_service.get_layer_by_id.side_effect = lambda layer_id: {
+            'recording_layer_id': recording_layer,
+            'objects_layer_id': definitive_objects,
+            'def_topo_id': Mock(),
+            'temp_topo_id': temp_topo,
+        }.get(layer_id)
+
+        with patch.object(
+            self.service,
+            '_detect_topo_points_out_of_bounds',
+            return_value=[],
+        ) as topo_mock:
+            warnings = self.service.detect_out_of_bounds_features()
+
+        self.assertEqual(warnings, [])
+        topo_mock.assert_called_once()
+
+    def test_detect_topo_points_out_of_bounds_via_indirect_relation(self):
+        """Topo points linked to recording areas through an intermediate layer."""
+        if not QGIS_AVAILABLE:
+            self.skipTest("QGIS not available")
+
+        self.settings_manager.get_value.side_effect = lambda key, default=None: {
+            'enable_bounds_warnings': True,
+            'bounds_max_distance': 0.2,
+            'recording_areas_layer': 'recording_layer_id',
+            'total_station_points_layer': 'def_topo_id',
+        }.get(key, default)
+
+        recording_geometry = QgsGeometry.fromPolygonXY(
+            [[QgsPointXY(0, 0), QgsPointXY(10, 0), QgsPointXY(10, 10), QgsPointXY(0, 10), QgsPointXY(0, 0)]]
+        )
+        point_geometry = QgsGeometry.fromPointXY(QgsPointXY(15, 15))
+
+        recording_layer = Mock()
+        recording_layer.name.return_value = "Recording Areas"
+        recording_layer.featureCount.return_value = 1
+        recording_layer.fields.return_value = Mock()
+        recording_layer.fields.return_value.indexOf.return_value = 0
+        recording_layer.displayExpression.return_value = ""
+
+        recording_feature = Mock()
+        recording_feature.id.return_value = 1
+        recording_feature.geometry.return_value = recording_geometry
+        recording_feature.isValid.return_value = True
+        recording_feature.attribute.return_value = "Area A"
+        recording_layer.getFeatures.return_value = [recording_feature]
+
+        def_topo = Mock()
+        def_topo.id.return_value = 'def_topo_id'
+        def_topo.name.return_value = "Topo Points"
+
+        inter = Mock()
+        inter.id.return_value = 'inter_id'
+        inter.name.return_value = "Link"
+
+        temp_topo = Mock()
+        temp_topo.id.return_value = 'temp_topo_id'
+        temp_topo.name.return_value = "Imported_CSV_Points"
+        temp_topo.featureCount.return_value = 1
+        temp_topo.fields.return_value = Mock()
+        temp_topo.fields.return_value.indexOf.side_effect = lambda name: 0 if name == 'identifier' else -1
+        temp_topo.fields.return_value.__getitem__ = lambda self, idx: Mock(name='identifier')
+
+        point_feature = Mock()
+        point_feature.geometry.return_value = point_geometry
+        point_feature.id.return_value = 1
+        point_feature.fields.return_value = temp_topo.fields.return_value
+        point_feature.attribute.side_effect = lambda idx: 'PT1' if idx == 0 else None
+        temp_topo.getFeatures.return_value = [point_feature]
+
+        inter.fields.return_value = Mock()
+        inter.fields.return_value.indexOf.side_effect = lambda name: {
+            'pt_pk': 0,
+            'ra_fk': 1,
+        }.get(name, -1)
+        inter.fields.return_value.__iter__ = lambda self=None: iter(
+            [Mock(name='pt_pk'), Mock(name='ra_fk')]
+        )
+
+        link_feature = Mock()
+        link_feature.attribute.side_effect = lambda idx: 'PT1' if idx == 0 else 1
+        inter.getFeatures.return_value = [link_feature]
+
+        def_topo.fields.return_value = Mock()
+        def_topo.fields.return_value.indexOf.return_value = 0
+        def_topo.fields.return_value.__iter__ = lambda self=None: iter([Mock(name='pt_fk')])
+
+        rel_pi = Mock()
+        rel_pi.id.return_value = 'rel_pi'
+        rel_pi.fieldPairs.return_value = {'pt_fk': 'pt_pk'}
+        rel_pi.referencingLayer.return_value = def_topo
+        rel_pi.referencedLayer.return_value = inter
+
+        rel_ir = Mock()
+        rel_ir.id.return_value = 'rel_ir'
+        rel_ir.fieldPairs.return_value = {'ra_fk': 'id'}
+        rel_ir.referencingLayer.return_value = inter
+        rel_ir.referencedLayer.return_value = recording_layer
+
+        self.layer_service.get_layer_by_name.side_effect = lambda name: {
+            "Imported_CSV_Points": temp_topo,
+            "New Objects": None,
+            "New Features": None,
+            "New Small Finds": None,
+        }.get(name)
+
+        self.layer_service.get_layer_by_id.side_effect = lambda layer_id: {
+            'recording_layer_id': recording_layer,
+            'def_topo_id': def_topo,
+            'temp_topo_id': temp_topo,
+        }.get(layer_id)
+
+        mock_project = Mock()
+        mock_relation_manager = Mock()
+        mock_relation_manager.relations.return_value = {
+            'rel_pi': rel_pi,
+            'rel_ir': rel_ir,
+        }
+
+        with patch('qgis.core.QgsProject') as mock_qgs_project:
+            mock_qgs_project.instance.return_value = mock_project
+            mock_project.relationManager.return_value = mock_relation_manager
+
+            warnings = self.service.detect_out_of_bounds_features()
+
+        self.assertEqual(len(warnings), 1)
+        self.assertIsInstance(warnings[0], WarningData)
+        self.assertIn("Area A", warnings[0].message)
 
     def test_skips_recording_area_index_when_layer_has_no_geometry(self):
         """Avoid building the recording-area index when no feature has geometry."""

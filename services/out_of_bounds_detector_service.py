@@ -31,7 +31,8 @@ Usage:
     warnings = service.detect_out_of_bounds_features()
 """
 
-from typing import List, Dict, Any, Optional, Union, Tuple
+from collections import defaultdict, deque
+from typing import List, Dict, Any, Optional, Union, Tuple, AbstractSet
 
 try:
     from ..core.data_structures import WarningData
@@ -55,6 +56,15 @@ _LAYER_TYPE_LABELS = {
     "features_layer": "Features",
     "small_finds_layer": "Small Finds",
 }
+
+_TEMP_TOPO_LAYER_NAME = "Imported_CSV_Points"
+
+_ALL_TEMP_IMPORT_LAYER_NAMES = tuple(_TEMP_IMPORT_LAYER_NAMES.values()) + (_TEMP_TOPO_LAYER_NAME,)
+
+_STANDARD_RELATION_FIELD_NAMES = frozenset({
+    'identifier', 'identifiant', 'id', 'code', 'label', 'label_court', 'label_long',
+    'object_number', 'number', 'numero', 'ptid', 'pt_id', 'num', 'no',
+})
 
 
 class OutOfBoundsDetectorService(QObject):
@@ -84,6 +94,9 @@ class OutOfBoundsDetectorService(QObject):
     def detect_out_of_bounds_features(self) -> List[Union[str, WarningData]]:
         """
         Detect features located outside their recording areas.
+
+        Only pending temporary import layers are scanned (``New Objects``,
+        ``New Features``, ``New Small Finds``, ``Imported_CSV_Points``).
         
         Returns:
             List of warning messages or structured warning data about out-of-bounds features
@@ -123,6 +136,10 @@ class OutOfBoundsDetectorService(QObject):
             print(f"[DEBUG] Successfully got recording areas layer: {recording_areas_layer.name()}")
             print(f"[DEBUG] Recording areas layer feature count: {recording_areas_layer.featureCount()}")
 
+            if not self._has_temporary_import_layers():
+                print("[DEBUG] No temporary import layers present, skipping out-of-bounds detection")
+                return warnings
+
             layers_to_check = self._resolve_layers_to_check()
             for layer_id, layer_type in layers_to_check:
                 print(f"[DEBUG] Checking {layer_type} layer ({layer_id})...")
@@ -131,6 +148,10 @@ class OutOfBoundsDetectorService(QObject):
                 )
                 print(f"[DEBUG] {layer_type} layer returned {len(layer_warnings)} warnings")
                 warnings.extend(layer_warnings)
+
+            topo_warnings = self._detect_topo_points_out_of_bounds(recording_areas_layer)
+            print(f"[DEBUG] Total station points layer returned {len(topo_warnings)} warnings")
+            warnings.extend(topo_warnings)
             
             print(f"[DEBUG] Total out-of-bounds warnings found: {len(warnings)}")
             
@@ -141,35 +162,75 @@ class OutOfBoundsDetectorService(QObject):
         
         return warnings
 
+    def _has_temporary_import_layers(self) -> bool:
+        """Return whether any pending ArcheoSync import layer exists in the project."""
+        return any(
+            self._layer_service.get_layer_by_name(layer_name)
+            for layer_name in _ALL_TEMP_IMPORT_LAYER_NAMES
+        )
+
     def _resolve_layers_to_check(self) -> List[Tuple[str, str]]:
         """
         Resolve which object/feature/small-find layers should be scanned.
 
-        During import, only temporary ``New *`` layers that exist are checked so
-        definitive project layers are not scanned unnecessarily. When no temp
-        import layer is present (e.g. manual refresh), configured definitive
-        layers are used instead.
+        Only existing temporary ``New *`` import layers are checked. Definitive
+        project layers are never scanned by this service.
         """
-        temp_import_in_progress = any(
-            self._layer_service.get_layer_by_name(temp_name)
-            for temp_name in _TEMP_IMPORT_LAYER_NAMES.values()
-        )
-
         layers_to_check: List[Tuple[str, str]] = []
         for setting_key, temp_layer_name in _TEMP_IMPORT_LAYER_NAMES.items():
-            configured_layer_id = self._settings_manager.get_value(setting_key)
-            if not configured_layer_id:
+            if not self._settings_manager.get_value(setting_key):
                 continue
 
             temp_layer = self._layer_service.get_layer_by_name(temp_layer_name)
             if temp_layer:
                 layers_to_check.append((temp_layer.id(), _LAYER_TYPE_LABELS[setting_key]))
-                continue
-
-            if not temp_import_in_progress:
-                layers_to_check.append((configured_layer_id, _LAYER_TYPE_LABELS[setting_key]))
 
         return layers_to_check
+
+    def _detect_topo_points_out_of_bounds(self, recording_areas_layer: Any) -> List[Union[str, WarningData]]:
+        """
+        Detect out-of-bounds total-station (topo) points in ``Imported_CSV_Points``.
+
+        Supports direct and multi-hop QGIS relations to recording areas. Definitive
+        topo layers are used only to resolve relation metadata, not for spatial checks.
+        """
+        warnings: List[Union[str, WarningData]] = []
+        temp_topo = self._layer_service.get_layer_by_name(_TEMP_TOPO_LAYER_NAME)
+        if not temp_topo:
+            print("[DEBUG] No temporary topo import layer, skipping topo out-of-bounds check")
+            return warnings
+
+        definitive_topo_id = self._settings_manager.get_value('total_station_points_layer')
+        if not definitive_topo_id:
+            print("[DEBUG] No total station points layer configured")
+            return warnings
+
+        definitive_topo = self._layer_service.get_layer_by_id(definitive_topo_id)
+        if not definitive_topo:
+            print(f"[DEBUG] Could not get definitive topo layer with ID: {definitive_topo_id}")
+            return warnings
+
+        check_layer = temp_topo
+        print(
+            f"[DEBUG] Checking temporary topo points layer '{check_layer.name()}'"
+        )
+
+        direct_relation = self._get_relation_for_layer(definitive_topo, recording_areas_layer)
+        if direct_relation:
+            print("[DEBUG] Topo out-of-bounds: using direct relation to recording areas")
+            return self._detect_out_of_bounds_in_layer(
+                check_layer.id(), recording_areas_layer, "Total Station Points"
+            )
+
+        indirect_path = self._find_shortest_relation_path(definitive_topo, recording_areas_layer)
+        if not indirect_path:
+            print("[DEBUG] No direct or indirect relation between topo points and recording areas")
+            return warnings
+
+        print(f"[DEBUG] Topo out-of-bounds: indirect path hops = {len(indirect_path)}")
+        return self._detect_out_of_bounds_via_relation_path(
+            check_layer, definitive_topo, recording_areas_layer, indirect_path
+        )
     
     def _detect_out_of_bounds_in_layer(self,
                                      layer_id: str, 
@@ -213,10 +274,10 @@ class OutOfBoundsDetectorService(QObject):
                     # Map temporary layer names to definitive layer types
                     layer_type_mapping = {
                         "New Objects": "objects_layer",
-                        "New Features": "features_layer", 
+                        "New Features": "features_layer",
                         "New Small Finds": "small_finds_layer"
                     }
-                    
+
                     definitive_layer_key = layer_type_mapping.get(layer.name())
                     print(f"[DEBUG] Definitive layer key: {definitive_layer_key}")
                     if definitive_layer_key:
@@ -236,6 +297,25 @@ class OutOfBoundsDetectorService(QObject):
                                     if field_idx >= 0:
                                         recording_area_field = definitive_field
                                         print(f"[DEBUG] Using definitive field: {recording_area_field}")
+                elif layer.name() == _TEMP_TOPO_LAYER_NAME:
+                    print(f"[DEBUG] Layer is temporary topo import: {layer.name()}")
+                    definitive_layer_id = self._settings_manager.get_value('total_station_points_layer')
+                    if definitive_layer_id:
+                        definitive_layer = self._layer_service.get_layer_by_id(definitive_layer_id)
+                        if definitive_layer:
+                            definitive_field = self._get_recording_area_field(
+                                definitive_layer, recording_areas_layer
+                            )
+                            if definitive_field:
+                                resolved_field = self._find_relation_field_on_layer(
+                                    layer, definitive_field, is_point_layer=True
+                                )
+                                if resolved_field:
+                                    recording_area_field = resolved_field
+                                    print(
+                                        f"[DEBUG] Using topo field from definitive layer: "
+                                        f"{recording_area_field}"
+                                    )
                     
                     if not recording_area_field:
                         print(f"[DEBUG] Still no recording area field found for temporary layer")
@@ -257,10 +337,10 @@ class OutOfBoundsDetectorService(QObject):
                 # For temporary layers, we need to get the field mapping from the definitive layer
                 layer_type_mapping = {
                     "New Objects": "objects_layer",
-                    "New Features": "features_layer", 
+                    "New Features": "features_layer",
                     "New Small Finds": "small_finds_layer"
                 }
-                
+
                 definitive_layer_key = layer_type_mapping.get(layer.name())
                 if definitive_layer_key:
                     definitive_layer_id = self._settings_manager.get_value(definitive_layer_key)
@@ -275,6 +355,20 @@ class OutOfBoundsDetectorService(QObject):
                                     # Get the referenced field name (the field in the recording areas layer)
                                     referenced_field_name = list(field_pairs.values())[0]
                                     print(f"[DEBUG] Using field mapping from definitive layer: {recording_area_field} -> {referenced_field_name}")
+            elif layer.name() == _TEMP_TOPO_LAYER_NAME:
+                definitive_layer_id = self._settings_manager.get_value('total_station_points_layer')
+                if definitive_layer_id:
+                    definitive_layer = self._layer_service.get_layer_by_id(definitive_layer_id)
+                    if definitive_layer:
+                        relation = self._get_relation_for_layer(definitive_layer, recording_areas_layer)
+                        if relation:
+                            field_pairs = relation.fieldPairs()
+                            if field_pairs:
+                                referenced_field_name = list(field_pairs.values())[0]
+                                print(
+                                    f"[DEBUG] Using topo field mapping from definitive layer: "
+                                    f"{recording_area_field} -> {referenced_field_name}"
+                                )
             else:
                 # For definitive layers, get the relation directly
                 relation = self._get_relation_for_layer(layer, recording_areas_layer)
@@ -409,43 +503,12 @@ class OutOfBoundsDetectorService(QObject):
                     max_distance = max(item['distance'] for item in items)
                     
                     # Create filter expression to select only the out-of-bounds features
-                    # Use the feature's unique identifier (Label) instead of FID which can change
-                    feature_labels = []
-                    for item in items:
-                        feature = item['feature']
-                        # Get the Label field value (or another unique identifier)
-                        label_field_idx = feature.fields().indexOf('Label')
-                        if label_field_idx >= 0:
-                            label_value = feature.attribute(label_field_idx)
-                            if label_value:
-                                feature_labels.append(f"'{label_value}'")
-                    
-                    if feature_labels:
-                        filter_expression = f'"Label" IN ({",".join(feature_labels)})'
-                    else:
-                        # Fallback to internal feature id ($id); temp layers often have no "fid" column.
-                        feature_ids = [str(item['feature_id']) for item in items]
-                        filter_expression = f"$id IN ({','.join(feature_ids)})"
+                    filter_expression = self._build_out_of_bounds_filter_expression(
+                        layer, items, layer_type
+                    )
                     
                     # Debug: Verify filter expression
                     print(f"[DEBUG] Creating filter expression: {filter_expression}")
-                    print(f"[DEBUG] Feature labels from detection: {feature_labels}")
-                    
-                    # Check actual labels in the layer
-                    actual_labels = []
-                    label_field_idx = layer.fields().indexOf('Label')
-                    if label_field_idx >= 0:
-                        for feature in layer.getFeatures():
-                            maybe_yield_to_ui()
-                            label_value = feature.attribute(label_field_idx)
-                            if label_value:
-                                actual_labels.append(str(label_value))
-                    print(f"[DEBUG] Actual labels in layer: {actual_labels}")
-                    
-                    # Check if our detected labels match actual labels
-                    missing_labels = [label.strip("'") for label in feature_labels if label.strip("'") not in actual_labels]
-                    if missing_labels:
-                        print(f"[DEBUG] WARNING: Labels {missing_labels} not found in layer!")
                     
                     print(f"[DEBUG] Creating warning for {recording_area_name}: {len(items)} features, max distance: {max_distance:.3f}m")
                     
@@ -471,6 +534,389 @@ class OutOfBoundsDetectorService(QObject):
         
         print(f"[DEBUG] _detect_out_of_bounds_in_layer returning {len(warnings)} warnings")
         return warnings
+
+    def _detect_out_of_bounds_via_relation_path(
+        self,
+        check_layer: Any,
+        definitive_start_layer: Any,
+        recording_areas_layer: Any,
+        relations_path: List[Any],
+    ) -> List[Union[str, WarningData]]:
+        """
+        Detect out-of-bounds features by following a multi-hop QGIS relation path to recording areas.
+
+        Used for topo points when no direct relation links them to recording areas (for example
+        points → link table → recording areas).
+        """
+        warnings: List[Union[str, WarningData]] = []
+        try:
+            ordered_def = self._ordered_layers_along_path(definitive_start_layer, relations_path)
+            if (
+                not ordered_def
+                or ordered_def[-1].id() != recording_areas_layer.id()
+                or ordered_def[0].id() != definitive_start_layer.id()
+            ):
+                print("[DEBUG] Topo out-of-bounds (indirect): path does not connect layers")
+                return warnings
+
+            combo_layers: List[Any] = []
+            for index, def_layer in enumerate(ordered_def):
+                if index == 0 and check_layer and check_layer.id() != def_layer.id():
+                    combo_layers.append(check_layer)
+                else:
+                    combo_layers.append(def_layer)
+
+            print(
+                "[DEBUG] Topo out-of-bounds (indirect): resolved path layers = "
+                f"{[layer.name() if layer else '<none>' for layer in combo_layers]}"
+            )
+
+            hops: List[Tuple[int, int]] = []
+            for hop_index, relation in enumerate(relations_path):
+                from_def = ordered_def[hop_index]
+                names = self._field_names_for_relation_hop(relation, from_def)
+                if not names:
+                    print("[DEBUG] Topo out-of-bounds (indirect): relation has no field pairs")
+                    return warnings
+                from_name, to_name = names
+                from_idx = self._field_index_on_path_layer(
+                    combo_layers[hop_index], from_name, from_def, definitive_start_layer
+                )
+                to_idx = self._field_index_on_path_layer(
+                    combo_layers[hop_index + 1], to_name, ordered_def[hop_index + 1],
+                    definitive_start_layer,
+                )
+                if from_idx < 0 or to_idx < 0:
+                    print(
+                        "[DEBUG] Topo out-of-bounds (indirect): could not resolve hop fields "
+                        f"(hop {hop_index}: from_idx={from_idx}, to_idx={to_idx})"
+                    )
+                    return warnings
+                hops.append((from_idx, to_idx))
+
+            features_by_layer: List[List[Any]] = []
+            for layer in combo_layers:
+                layer_features = []
+                for feature in layer.getFeatures():
+                    maybe_yield_to_ui()
+                    layer_features.append(feature)
+                features_by_layer.append(layer_features)
+
+            if not features_by_layer[0]:
+                return warnings
+
+            indices: List[Dict[str, List[Any]]] = []
+            for hop_index in range(len(hops)):
+                to_idx = hops[hop_index][1]
+                bucket: Dict[str, List[Any]] = defaultdict(list)
+                for feature in features_by_layer[hop_index + 1]:
+                    maybe_yield_to_ui()
+                    value = feature.attribute(to_idx)
+                    if not self._is_valid_relation_value(value):
+                        continue
+                    bucket[self._relation_value_key(value)].append(feature)
+                indices.append(dict(bucket))
+
+            out_of_bounds_features: List[Dict[str, Any]] = []
+            for point_feature in features_by_layer[0]:
+                maybe_yield_to_ui()
+                if not point_feature.geometry() or point_feature.geometry().isEmpty():
+                    continue
+
+                start_value = point_feature.attribute(hops[0][0])
+                if not self._is_valid_relation_value(start_value):
+                    continue
+
+                current_matches = indices[0].get(self._relation_value_key(start_value), [])
+                for hop_index in range(1, len(hops)):
+                    next_matches: List[Any] = []
+                    from_idx = hops[hop_index][0]
+                    index_map = indices[hop_index]
+                    for candidate in current_matches:
+                        link_value = candidate.attribute(from_idx)
+                        if not self._is_valid_relation_value(link_value):
+                            continue
+                        next_matches.extend(
+                            index_map.get(self._relation_value_key(link_value), [])
+                        )
+                    current_matches = next_matches
+
+                point_geometry = point_feature.geometry()
+                for recording_area_feature in current_matches:
+                    maybe_yield_to_ui()
+                    recording_area_geometry = recording_area_feature.geometry()
+                    if not recording_area_geometry or recording_area_geometry.isEmpty():
+                        continue
+                    if recording_area_geometry.contains(point_geometry):
+                        continue
+                    distance = recording_area_geometry.distance(point_geometry)
+                    if distance <= self._max_distance_meters:
+                        continue
+
+                    recording_area_name = self._get_recording_area_name(
+                        recording_areas_layer, recording_area_feature
+                    )
+                    feature_identifier = self._get_feature_identifier(
+                        point_feature, "Total Station Points"
+                    )
+                    out_of_bounds_features.append({
+                        'feature': point_feature,
+                        'feature_id': point_feature.id(),
+                        'recording_area_name': recording_area_name,
+                        'recording_area_id': recording_area_feature.id(),
+                        'distance': distance,
+                        'feature_identifier': feature_identifier,
+                    })
+
+            if not out_of_bounds_features:
+                return warnings
+
+            by_recording_area: Dict[Any, List[Dict[str, Any]]] = {}
+            for item in out_of_bounds_features:
+                recording_area_id = item['recording_area_id']
+                if recording_area_id not in by_recording_area:
+                    by_recording_area[recording_area_id] = []
+                by_recording_area[recording_area_id].append(item)
+
+            for recording_area_id, items in by_recording_area.items():
+                recording_area_name = items[0]['recording_area_name']
+                feature_identifiers = [item['feature_identifier'] for item in items]
+                max_distance = max(item['distance'] for item in items)
+                filter_expression = self._build_out_of_bounds_filter_expression(
+                    check_layer, items, "Total Station Points"
+                )
+                warning_data = WarningData(
+                    message=self._create_out_of_bounds_warning(
+                        recording_area_name, "Total Station Points", feature_identifiers, max_distance
+                    ),
+                    recording_area_name=recording_area_name,
+                    layer_name=check_layer.name(),
+                    filter_expression=filter_expression,
+                    out_of_bounds_features=items,
+                )
+                warnings.append(warning_data)
+
+        except Exception as e:
+            print(f"[DEBUG] Error in _detect_out_of_bounds_via_relation_path: {e}")
+            import traceback
+            traceback.print_exc()
+
+        return warnings
+
+    def _build_out_of_bounds_filter_expression(
+        self,
+        layer: Any,
+        items: List[Dict[str, Any]],
+        layer_type: str,
+    ) -> str:
+        """Build a QGIS expression to select out-of-bounds features in the attribute table."""
+        if layer_type == "Total Station Points":
+            for field_name in ('identifier', 'PtID', 'ptid', 'point_id', 'Label'):
+                field_idx = layer.fields().indexOf(field_name)
+                if field_idx < 0:
+                    continue
+                values = []
+                for item in items:
+                    value = item['feature'].attribute(field_idx)
+                    if value is not None and str(value).strip():
+                        values.append(f"'{value}'")
+                if values:
+                    return f'"{field_name}" IN ({",".join(values)})'
+
+        label_field_idx = layer.fields().indexOf('Label')
+        if label_field_idx >= 0:
+            feature_labels = []
+            for item in items:
+                label_value = item['feature'].attribute(label_field_idx)
+                if label_value:
+                    feature_labels.append(f"'{label_value}'")
+            if feature_labels:
+                return f'"Label" IN ({",".join(feature_labels)})'
+
+        feature_ids = [str(item['feature_id']) for item in items]
+        return f"$id IN ({','.join(feature_ids)})"
+
+    def _other_layer_in_relation(self, current_layer: Any, relation: Any) -> Optional[Any]:
+        """Return the layer at the other end of ``relation`` from ``current_layer``."""
+        try:
+            ref = relation.referencingLayer()
+            rec = relation.referencedLayer()
+            if not ref or not rec or not current_layer:
+                return None
+            current_id = current_layer.id()
+            if ref.id() == current_id:
+                return rec
+            if rec.id() == current_id:
+                return ref
+        except Exception:
+            return None
+        return None
+
+    def _find_shortest_relation_path(
+        self,
+        layer_start: Any,
+        layer_end: Any,
+        max_hops: int = 8,
+        forbidden_relation_ids: Optional[AbstractSet[str]] = None,
+    ) -> Optional[List[Any]]:
+        """Shortest chain of QgsRelation instances connecting two layers (BFS)."""
+        try:
+            if not layer_start or not layer_end or layer_start.id() == layer_end.id():
+                return None
+            queue = deque([(layer_start, [])])
+            visited = {layer_start.id()}
+            project = QgsProject.instance()
+            relation_manager = project.relationManager()
+            while queue:
+                current, path = queue.popleft()
+                if len(path) >= max_hops:
+                    continue
+                for rel_key, relation in relation_manager.relations().items():
+                    if forbidden_relation_ids:
+                        relation_id = self._relation_project_id(relation, rel_key)
+                        if relation_id in forbidden_relation_ids:
+                            continue
+                    nxt = self._other_layer_in_relation(current, relation)
+                    if not nxt:
+                        continue
+                    new_path = path + [relation]
+                    if nxt.id() == layer_end.id():
+                        return new_path
+                    if nxt.id() in visited:
+                        continue
+                    visited.add(nxt.id())
+                    queue.append((nxt, new_path))
+            return None
+        except Exception as e:
+            print(f"[DEBUG] Error finding indirect relation path: {e}")
+            return None
+
+    def _relation_project_id(self, relation: Any, dict_key: Any = None) -> str:
+        """Stable string id for a QgsRelation."""
+        try:
+            relation_id = relation.id()
+            if relation_id:
+                return str(relation_id)
+        except Exception:
+            pass
+        if dict_key is not None:
+            return str(dict_key)
+        return str(id(relation))
+
+    def _ordered_layers_along_path(
+        self,
+        layer_start: Any,
+        relations_path: List[Any],
+    ) -> Optional[List[Any]]:
+        """Reconstruct [L0, L1, ..., Ln] where each relation connects consecutive layers."""
+        layers = [layer_start]
+        current = layer_start
+        for relation in relations_path:
+            nxt = self._other_layer_in_relation(current, relation)
+            if not nxt:
+                return None
+            layers.append(nxt)
+            current = nxt
+        return layers
+
+    def _field_names_for_relation_hop(self, relation: Any, from_layer: Any) -> Optional[Tuple[str, str]]:
+        """Return (field_on_from_layer, field_on_to_layer) for one relation hop."""
+        field_pairs = relation.fieldPairs()
+        if not field_pairs:
+            return None
+        ref_field, rec_field = next(iter(field_pairs.items()))
+        ref_layer = relation.referencingLayer()
+        rec_layer = relation.referencedLayer()
+        if not ref_layer or not rec_layer:
+            return None
+        if from_layer.id() == ref_layer.id():
+            return ref_field, rec_field
+        if from_layer.id() == rec_layer.id():
+            return rec_field, ref_field
+        return None
+
+    def _field_index_on_path_layer(
+        self,
+        combo_layer: Any,
+        relation_field_name: str,
+        path_def_layer: Any,
+        definitive_topo_layer: Any,
+    ) -> int:
+        """Resolve a relation field name to a field index on a path layer."""
+        is_point_layer = path_def_layer.id() == definitive_topo_layer.id()
+        field_name = self._find_relation_field_on_layer(
+            combo_layer, relation_field_name, is_point_layer=is_point_layer
+        )
+        if not field_name:
+            return -1
+        field_idx = combo_layer.fields().indexOf(field_name)
+        if field_idx >= 0:
+            return field_idx
+        for index, field in enumerate(combo_layer.fields()):
+            if field.name().lower() == field_name.lower():
+                return index
+        return -1
+
+    def _find_matching_field(self, layer: Any, target_field_name: str) -> Optional[str]:
+        """Find a field whose name matches ``target_field_name`` (case-insensitive)."""
+        for field in layer.fields():
+            if field.name().lower() == target_field_name.lower():
+                return field.name()
+        return None
+
+    def _find_relation_field_on_layer(
+        self,
+        layer: Any,
+        relation_field_name: str,
+        *,
+        is_point_layer: bool,
+    ) -> Optional[str]:
+        """Resolve a relation field on a layer, including common naming mismatches."""
+        if not relation_field_name or not layer:
+            return None
+        direct = self._find_matching_field(layer, relation_field_name)
+        if direct:
+            return direct
+        key = str(relation_field_name).strip().lower()
+        if key not in _STANDARD_RELATION_FIELD_NAMES:
+            return None
+        if is_point_layer:
+            alternates = (
+                'ptid', 'pt_id', 'label_court', 'label', 'identifiant', 'identifier',
+                'code', 'numero', 'number', 'object_number',
+            )
+        else:
+            alternates = (
+                'label_court', 'label', 'object_number', 'number', 'identifiant', 'identifier',
+                'code', 'numero', 'ptid', 'pt_id',
+            )
+        if key in {'id', 'fid'}:
+            alternates = alternates + ('id', 'fid')
+        seen = {key}
+        for alternate in alternates:
+            alternate_lower = alternate.lower()
+            if alternate_lower in seen:
+                continue
+            seen.add(alternate_lower)
+            match = self._find_matching_field(layer, alternate)
+            if match:
+                return match
+        return None
+
+    def _is_valid_relation_value(self, relation_value: Any) -> bool:
+        """Return whether a relation value can safely link features."""
+        if relation_value is None:
+            return False
+        text_value = str(relation_value).strip()
+        if not text_value:
+            return False
+        if text_value.lower() in {"null", "none", "nan"}:
+            return False
+        return True
+
+    def _relation_value_key(self, relation_value: Any) -> str:
+        """Normalize a relation value to a stable case-insensitive key."""
+        return str(relation_value).strip().lower()
     
     def _get_relation_for_layer(self, layer: Any, recording_areas_layer: Any) -> Optional[Any]:
         """
@@ -615,6 +1061,13 @@ class OutOfBoundsDetectorService(QObject):
                         number = feature.attribute(number_idx)
                         if number:
                             return f"Object {number}"
+            elif layer_type == "Total Station Points":
+                for field_name in ('identifier', 'PtID', 'ptid', 'point_id', 'station_id'):
+                    field_idx = feature.fields().indexOf(field_name)
+                    if field_idx >= 0:
+                        value = feature.attribute(field_idx)
+                        if value:
+                            return f"Point {value}"
             
             # Fallback to feature ID
             return f"{layer_type} {feature.id()}"

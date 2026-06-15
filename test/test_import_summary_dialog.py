@@ -333,6 +333,18 @@ class TestImportSummaryDialog(unittest.TestCase):
         self.assertIn("duplicate_objects_warnings", result_keys)
         self.assertIn("skipped_numbers_warnings", result_keys)
 
+    def test_build_warning_refresh_plan_includes_out_of_bounds_for_csv_only_import(self):
+        """Topo CSV import alone must still run out-of-bounds detection."""
+        self.dialog._summary_data.objects_count = 0
+        self.dialog._summary_data.features_count = 0
+        self.dialog._summary_data.small_finds_count = 0
+        self.dialog._summary_data.csv_points_count = 5
+
+        plan = self.dialog._build_warning_refresh_plan()
+        result_keys = [step[0] for step in plan]
+
+        self.assertIn("out_of_bounds_warnings", result_keys)
+
     def test_refresh_warnings_silently_does_not_show_success_dialog(self):
         """Automatic background refresh must not show modal success popups."""
         mock_duplicate_detector = Mock()

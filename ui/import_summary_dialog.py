@@ -1298,6 +1298,7 @@ class ImportSummaryDockWidget(QDockWidget):
             self._summary_data.objects_count > 0
             or self._summary_data.features_count > 0
             or self._summary_data.small_finds_count > 0
+            or self._summary_data.csv_points_count > 0
         ):
             steps.append(
                 (
