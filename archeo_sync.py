@@ -738,6 +738,8 @@ class ArcheoSyncPlugin(QObject):
                 summary_data['csv_duplicates'] > 0 or
                 summary_data['features_count'] > 0 or 
                 summary_data['objects_count'] > 0 or 
+                summary_data['objects_duplicates'] > 0 or
+                summary_data.get('duplicate_objects_warnings') or
                 summary_data['small_finds_count'] > 0):
                 
                 self._show_import_summary(summary_data)

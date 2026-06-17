@@ -63,13 +63,15 @@ def make_qgsfeature_mock(fields):
     return feature
 
 # Helper to create a mock feature that can be iterated (for getFeatures())
-def create_iterable_mock_feature():
+def create_iterable_mock_feature(has_geometry=True):
     mock_feature = MagicMock()
     mock_geometry = MagicMock()
     mock_geometry.type.return_value = 2  # PolygonGeometry
     mock_geometry.isMultipart.return_value = False
-    mock_geometry.isEmpty.return_value = False
+    mock_geometry.isEmpty.return_value = not has_geometry
+    mock_geometry.isNull.return_value = not has_geometry
     mock_feature.geometry.return_value = mock_geometry
+    mock_feature.hasGeometry.return_value = has_geometry
     
     # Mock feature fields
     mock_field = MagicMock()
@@ -334,17 +336,12 @@ class TestFieldProjectImportService:
         """Rows with no geometry and no comparable attributes must not be dropped as duplicates."""
         existing_layer = Mock()
         existing_layer.getFeatures.return_value = [create_iterable_mock_feature()]
-        feature = create_iterable_mock_feature()
-        feature.geometry.return_value.isEmpty.return_value = True
+        feature = create_iterable_mock_feature(has_geometry=False)
 
         with patch.object(
             self.field_import_service,
-            "_get_object_identity_key",
-            return_value=None,
-        ), patch.object(
-            self.field_import_service,
-            "_create_feature_signature",
-            side_effect=["name:test||POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))", "||NO_GEOM"],
+            "_create_attribute_signature",
+            return_value="",
         ):
             filtered = self.field_import_service._filter_duplicates(
                 [feature], existing_layer, "Objects"
@@ -352,22 +349,20 @@ class TestFieldProjectImportService:
 
         assert filtered == [feature]
 
-    def test_filter_duplicates_excludes_no_geometry_objects_with_same_identity(self):
-        """Two no-geometry rows with the same zone/number: the import duplicate is excluded."""
-        existing_feature = create_iterable_mock_feature()
-        existing_feature.geometry.return_value.isEmpty.return_value = True
-        import_feature = create_iterable_mock_feature()
-        import_feature.geometry.return_value.isEmpty.return_value = True
+    def test_filter_duplicates_excludes_no_geometry_objects_with_same_attributes(self):
+        """Two no-geometry rows with identical attributes: the import duplicate is excluded."""
+        existing_feature = create_iterable_mock_feature(has_geometry=False)
+        import_feature = create_iterable_mock_feature(has_geometry=False)
 
         existing_layer = Mock()
         existing_layer.getFeatures.return_value = [existing_feature]
         existing_layer.fields.return_value = existing_feature.fields.return_value
 
-        identity_key = (42, 7)
+        attr_sig = "number:7|zone:42"
         with patch.object(
             self.field_import_service,
-            "_get_object_identity_key",
-            side_effect=[identity_key, identity_key],
+            "_create_attribute_signature",
+            return_value=attr_sig,
         ):
             filtered = self.field_import_service._filter_duplicates(
                 [import_feature], existing_layer, "Objects"
@@ -376,21 +371,25 @@ class TestFieldProjectImportService:
         assert filtered == []
 
     def test_filter_duplicates_keeps_no_geometry_when_only_geometric_match_exists(self):
-        """No-geometry import is kept when definitive data has only a polygon with same identity."""
-        existing_feature = create_iterable_mock_feature()
-        existing_feature.geometry.return_value.isEmpty.return_value = False
-        import_feature = create_iterable_mock_feature()
-        import_feature.geometry.return_value.isEmpty.return_value = True
+        """No-geometry import is kept when definitive polygon shares zone/number but differs elsewhere."""
+        existing_feature = create_iterable_mock_feature(has_geometry=True)
+        import_feature = create_iterable_mock_feature(has_geometry=False)
 
         existing_layer = Mock()
         existing_layer.getFeatures.return_value = [existing_feature]
         existing_layer.fields.return_value = existing_feature.fields.return_value
 
-        identity_key = (42, 7)
         with patch.object(
             self.field_import_service,
-            "_get_object_identity_key",
-            return_value=identity_key,
+            "_create_attribute_signature",
+            side_effect=[
+                "number:7|type:polygon|zone:42",
+                "number:7|type:table|zone:42",
+            ],
+        ), patch.object(
+            self.field_import_service,
+            "_create_feature_signature",
+            return_value="number:7|type:polygon|zone:42||POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))",
         ):
             filtered = self.field_import_service._filter_duplicates(
                 [import_feature], existing_layer, "Objects"
@@ -399,27 +398,185 @@ class TestFieldProjectImportService:
         assert filtered == [import_feature]
 
     def test_filter_duplicates_excludes_duplicate_no_geometry_within_import_batch(self):
-        """Two imported alternative rows with the same zone/number must not both be kept."""
-        feature_one = create_iterable_mock_feature()
-        feature_two = create_iterable_mock_feature()
-        for feature in (feature_one, feature_two):
-            feature.geometry.return_value.isEmpty.return_value = True
+        """Two imported alternative rows with identical attributes must not both be kept."""
+        feature_one = create_iterable_mock_feature(has_geometry=False)
+        feature_two = create_iterable_mock_feature(has_geometry=False)
 
         existing_layer = Mock()
         existing_layer.getFeatures.return_value = []
         existing_layer.fields.return_value = feature_one.fields.return_value
 
-        identity_key = ("zone-a", 3)
+        attr_sig = "number:3|zone:zone-a"
         with patch.object(
             self.field_import_service,
-            "_get_object_identity_key",
-            return_value=identity_key,
+            "_create_attribute_signature",
+            return_value=attr_sig,
         ):
             filtered = self.field_import_service._filter_duplicates(
                 [feature_one, feature_two], existing_layer, "Objects"
             )
 
         assert filtered == [feature_one]
+
+    def test_filter_duplicates_excludes_no_geometry_when_all_attributes_match_geometric_in_batch(
+        self,
+    ):
+        """No-geometry row is excluded when a geometric row with the same attributes is kept."""
+        geometric_feature = create_iterable_mock_feature(has_geometry=True)
+        no_geom_feature = create_iterable_mock_feature(has_geometry=False)
+
+        existing_layer = Mock()
+        existing_layer.getFeatures.return_value = []
+        existing_layer.fields.return_value = geometric_feature.fields.return_value
+
+        attr_sig = "number:7|type:obj|zone:42"
+        geom_sig = f"{attr_sig}||POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))"
+        with patch.object(
+            self.field_import_service,
+            "_create_attribute_signature",
+            return_value=attr_sig,
+        ), patch.object(
+            self.field_import_service,
+            "_create_feature_signature",
+            return_value=geom_sig,
+        ):
+            filtered = self.field_import_service._filter_duplicates(
+                [geometric_feature, no_geom_feature], existing_layer, "Objects"
+            )
+
+        assert filtered == [geometric_feature]
+
+    def test_filter_duplicates_keeps_no_geometry_when_only_zone_number_match_geometric_in_batch(
+        self,
+    ):
+        """Rows with same zone/number but different attributes are distinct objects."""
+        geometric_feature = create_iterable_mock_feature(has_geometry=True)
+        no_geom_feature = create_iterable_mock_feature(has_geometry=False)
+
+        existing_layer = Mock()
+        existing_layer.getFeatures.return_value = []
+        existing_layer.fields.return_value = geometric_feature.fields.return_value
+
+        geom_attr_sig = "number:7|type:polygon|zone:42"
+        no_geom_attr_sig = "number:7|type:table|zone:42"
+        geom_sig = f"{geom_attr_sig}||POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))"
+        with patch.object(
+            self.field_import_service,
+            "_create_attribute_signature",
+            side_effect=[geom_attr_sig, no_geom_attr_sig],
+        ), patch.object(
+            self.field_import_service,
+            "_create_feature_signature",
+            return_value=geom_sig,
+        ):
+            filtered = self.field_import_service._filter_duplicates(
+                [geometric_feature, no_geom_feature], existing_layer, "Objects"
+            )
+
+        assert filtered == [geometric_feature, no_geom_feature]
+
+    def test_build_zone_number_duplicate_warnings_between_layers(self):
+        """Import with same zone/number as definitive object produces a warning."""
+        existing_feature = create_iterable_mock_feature(has_geometry=True)
+        import_feature = create_iterable_mock_feature(has_geometry=True)
+
+        existing_layer = Mock()
+        existing_layer.name.return_value = "Objects"
+        existing_layer.getFeatures.return_value = [existing_feature]
+
+        self.settings_manager.get_value.side_effect = lambda key, default="": {
+            "objects_number_field": "number",
+            "recording_areas_layer": "ra-layer",
+            "objects_recording_area_field": "zone",
+        }.get(key, default)
+
+        identity = (42, 7)
+        with patch.object(
+            self.field_import_service,
+            "_get_object_identity_key",
+            side_effect=[identity, identity],
+        ), patch.object(
+            self.field_import_service,
+            "_get_objects_recording_area_field",
+            return_value="zone",
+        ), patch.object(
+            self.field_import_service,
+            "_get_recording_area_display_name",
+            return_value="Zone A",
+        ):
+            warnings = self.field_import_service._build_zone_number_duplicate_warnings(
+                [import_feature],
+                existing_layer,
+            )
+
+        assert len(warnings) == 1
+        assert warnings[0].object_number == 7
+        assert warnings[0].second_layer_name == "New Objects"
+
+    def test_build_zone_number_duplicate_warnings_within_import_batch(self):
+        """Two imported objects with the same zone/number produce a warning."""
+        feature_one = create_iterable_mock_feature(has_geometry=True)
+        feature_two = create_iterable_mock_feature(has_geometry=True)
+
+        existing_layer = Mock()
+        existing_layer.name.return_value = "Objects"
+        existing_layer.getFeatures.return_value = []
+
+        self.settings_manager.get_value.side_effect = lambda key, default="": {
+            "objects_number_field": "number",
+            "recording_areas_layer": "",
+            "objects_recording_area_field": "zone",
+        }.get(key, default)
+
+        identity = ("zone-a", 3)
+        with patch.object(
+            self.field_import_service,
+            "_get_object_identity_key",
+            return_value=identity,
+        ), patch.object(
+            self.field_import_service,
+            "_get_objects_recording_area_field",
+            return_value="zone",
+        ), patch.object(
+            self.field_import_service,
+            "_get_recording_area_display_name",
+            return_value="Zone A",
+        ):
+            warnings = self.field_import_service._build_zone_number_duplicate_warnings(
+                [feature_one, feature_two],
+                existing_layer,
+            )
+
+        assert len(warnings) == 1
+        assert warnings[0].layer_name == "New Objects"
+
+    def test_filter_duplicates_excludes_no_geometry_when_geometric_kept_even_if_no_geom_first(
+        self,
+    ):
+        """Cross-layer dedup is independent of feature order in the import batch."""
+        geometric_feature = create_iterable_mock_feature(has_geometry=True)
+        no_geom_feature = create_iterable_mock_feature(has_geometry=False)
+
+        existing_layer = Mock()
+        existing_layer.getFeatures.return_value = []
+        existing_layer.fields.return_value = geometric_feature.fields.return_value
+
+        attr_sig = "number:7|type:obj|zone:42"
+        geom_sig = f"{attr_sig}||POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))"
+        with patch.object(
+            self.field_import_service,
+            "_create_attribute_signature",
+            return_value=attr_sig,
+        ), patch.object(
+            self.field_import_service,
+            "_create_feature_signature",
+            return_value=geom_sig,
+        ):
+            filtered = self.field_import_service._filter_duplicates(
+                [no_geom_feature, geometric_feature], existing_layer, "Objects"
+            )
+
+        assert filtered == [geometric_feature]
 
     @patch("services.field_project_import_service.QgsFeature")
     @patch("services.field_project_import_service.QgsGeometry")
@@ -1502,8 +1659,9 @@ class TestFieldProjectImportService:
 
         self.field_import_service._apply_definitive_layer_style(temp_layer, setting_key)
 
-        self.layer_service.configure_temporary_import_layer.assert_called_once_with(
-            definitive_layer,
-            temp_layer,
-        )
+        self.layer_service.configure_temporary_import_layer.assert_called_once()
+        call_args = self.layer_service.configure_temporary_import_layer.call_args
+        self.assertEqual(call_args.args[0], definitive_layer)
+        self.assertEqual(call_args.args[1], temp_layer)
+        self.assertIn("peer_layer_replacements", call_args.kwargs)
         self.settings_manager.get_value.assert_called_with(setting_key, "")

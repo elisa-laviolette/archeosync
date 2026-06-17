@@ -1279,7 +1279,11 @@ class ImportSummaryDockWidget(QDockWidget):
                 self._run_prepare_layers_for_warning_detection,
             ),
         ]
-        if self._summary_data.objects_count > 0:
+        if (
+            self._summary_data.objects_count > 0
+            or self._summary_data.objects_duplicates > 0
+            or getattr(self._summary_data, "duplicate_objects_warnings", [])
+        ):
             steps.append(
                 (
                     "duplicate_objects_warnings",
@@ -1287,6 +1291,7 @@ class ImportSummaryDockWidget(QDockWidget):
                     self._detect_duplicate_objects_warnings,
                 )
             )
+        if self._summary_data.objects_count > 0:
             steps.append(
                 (
                     "skipped_numbers_warnings",
@@ -1410,11 +1415,40 @@ class ImportSummaryDockWidget(QDockWidget):
 
         self._dispatch_warning_detection_step(status_label, runner, on_success, on_error)
 
+    def _merge_duplicate_object_warnings(
+        self,
+        existing_warnings: List[Any],
+        detected_warnings: List[Any],
+    ) -> List[Any]:
+        """Merge import-time and detector warnings, keeping one entry per zone/number."""
+        merged = list(existing_warnings or [])
+        seen_identities = set()
+        for warning in merged:
+            if isinstance(warning, WarningData):
+                seen_identities.add((warning.recording_area_name, warning.object_number))
+
+        for warning in detected_warnings or []:
+            if isinstance(warning, WarningData):
+                identity = (warning.recording_area_name, warning.object_number)
+                if identity in seen_identities:
+                    continue
+                seen_identities.add(identity)
+            merged.append(warning)
+        return merged
+
     def _finalize_warning_refresh(self) -> None:
         """Apply collected warnings and rebuild the summary panel on the next event-loop tick."""
         try:
             for result_key, warnings in self._warning_refresh_results.items():
-                setattr(self._summary_data, result_key, warnings)
+                if result_key == "duplicate_objects_warnings":
+                    existing = list(getattr(self._summary_data, result_key, []) or [])
+                    setattr(
+                        self._summary_data,
+                        result_key,
+                        self._merge_duplicate_object_warnings(existing, warnings),
+                    )
+                else:
+                    setattr(self._summary_data, result_key, warnings)
             for result_key in (
                 "duplicate_objects_warnings",
                 "skipped_numbers_warnings",
@@ -1425,6 +1459,10 @@ class ImportSummaryDockWidget(QDockWidget):
                 "height_difference_warnings",
             ):
                 if result_key not in self._warning_refresh_results:
+                    if result_key == "duplicate_objects_warnings" and getattr(
+                        self._summary_data, result_key, []
+                    ):
+                        continue
                     setattr(self._summary_data, result_key, [])
 
             QTimer.singleShot(1, self._complete_warning_refresh_ui)
@@ -1722,6 +1760,16 @@ class ImportSummaryDockWidget(QDockWidget):
             from qgis.core import QgsProject
             
             project = QgsProject.instance()
+
+            if self._layer_service and hasattr(
+                self._layer_service, "remove_import_clone_relations"
+            ):
+                removed = self._layer_service.remove_import_clone_relations(project)
+                if removed:
+                    print(
+                        f"Removed {removed} temporary import relation clone(s) "
+                        "before deleting temp layers"
+                    )
             
             # Define temporary layer names to delete
             temporary_layer_names = ["New Objects", "New Features", "New Small Finds", "Imported_CSV_Points"]

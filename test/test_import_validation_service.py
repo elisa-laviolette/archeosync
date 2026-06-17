@@ -15,6 +15,7 @@ try:
         LayerFieldMapping,
         _feature_id,
         build_layer_copy_jobs,
+        build_peer_temp_layer_replacements,
         load_job_source_features_chunk,
         DEFAULT_COPY_BATCH_SIZE,
     )
@@ -366,6 +367,38 @@ class TestBuildLayerCopyJobs(unittest.TestCase):
         self.assertIs(jobs[0].target_layer, def_objects)
         self.assertEqual(jobs[0].feature_count, 1)
         self.assertIsNone(jobs[0].source_features)
+
+
+class TestBuildPeerTempLayerReplacements(unittest.TestCase):
+    """Tests for mapping definitive layers to active temporary import layers."""
+
+    def test_build_peer_temp_layer_replacements_maps_configured_pairs(self):
+        temp_objects = Mock()
+        temp_objects.name.return_value = "New Objects"
+        temp_objects.id.return_value = "temp_objects_id"
+
+        def_objects = Mock()
+        def_objects.id.return_value = "def_objects_id"
+
+        project_layers = {
+            "temp": temp_objects,
+            "def": def_objects,
+        }
+
+        def get_setting(key, default=""):
+            if key == "objects_layer":
+                return "def_objects_id"
+            return default
+
+        replacements = build_peer_temp_layer_replacements(
+            project_layers,
+            get_setting,
+        )
+
+        self.assertEqual(
+            replacements,
+            {"def_objects_id": "temp_objects_id"},
+        )
 
 
 if __name__ == "__main__":

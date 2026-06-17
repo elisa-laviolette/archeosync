@@ -472,18 +472,30 @@ class ILayerService(ABC):
         pass
 
     @abstractmethod
-    def configure_temporary_import_layer(self, source_layer: Any, target_layer: Any) -> None:
+    def configure_temporary_import_layer(
+        self,
+        source_layer: Any,
+        target_layer: Any,
+        peer_layer_replacements: Optional[Dict[str, str]] = None,
+    ) -> None:
         """
         Apply definitive-layer style, forms, and project relations to a temporary import layer.
 
         Args:
             source_layer: Configured definitive project layer
             target_layer: Temporary import layer to configure
+            peer_layer_replacements: Optional map of definitive layer id to other active
+                temporary import layer ids
         """
         pass
 
     @abstractmethod
-    def configure_temporary_topo_csv_layer(self, source_layer: Any, target_layer: Any) -> None:
+    def configure_temporary_topo_csv_layer(
+        self,
+        source_layer: Any,
+        target_layer: Any,
+        peer_layer_replacements: Optional[Dict[str, str]] = None,
+    ) -> None:
         """
         Apply symbology and relations to a CSV topo import layer without full QML/form copy.
 
@@ -493,6 +505,8 @@ class ILayerService(ABC):
         Args:
             source_layer: Configured definitive total station points layer
             target_layer: Temporary ``Imported_CSV_Points`` layer to configure
+            peer_layer_replacements: Optional map of definitive layer id to other active
+                temporary import layer ids
         """
         pass
 
@@ -501,12 +515,23 @@ class ILayerService(ABC):
         self,
         source_layer: Any,
         target_layer: Any,
+        peer_layer_replacements: Optional[Dict[str, str]] = None,
     ) -> Dict[str, str]:
         """
         Copy project relations from a definitive layer to a temporary import layer.
 
         Returns:
             Mapping of source relation id to newly created relation id
+        """
+        pass
+
+    @abstractmethod
+    def remove_import_clone_relations(self, project: Any = None) -> int:
+        """
+        Remove project relations created for temporary import layers.
+
+        Returns:
+            Number of import-clone relations removed
         """
         pass
 

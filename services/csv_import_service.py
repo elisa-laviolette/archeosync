@@ -287,7 +287,18 @@ class CSVImportService(ICSVImportService):
         source_layer = self._get_configured_total_station_points_layer()
         if not source_layer or not temp_layer:
             return
-        self._layer_service.configure_temporary_topo_csv_layer(source_layer, temp_layer)
+        from qgis.core import QgsProject
+        from .import_validation_service import build_peer_temp_layer_replacements
+
+        peer_replacements = build_peer_temp_layer_replacements(
+            QgsProject.instance().mapLayers(),
+            self._settings_manager.get_value,
+        )
+        self._layer_service.configure_temporary_topo_csv_layer(
+            source_layer,
+            temp_layer,
+            peer_layer_replacements=peer_replacements,
+        )
 
     def _get_configured_total_station_points_layer(self):
         """

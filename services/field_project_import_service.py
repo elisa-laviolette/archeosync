@@ -171,6 +171,8 @@ class FieldProjectImportService(QObject):
                     failed_projects += 1
                     continue
             
+            zone_number_duplicate_warnings: List[Any] = []
+
             # Filter out duplicates before creating merged layers
             filtered_objects_features = self._filter_duplicates(all_objects_features, existing_objects_layer, "Objects")
             filtered_features_features = self._filter_duplicates(all_features_features, existing_features_layer, "Features")
@@ -199,6 +201,14 @@ class FieldProjectImportService(QObject):
                     QgsProject.instance().addMapLayer(small_finds_layer)
                     self._apply_definitive_layer_style(small_finds_layer, "small_finds_layer")
                     layers_created += 1
+
+            # When every imported object was filtered out, no "New Objects" layer exists
+            # for the async duplicate detector; compute warnings synchronously in that case only.
+            if all_objects_features and not filtered_objects_features:
+                zone_number_duplicate_warnings = self._build_zone_number_duplicate_warnings(
+                    all_objects_features,
+                    existing_objects_layer,
+                )
             
             # Store imported projects for later archiving instead of archiving immediately
             self._last_imported_projects = project_paths
@@ -215,6 +225,7 @@ class FieldProjectImportService(QObject):
                 'global_projects_count': global_projects_count,
                 'is_global_project': global_projects_count > 0,
                 'source_layer_files_count': source_layer_files_count,
+                'duplicate_objects_warnings': zone_number_duplicate_warnings,
             }
             
             total_detected_features = (
@@ -1058,7 +1069,32 @@ class FieldProjectImportService(QObject):
         source_layer = self._get_existing_layer(layer_setting_key)
         if not source_layer or not temp_layer:
             return
-        self._layer_service.configure_temporary_import_layer(source_layer, temp_layer)
+        self._layer_service.configure_temporary_import_layer(
+            source_layer,
+            temp_layer,
+            peer_layer_replacements=self._build_peer_temp_layer_replacements(),
+        )
+
+    def _build_peer_temp_layer_replacements(self) -> Dict[str, str]:
+        """
+        Map definitive layer ids to active temporary import layer ids in the project.
+
+        Used when cloning project relations so relations between two definitive import
+        layers (e.g. Objects and Features) are reproduced on their temporary counterparts.
+        """
+        try:
+            from .import_validation_service import build_peer_temp_layer_replacements
+
+            project = QgsProject.instance()
+            if project is None:
+                return {}
+            return build_peer_temp_layer_replacements(
+                project.mapLayers(),
+                self._settings_manager.get_value,
+            )
+        except Exception as exc:
+            print(f"Error building peer temp layer replacements: {exc}")
+            return {}
 
     def _get_existing_layer(self, layer_setting_key: str) -> Optional[Any]:
         """
@@ -1094,48 +1130,24 @@ class FieldProjectImportService(QObject):
         # Get all existing features for comparison
         existing_features = list(existing_layer.getFeatures())
         print(f"[DEBUG] Filtering duplicates for {layer_type}: {len(features)} features to check against {len(existing_features)} existing features")
+
+        if layer_type == "Objects":
+            return self._filter_object_duplicates(
+                features,
+                existing_layer,
+                existing_features,
+            )
         
         # Create a set of existing feature signatures for fast lookup
         existing_signatures = set()
         for existing_feature in existing_features:
             signature = self._create_feature_signature(existing_feature, existing_layer)
             existing_signatures.add(signature)
-
-        existing_no_geometry_object_identity_keys: set = set()
-        imported_no_geometry_object_identity_keys: set = set()
-        if layer_type == "Objects":
-            existing_no_geometry_object_identity_keys = (
-                self._build_existing_no_geometry_object_identity_keys(
-                    existing_layer,
-                    existing_features,
-                )
-            )
         
         # Filter out duplicates
         filtered_features = []
         duplicates_count = 0
         for feature in features:
-            if layer_type == "Objects" and self._feature_has_empty_geometry(feature):
-                identity_key = self._get_object_identity_key(feature, existing_layer)
-                if identity_key is not None:
-                    if identity_key in existing_no_geometry_object_identity_keys:
-                        print(
-                            f"[DEBUG] Excluding no-geometry object duplicate "
-                            f"(identity={identity_key}) already in definitive data"
-                        )
-                        duplicates_count += 1
-                        continue
-                    if identity_key in imported_no_geometry_object_identity_keys:
-                        print(
-                            f"[DEBUG] Excluding no-geometry object duplicate "
-                            f"(identity={identity_key}) already in this import batch"
-                        )
-                        duplicates_count += 1
-                        continue
-                    imported_no_geometry_object_identity_keys.add(identity_key)
-                    filtered_features.append(feature)
-                    continue
-
             signature = self._create_feature_signature(feature, existing_layer)
             # Ambiguous rows without zone/number (or other layers) cannot be matched safely.
             if signature == "||NO_GEOM":
@@ -1147,6 +1159,94 @@ class FieldProjectImportService(QObject):
                 duplicates_count += 1
         print(f"[DEBUG] {duplicates_count} duplicates found and ignored for {layer_type}")
         return filtered_features
+
+    def _filter_object_duplicates(
+        self,
+        features: List[Any],
+        existing_layer: Any,
+        existing_features: List[Any],
+    ) -> List[Any]:
+        """
+        Filter imported object features, including cross-layer dedup between geometric
+        objects and alternative no-geometry rows using full attribute equality.
+        """
+        existing_signatures: set = set()
+        existing_no_geom_attr_sigs: set = set()
+        existing_geometric_attr_sigs: set = set()
+        for existing_feature in existing_features:
+            existing_signatures.add(
+                self._create_feature_signature(existing_feature, existing_layer)
+            )
+            attr_sig = self._create_attribute_signature(existing_feature, existing_layer)
+            if not attr_sig:
+                continue
+            if self._feature_has_empty_geometry(existing_feature):
+                existing_no_geom_attr_sigs.add(attr_sig)
+            else:
+                existing_geometric_attr_sigs.add(attr_sig)
+
+        geometric_features = [
+            feature for feature in features if not self._feature_has_empty_geometry(feature)
+        ]
+        no_geom_features = [
+            feature for feature in features if self._feature_has_empty_geometry(feature)
+        ]
+
+        filtered_geometric: List[Any] = []
+        kept_geometric_attr_sigs: set = set()
+        duplicates_count = 0
+
+        for feature in geometric_features:
+            signature = self._create_feature_signature(feature, existing_layer)
+            if signature not in existing_signatures:
+                filtered_geometric.append(feature)
+                attr_sig = self._create_attribute_signature(feature, existing_layer)
+                if attr_sig:
+                    kept_geometric_attr_sigs.add(attr_sig)
+            else:
+                duplicates_count += 1
+
+        filtered_no_geom: List[Any] = []
+        imported_no_geom_attr_sigs: set = set()
+
+        for feature in no_geom_features:
+            attr_sig = self._create_attribute_signature(feature, existing_layer)
+            if not attr_sig:
+                filtered_no_geom.append(feature)
+                continue
+            if attr_sig in existing_no_geom_attr_sigs:
+                print(
+                    f"[DEBUG] Excluding no-geometry object duplicate "
+                    f"(attributes={attr_sig}) already in definitive data"
+                )
+                duplicates_count += 1
+                continue
+            if attr_sig in existing_geometric_attr_sigs:
+                print(
+                    f"[DEBUG] Excluding no-geometry object duplicate "
+                    f"(attributes={attr_sig}) already represented by definitive geometry"
+                )
+                duplicates_count += 1
+                continue
+            if attr_sig in imported_no_geom_attr_sigs:
+                print(
+                    f"[DEBUG] Excluding no-geometry object duplicate "
+                    f"(attributes={attr_sig}) already in this import batch"
+                )
+                duplicates_count += 1
+                continue
+            if attr_sig in kept_geometric_attr_sigs:
+                print(
+                    f"[DEBUG] Excluding no-geometry object duplicate "
+                    f"(attributes={attr_sig}) already represented by imported geometry"
+                )
+                duplicates_count += 1
+                continue
+            imported_no_geom_attr_sigs.add(attr_sig)
+            filtered_no_geom.append(feature)
+
+        print(f"[DEBUG] {duplicates_count} duplicates found and ignored for Objects")
+        return filtered_geometric + filtered_no_geom
 
     def _feature_has_empty_geometry(self, feature: Any) -> bool:
         """Return True when a feature has no geometry or an empty geometry."""
@@ -1223,11 +1323,15 @@ class FieldProjectImportService(QObject):
                 if relation_field:
                     return relation_field
 
-        configured_field = self._settings_manager.get_value(
+        configured_field = self._settings_manager.get_value("objects_recording_area_field", "")
+        if configured_field:
+            return configured_field
+
+        alternative_field = self._settings_manager.get_value(
             "alternative_objects_recording_area_field",
             "",
         )
-        return configured_field or None
+        return alternative_field or None
 
     def _get_recording_area_field_from_relation(
         self,
@@ -1288,15 +1392,16 @@ class FieldProjectImportService(QObject):
         candidate_recording_fields: List[str] = []
         if recording_area_field:
             candidate_recording_fields.append(recording_area_field)
-        relation_field = self._get_objects_recording_area_field(reference_layer)
-        if relation_field and relation_field not in candidate_recording_fields:
-            candidate_recording_fields.append(relation_field)
-        alternative_field = self._settings_manager.get_value(
-            "alternative_objects_recording_area_field",
-            "",
-        )
-        if alternative_field and alternative_field not in candidate_recording_fields:
-            candidate_recording_fields.append(alternative_field)
+        else:
+            relation_field = self._get_objects_recording_area_field(reference_layer)
+            if relation_field:
+                candidate_recording_fields.append(relation_field)
+            alternative_field = self._settings_manager.get_value(
+                "alternative_objects_recording_area_field",
+                "",
+            )
+            if alternative_field and alternative_field not in candidate_recording_fields:
+                candidate_recording_fields.append(alternative_field)
 
         recording_area_id = None
         for field_name in candidate_recording_fields:
@@ -1318,6 +1423,149 @@ class FieldProjectImportService(QObject):
 
         return (recording_area_id, object_number)
 
+    def _build_zone_number_duplicate_warnings(
+        self,
+        imported_features: List[Any],
+        reference_layer: Optional[Any],
+    ) -> List[Any]:
+        """
+        Detect zone/number conflicts in the import batch and against definitive objects.
+
+        Used when every imported object was filtered out so no temporary layer exists
+        for the async duplicate detector. Runs in a single pass over each layer.
+        """
+        if not imported_features or reference_layer is None:
+            return []
+
+        try:
+            from ..core.data_structures import WarningData
+        except ImportError:
+            from core.data_structures import WarningData
+
+        recording_area_field = self._get_objects_recording_area_field(reference_layer) or ""
+        number_field = self._settings_manager.get_value("objects_number_field", "") or ""
+        recording_area_field_arg = recording_area_field or None
+
+        existing_identity_counts: Dict[Tuple[Any, Any], int] = {}
+        for feature in reference_layer.getFeatures():
+            identity_key = self._get_object_identity_key(
+                feature,
+                reference_layer,
+                recording_area_field=recording_area_field_arg,
+            )
+            if identity_key is None:
+                continue
+            existing_identity_counts[identity_key] = existing_identity_counts.get(identity_key, 0) + 1
+
+        batch_counts: Dict[Tuple[Any, Any], int] = {}
+        for feature in imported_features:
+            identity_key = self._get_object_identity_key(
+                feature,
+                reference_layer,
+                recording_area_field=recording_area_field_arg,
+            )
+            if identity_key is None:
+                continue
+            batch_counts[identity_key] = batch_counts.get(identity_key, 0) + 1
+
+        recording_areas_layer_id = self._settings_manager.get_value("recording_areas_layer", "")
+        recording_areas_layer = None
+        if recording_areas_layer_id:
+            recording_areas_layer = self._layer_service.get_layer_by_id(recording_areas_layer_id)
+        recording_area_names = self._build_recording_area_name_lookup(recording_areas_layer)
+
+        warnings: List[Any] = []
+        warned_identities = set()
+
+        for identity_key, import_count in batch_counts.items():
+            recording_area_id, object_number = identity_key
+            recording_area_name = recording_area_names.get(recording_area_id, str(recording_area_id))
+            definitive_count = existing_identity_counts.get(identity_key, 0)
+
+            if definitive_count > 0 and identity_key not in warned_identities:
+                warned_identities.add(identity_key)
+                warnings.append(
+                    WarningData(
+                        message=(
+                            f"Recording Area '{recording_area_name}' has {definitive_count} objects "
+                            f"with number {object_number} in {reference_layer.name()} and New Objects"
+                        ),
+                        recording_area_name=recording_area_name,
+                        layer_name=reference_layer.name(),
+                        filter_expression=(
+                            f'"{recording_area_field}" = \'{recording_area_id}\' '
+                            f'AND "{number_field}" = {object_number}'
+                        ),
+                        object_number=object_number,
+                        second_layer_name="New Objects",
+                        second_filter_expression=(
+                            f'"{recording_area_field}" = \'{recording_area_id}\' '
+                            f'AND "{number_field}" = {object_number}'
+                        ),
+                    )
+                )
+                continue
+
+            if import_count > 1 and identity_key not in warned_identities:
+                warned_identities.add(identity_key)
+                warnings.append(
+                    WarningData(
+                        message=(
+                            f"Recording Area '{recording_area_name}' has {import_count} objects "
+                            f"with number {object_number} in New Objects"
+                        ),
+                        recording_area_name=recording_area_name,
+                        layer_name="New Objects",
+                        filter_expression=(
+                            f'"{recording_area_field}" = \'{recording_area_id}\' '
+                            f'AND "{number_field}" = {object_number}'
+                        ),
+                        object_number=object_number,
+                    )
+                )
+
+        return warnings
+
+    def _build_recording_area_name_lookup(
+        self,
+        recording_areas_layer: Optional[Any],
+    ) -> Dict[Any, str]:
+        """Build a feature-id to display-name map for recording areas (single pass)."""
+        if recording_areas_layer is None:
+            return {}
+
+        lookup: Dict[Any, str] = {}
+        name_fields = ["name", "title", "label", "description", "comment"]
+        name_field_indices = [
+            recording_areas_layer.fields().indexOf(field_name) for field_name in name_fields
+        ]
+        try:
+            for feature in recording_areas_layer.getFeatures():
+                feature_id = feature.id()
+                display_name = None
+                for field_idx in name_field_indices:
+                    if field_idx < 0:
+                        continue
+                    name_value = feature[field_idx]
+                    if name_value and str(name_value) != "NULL":
+                        display_name = str(name_value)
+                        break
+                lookup[feature_id] = display_name or str(feature_id)
+        except Exception as exc:
+            print(f"Error building recording area name lookup: {exc}")
+        return lookup
+
+    def _get_recording_area_display_name(
+        self,
+        recording_areas_layer: Optional[Any],
+        recording_area_id: Any,
+    ) -> str:
+        """Resolve a human-readable recording area label for warning messages."""
+        if recording_areas_layer is None:
+            return str(recording_area_id)
+        lookup = self._build_recording_area_name_lookup(recording_areas_layer)
+        return lookup.get(recording_area_id, str(recording_area_id))
+
     def _collect_object_identity_keys(
         self,
         features: List[Any],
@@ -1333,6 +1581,8 @@ class FieldProjectImportService(QObject):
         zone/number already exists (that case is handled by duplicate warnings).
         """
         keys = set()
+        if recording_area_field is None:
+            recording_area_field = self._get_objects_recording_area_field(reference_layer)
         for feature in features:
             if only_empty_geometry and not self._feature_has_empty_geometry(feature):
                 continue
@@ -1345,6 +1595,44 @@ class FieldProjectImportService(QObject):
                 keys.add(identity_key)
         return keys
     
+    def _build_attribute_signatures(
+        self,
+        features: List[Any],
+        layer: Any,
+        only_empty_geometry: bool = False,
+    ) -> set:
+        """
+        Collect attribute signatures for a list of object features.
+
+        When ``only_empty_geometry`` is True, only no-geometry features are included.
+        """
+        signatures: set = set()
+        for feature in features:
+            if only_empty_geometry and not self._feature_has_empty_geometry(feature):
+                continue
+            attr_sig = self._create_attribute_signature(feature, layer)
+            if attr_sig:
+                signatures.add(attr_sig)
+        return signatures
+
+    def _create_attribute_signature(self, feature: Any, layer: Any) -> str:
+        """
+        Create a signature from feature attributes, excluding geometry and fid fields.
+        """
+        attributes = []
+        for field in feature.fields():
+            field_name = field.name()
+            if field_name.lower() in ("fid", "ogc_fid"):
+                continue
+            if self._is_virtual_field(layer, field_name):
+                continue
+            value = feature[field_name]
+            if value is None:
+                continue
+            attributes.append(f"{field_name}:{str(value)}")
+        attributes.sort()
+        return "|".join(attributes)
+
     def _create_feature_signature(self, feature: Any, layer: Any) -> str:
         """
         Create a unique signature for a feature based on its attributes and geometry.
@@ -1356,26 +1644,7 @@ class FieldProjectImportService(QObject):
         Returns:
             String signature representing the feature
         """
-        # Create signature from attributes (excluding fid field and virtual fields)
-        attributes = []
-        for field in feature.fields():
-            field_name = field.name()
-            # Skip the fid field as it's layer-specific and not part of the data
-            if field_name.lower() == 'fid':
-                continue
-            # Skip virtual/computed fields that might be NULL in exports
-            if self._is_virtual_field(layer, field_name):
-                continue
-            value = feature[field_name]
-            # Convert value to string, handling None values
-            if value is None:
-                continue
-            else:
-                attr_str = f"{field_name}:{str(value)}"
-                attributes.append(attr_str)
-        # Sort attributes for consistent signature
-        attributes.sort()
-        attr_signature = "|".join(attributes)
+        attr_signature = self._create_attribute_signature(feature, layer)
         # Create signature from geometry (normalized to handle Polygon vs MultiPolygon)
         geometry = feature.geometry()
         if geometry and not geometry.isEmpty():

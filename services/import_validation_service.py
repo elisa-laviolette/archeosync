@@ -440,3 +440,38 @@ def build_layer_copy_jobs(
         )
 
     return jobs
+
+
+def build_peer_temp_layer_replacements(
+    project_layers: Dict[str, Any],
+    get_setting: Callable[[str, Any], Any],
+    layer_mappings: Optional[Dict[str, str]] = None,
+) -> Dict[str, str]:
+    """
+    Map definitive layer ids to active temporary import layer ids in the project.
+
+    Used when cloning QGIS relations so inter-definitive relations (e.g. Objects to
+    Features) are reproduced on their temporary counterparts during import.
+    """
+    mappings = layer_mappings or IMPORT_LAYER_MAPPINGS
+    replacements: Dict[str, str] = {}
+
+    layers_by_name: Dict[str, Any] = {}
+    layers_by_id: Dict[str, Any] = {}
+    for layer in project_layers.values():
+        layers_by_name[layer.name()] = layer
+        layers_by_id[layer.id()] = layer
+
+    for temp_layer_name, definitive_layer_key in mappings.items():
+        temp_layer = layers_by_name.get(temp_layer_name)
+        if temp_layer is None:
+            continue
+        definitive_layer_id = get_setting(definitive_layer_key, "")
+        if not definitive_layer_id:
+            continue
+        definitive_layer = layers_by_id.get(definitive_layer_id)
+        if definitive_layer is None:
+            continue
+        replacements[definitive_layer.id()] = temp_layer.id()
+
+    return replacements

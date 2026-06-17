@@ -533,15 +533,18 @@ class TestStyleCopying(unittest.TestCase):
         source_relation.id.return_value = "objects_materials"
         source_relation.name.return_value = "Objects/Materials"
         source_relation.fieldPairs.return_value = {"material_id": "id"}
+        source_relation.isValid.return_value = True
 
         new_relation = Mock()
         mock_uuid4.return_value = Mock(hex="abc123def456")
         new_relation.referencingLayerId.return_value = target_layer.id()
         new_relation.referencedLayerId.return_value = "materials"
+        new_relation.id.return_value = "archeosync_import_abc123def456"
         mock_qgs_relation.return_value = new_relation
 
         relation_manager = Mock()
         relation_manager.relations.return_value = {"objects_materials": source_relation}
+        relation_manager.relation.return_value = source_relation
         relation_manager.addRelation.return_value = True
 
         project_instance = Mock()
@@ -563,6 +566,148 @@ class TestStyleCopying(unittest.TestCase):
         )
         new_relation.addFieldPair.assert_called_once_with("material_id", "id")
         relation_manager.addRelation.assert_called_once_with(new_relation)
+
+    def test_copy_layer_relations_preserves_definitive_relations_in_project(self):
+        """Cloning relations for a temp layer must not alter definitive project relations."""
+        from qgis.core import QgsRelation
+
+        objects_layer = QgsVectorLayer(
+            "Point?crs=EPSG:4326&field=id:integer&field=feature_id:integer",
+            "Objects",
+            "memory",
+        )
+        features_layer = QgsVectorLayer(
+            "Point?crs=EPSG:4326&field=id:integer",
+            "Features",
+            "memory",
+        )
+        new_objects_layer = QgsVectorLayer(
+            "Point?crs=EPSG:4326&field=id:integer&field=feature_id:integer",
+            "New Objects",
+            "memory",
+        )
+        for layer in (objects_layer, features_layer, new_objects_layer):
+            self.assertTrue(layer.isValid())
+
+        project = QgsProject.instance()
+        project.addMapLayer(features_layer, False)
+        project.addMapLayer(objects_layer, False)
+        project.addMapLayer(new_objects_layer, False)
+
+        self._create_test_relation(
+            "objects_features",
+            objects_layer,
+            "feature_id",
+            features_layer,
+            "id",
+        )
+
+        peer_replacements = {
+            objects_layer.id(): new_objects_layer.id(),
+        }
+        mapping = self.layer_service.copy_layer_relations_for_temporary_layer(
+            objects_layer,
+            new_objects_layer,
+            peer_layer_replacements=peer_replacements,
+        )
+
+        relation_manager = project.relationManager()
+        definitive_relation = relation_manager.relation("objects_features")
+        self.assertTrue(definitive_relation.isValid())
+        self.assertEqual(
+            definitive_relation.referencingLayerId(),
+            objects_layer.id(),
+        )
+        self.assertEqual(
+            definitive_relation.referencedLayerId(),
+            features_layer.id(),
+        )
+        self.assertEqual(mapping, {"objects_features": next(iter(mapping.values()))})
+        cloned_relation = relation_manager.relation(next(iter(mapping.values())))
+        self.assertTrue(cloned_relation.isValid())
+        self.assertEqual(
+            cloned_relation.referencingLayerId(),
+            new_objects_layer.id(),
+        )
+        self.assertEqual(
+            cloned_relation.referencedLayerId(),
+            features_layer.id(),
+        )
+
+        for relation_id in list(mapping.values()) + ["objects_features"]:
+            relation_manager.removeRelation(relation_id)
+        project.removeMapLayers(
+            [
+                objects_layer.id(),
+                features_layer.id(),
+                new_objects_layer.id(),
+            ]
+        )
+
+    def test_copy_layer_relations_skips_existing_import_clones(self):
+        """Only definitive relations are cloned; existing archeosync import clones are ignored."""
+        from qgis.core import QgsRelation
+
+        objects_layer = QgsVectorLayer(
+            "Point?crs=EPSG:4326&field=id:integer&field=feature_id:integer",
+            "Objects",
+            "memory",
+        )
+        features_layer = QgsVectorLayer(
+            "Point?crs=EPSG:4326&field=id:integer",
+            "Features",
+            "memory",
+        )
+        new_objects_layer = QgsVectorLayer(
+            "Point?crs=EPSG:4326&field=id:integer&field=feature_id:integer",
+            "New Objects",
+            "memory",
+        )
+        for layer in (objects_layer, features_layer, new_objects_layer):
+            self.assertTrue(layer.isValid())
+
+        project = QgsProject.instance()
+        project.addMapLayer(features_layer, False)
+        project.addMapLayer(objects_layer, False)
+        project.addMapLayer(new_objects_layer, False)
+        self._create_test_relation(
+            "objects_features",
+            objects_layer,
+            "feature_id",
+            features_layer,
+            "id",
+        )
+        self._create_test_relation(
+            "archeosync_import_existing",
+            new_objects_layer,
+            "feature_id",
+            features_layer,
+            "id",
+        )
+
+        mapping = self.layer_service.copy_layer_relations_for_temporary_layer(
+            objects_layer,
+            new_objects_layer,
+        )
+
+        self.assertEqual(mapping, {"objects_features": next(iter(mapping.values()))})
+        self.assertNotEqual(
+            next(iter(mapping.values())),
+            "archeosync_import_existing",
+        )
+
+        for relation_id in list(mapping.values()) + [
+            "objects_features",
+            "archeosync_import_existing",
+        ]:
+            project.relationManager().removeRelation(relation_id)
+        project.removeMapLayers(
+            [
+                objects_layer.id(),
+                features_layer.id(),
+                new_objects_layer.id(),
+            ]
+        )
 
     def test_copy_field_configurations(self):
         """Test the _copy_field_configurations method specifically."""

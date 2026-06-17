@@ -49,8 +49,12 @@ from qgis.PyQt.QtCore import QVariant
 
 try:
     from ..core.interfaces import ILayerService
+    from .import_validation_service import IMPORT_LAYER_MAPPINGS
 except ImportError:
     from core.interfaces import ILayerService
+    from services.import_validation_service import IMPORT_LAYER_MAPPINGS
+
+IMPORT_RELATION_ID_PREFIX = "archeosync_import_"
 
 
 class QGISLayerService(ILayerService):
@@ -867,6 +871,7 @@ class QGISLayerService(ILayerService):
         self,
         source_layer: QgsVectorLayer,
         target_layer: QgsVectorLayer,
+        peer_layer_replacements: Optional[Dict[str, str]] = None,
     ) -> None:
         """
         Apply definitive-layer style, forms, and project relations to a temporary import layer.
@@ -881,6 +886,9 @@ class QGISLayerService(ILayerService):
         Args:
             source_layer: Configured definitive project layer
             target_layer: Temporary import layer to configure
+            peer_layer_replacements: Optional map of definitive layer id to other active
+                temporary import layer ids (e.g. Objects -> New Objects while Features
+                already has New Features)
         """
         if source_layer is None or target_layer is None:
             return
@@ -890,6 +898,7 @@ class QGISLayerService(ILayerService):
         relation_id_mapping = self.copy_layer_relations_for_temporary_layer(
             source_layer,
             target_layer,
+            peer_layer_replacements=peer_layer_replacements,
         )
         self.copy_layer_style_and_forms(source_layer, target_layer)
         # QML copy may add virtual fields and reset editor widgets before remap runs.
@@ -908,6 +917,7 @@ class QGISLayerService(ILayerService):
         self,
         source_layer: QgsVectorLayer,
         target_layer: QgsVectorLayer,
+        peer_layer_replacements: Optional[Dict[str, str]] = None,
     ) -> None:
         """
         Apply symbology and relations to a CSV topo import layer safely.
@@ -920,6 +930,8 @@ class QGISLayerService(ILayerService):
         Args:
             source_layer: Configured definitive total station points layer
             target_layer: Temporary ``Imported_CSV_Points`` layer to configure
+            peer_layer_replacements: Optional map of definitive layer id to active
+                temporary import layer ids for relation cloning
         """
         if source_layer is None or target_layer is None:
             return
@@ -929,6 +941,7 @@ class QGISLayerService(ILayerService):
         relation_id_mapping = self.copy_layer_relations_for_temporary_layer(
             source_layer,
             target_layer,
+            peer_layer_replacements=peer_layer_replacements,
         )
         self._copy_renderer_fallback(source_layer, target_layer)
         self._copy_layer_display_expression(source_layer, target_layer)
@@ -963,12 +976,23 @@ class QGISLayerService(ILayerService):
             target_layer, "setEditFormConfig"
         ):
             try:
-                target_layer.setEditFormConfig(source_layer.editFormConfig())
+                target_layer.setEditFormConfig(
+                    self._clone_edit_form_config(source_layer.editFormConfig())
+                )
             except Exception as e:
                 print(
                     f"Error restoring edit form for {target_layer.name()} "
                     f"after style copy: {e}"
                 )
+
+    def _clone_edit_form_config(
+        self,
+        form_config: Optional[QgsEditFormConfig],
+    ) -> QgsEditFormConfig:
+        """Return a deep copy of an edit form config so remapping never mutates the source."""
+        if form_config is None:
+            return QgsEditFormConfig()
+        return QgsEditFormConfig(form_config)
 
     def _copy_layer_display_expression(
         self,
@@ -997,17 +1021,21 @@ class QGISLayerService(ILayerService):
         self,
         source_layer: QgsVectorLayer,
         target_layer: QgsVectorLayer,
+        peer_layer_replacements: Optional[Dict[str, str]] = None,
     ) -> Dict[str, str]:
         """
         Copy project relations from a definitive layer to a temporary import layer.
 
-        Relations that involve reference layers (materials, types, recording areas, etc.)
-        keep their referenced layer unchanged; only the definitive layer id is replaced by
-        the temporary layer id.
+        Definitive project relations are never modified. Each clone receives a new
+        ``archeosync_import_*`` id and remapped layer ids. When other definitive layers
+        already have active temporary import counterparts, their ids are remapped too
+        via ``peer_layer_replacements``.
 
         Args:
             source_layer: Definitive layer whose relations should be cloned
             target_layer: Temporary import layer that should receive cloned relations
+            peer_layer_replacements: Optional map of definitive layer id to temporary
+                import layer id for other import layers present in the project
 
         Returns:
             Mapping of source relation id to newly created relation id
@@ -1019,8 +1047,6 @@ class QGISLayerService(ILayerService):
             return relation_id_mapping
 
         try:
-            from qgis.core import QgsRelation
-
             project = QgsProject.instance()
             if project is None:
                 return relation_id_mapping
@@ -1034,28 +1060,30 @@ class QGISLayerService(ILayerService):
             if not source_layer_id or not target_layer_id:
                 return relation_id_mapping
 
+            layer_replacements = dict(peer_layer_replacements or {})
+            layer_replacements[source_layer_id] = target_layer_id
+
+            definitive_relation_snapshots = self._snapshot_definitive_project_relations(
+                relation_manager
+            )
+
             self._remove_relations_for_layer(relation_manager, target_layer_id)
 
-            for source_relation in list(relation_manager.relations().values()):
+            for source_relation_id, snapshot in definitive_relation_snapshots.items():
                 try:
-                    src_referencing_id = source_relation.referencingLayerId()
-                    src_referenced_id = source_relation.referencedLayerId()
-                    involves_source = (
-                        src_referencing_id == source_layer_id
-                        or src_referenced_id == source_layer_id
-                    )
-                    if not involves_source:
+                    if (
+                        snapshot["referencing_id"] != source_layer_id
+                        and snapshot["referenced_id"] != source_layer_id
+                    ):
                         continue
 
-                    tgt_referencing_id = (
-                        target_layer_id
-                        if src_referencing_id == source_layer_id
-                        else src_referencing_id
+                    tgt_referencing_id = layer_replacements.get(
+                        snapshot["referencing_id"],
+                        snapshot["referencing_id"],
                     )
-                    tgt_referenced_id = (
-                        target_layer_id
-                        if src_referenced_id == source_layer_id
-                        else src_referenced_id
+                    tgt_referenced_id = layer_replacements.get(
+                        snapshot["referenced_id"],
+                        snapshot["referenced_id"],
                     )
 
                     if project.mapLayer(tgt_referencing_id) is None:
@@ -1063,72 +1091,21 @@ class QGISLayerService(ILayerService):
                     if project.mapLayer(tgt_referenced_id) is None:
                         continue
 
-                    new_relation = QgsRelation()
-                    relation_name = (
-                        source_relation.name()
-                        if hasattr(source_relation, "name")
-                        else ""
-                    )
-                    if relation_name and hasattr(new_relation, "setName"):
-                        new_relation.setName(relation_name)
-
-                    source_relation_id = (
-                        source_relation.id()
-                        if hasattr(source_relation, "id")
-                        else ""
-                    )
-                    existing_ids = set(relation_manager.relations().keys())
-                    new_relation_id = (
-                        f"archeosync_import_{uuid.uuid4().hex[:12]}"
-                    )
-                    while new_relation_id in existing_ids:
-                        new_relation_id = f"archeosync_import_{uuid.uuid4().hex[:12]}"
-                    if hasattr(new_relation, "setId"):
-                        new_relation.setId(new_relation_id)
-
-                    tgt_referencing_layer = project.mapLayer(tgt_referencing_id)
-                    tgt_referenced_layer = project.mapLayer(tgt_referenced_id)
-                    self._bind_relation_layers(
-                        new_relation,
+                    new_relation = self._build_cloned_relation(
+                        snapshot,
                         tgt_referencing_id,
                         tgt_referenced_id,
-                        tgt_referencing_layer,
-                        tgt_referenced_layer,
+                        project,
                     )
-
-                    if (
-                        new_relation.referencingLayerId() != tgt_referencing_id
-                        or new_relation.referencedLayerId() != tgt_referenced_id
-                    ):
+                    if new_relation is None:
                         continue
-
-                    field_pairs = self._normalize_relation_field_pairs(
-                        source_relation.fieldPairs()
-                        if hasattr(source_relation, "fieldPairs")
-                        else None
-                    )
-                    for referencing_field, referenced_field in field_pairs:
-                        new_relation.addFieldPair(
-                            str(referencing_field),
-                            str(referenced_field),
-                        )
-
-                    if not field_pairs:
-                        continue
-
-                    if hasattr(source_relation, "relationStrength") and hasattr(
-                        new_relation, "setRelationStrength"
-                    ):
-                        new_relation.setRelationStrength(
-                            source_relation.relationStrength()
-                        )
 
                     add_result = relation_manager.addRelation(new_relation)
                     if add_result is False:
                         rel_label = (
-                            relation_name
+                            snapshot.get("name")
                             or source_relation_id
-                            or new_relation_id
+                            or new_relation.id()
                         )
                         validation_error = None
                         for attr in (
@@ -1148,13 +1125,17 @@ class QGISLayerService(ILayerService):
                             f"{validation_error or 'unknown reason'}"
                         )
                     else:
-                        if source_relation_id:
-                            relation_id_mapping[source_relation_id] = new_relation_id
+                        relation_id_mapping[source_relation_id] = new_relation.id()
                 except Exception as relation_error:
                     print(
                         f"Error copying relation for {target_layer.name()}: "
                         f"{relation_error}"
                     )
+
+            self._restore_definitive_project_relations(
+                relation_manager,
+                definitive_relation_snapshots,
+            )
 
             return relation_id_mapping
         except Exception as e:
@@ -1165,6 +1146,192 @@ class QGISLayerService(ILayerService):
             import traceback
             traceback.print_exc()
             return relation_id_mapping
+
+    def _is_import_clone_relation_id(self, relation_id: str) -> bool:
+        """Return True when a relation id was created for a temporary import layer."""
+        return str(relation_id or "").startswith(IMPORT_RELATION_ID_PREFIX)
+
+    def _is_temporary_import_layer(self, layer: Any) -> bool:
+        """Return True when a layer is one of the known temporary import layers."""
+        return (
+            layer is not None
+            and hasattr(layer, "name")
+            and layer.name() in IMPORT_LAYER_MAPPINGS
+        )
+
+    def _snapshot_definitive_project_relations(
+        self,
+        relation_manager: Any,
+    ) -> Dict[str, Dict[str, Any]]:
+        """
+        Capture definitive project relations so they can be restored if QGIS mutates them.
+        """
+        snapshots: Dict[str, Dict[str, Any]] = {}
+        for relation_id, relation in relation_manager.relations().items():
+            if self._is_import_clone_relation_id(relation_id):
+                continue
+            snapshots[relation_id] = self._snapshot_relation(relation)
+        return snapshots
+
+    def _snapshot_relation(self, relation: Any) -> Dict[str, Any]:
+        """Serialize a QgsRelation for later comparison or restoration."""
+        field_pairs = (
+            relation.fieldPairs() if hasattr(relation, "fieldPairs") else {}
+        )
+        return {
+            "id": relation.id() if hasattr(relation, "id") else "",
+            "name": relation.name() if hasattr(relation, "name") else "",
+            "referencing_id": relation.referencingLayerId(),
+            "referenced_id": relation.referencedLayerId(),
+            "field_pairs": dict(field_pairs) if field_pairs else {},
+            "strength": (
+                relation.relationStrength()
+                if hasattr(relation, "relationStrength")
+                else None
+            ),
+        }
+
+    def _relation_snapshot_matches(
+        self,
+        relation: Any,
+        snapshot: Dict[str, Any],
+    ) -> bool:
+        """Return True when a live relation still matches its definitive snapshot."""
+        if relation is None or not relation.isValid():
+            return False
+        return (
+            relation.referencingLayerId() == snapshot["referencing_id"]
+            and relation.referencedLayerId() == snapshot["referenced_id"]
+        )
+
+    def _restore_definitive_project_relations(
+        self,
+        relation_manager: Any,
+        snapshots: Dict[str, Dict[str, Any]],
+    ) -> None:
+        """Re-create any definitive relation that was altered while cloning import relations."""
+        for relation_id, snapshot in snapshots.items():
+            current_relation = relation_manager.relation(relation_id)
+            if self._relation_snapshot_matches(current_relation, snapshot):
+                continue
+            self._restore_relation_from_snapshot(relation_manager, snapshot)
+
+    def _restore_relation_from_snapshot(
+        self,
+        relation_manager: Any,
+        snapshot: Dict[str, Any],
+    ) -> None:
+        """Restore a single definitive project relation from a snapshot."""
+        from qgis.core import QgsRelation
+
+        relation_id = snapshot.get("id")
+        if not relation_id:
+            return
+
+        try:
+            relation_manager.removeRelation(relation_id)
+        except Exception:
+            pass
+
+        restored = QgsRelation()
+        restored.setId(relation_id)
+        relation_name = snapshot.get("name")
+        if relation_name and hasattr(restored, "setName"):
+            restored.setName(relation_name)
+
+        self._bind_relation_layers(
+            restored,
+            snapshot["referencing_id"],
+            snapshot["referenced_id"],
+            None,
+            None,
+        )
+
+        field_pairs = self._normalize_relation_field_pairs(snapshot.get("field_pairs"))
+        for referencing_field, referenced_field in field_pairs:
+            restored.addFieldPair(str(referencing_field), str(referenced_field))
+
+        strength = snapshot.get("strength")
+        if strength is not None and hasattr(restored, "setRelationStrength"):
+            restored.setRelationStrength(strength)
+
+        relation_manager.addRelation(restored)
+
+    def _build_cloned_relation(
+        self,
+        snapshot: Dict[str, Any],
+        tgt_referencing_id: str,
+        tgt_referenced_id: str,
+        project: QgsProject,
+    ) -> Optional[Any]:
+        """Build a new import-clone relation from a definitive relation snapshot."""
+        from qgis.core import QgsRelation
+
+        field_pairs = self._normalize_relation_field_pairs(snapshot.get("field_pairs"))
+        if not field_pairs:
+            return None
+
+        relation_manager = project.relationManager()
+        existing_ids = set(relation_manager.relations().keys())
+        new_relation_id = f"{IMPORT_RELATION_ID_PREFIX}{uuid.uuid4().hex[:12]}"
+        while new_relation_id in existing_ids:
+            new_relation_id = f"{IMPORT_RELATION_ID_PREFIX}{uuid.uuid4().hex[:12]}"
+
+        new_relation = QgsRelation()
+        new_relation.setId(new_relation_id)
+        relation_name = snapshot.get("name") or ""
+        if relation_name and hasattr(new_relation, "setName"):
+            new_relation.setName(relation_name)
+
+        tgt_referencing_layer = project.mapLayer(tgt_referencing_id)
+        tgt_referenced_layer = project.mapLayer(tgt_referenced_id)
+        self._bind_relation_layers(
+            new_relation,
+            tgt_referencing_id,
+            tgt_referenced_id,
+            tgt_referencing_layer,
+            tgt_referenced_layer,
+        )
+
+        if (
+            new_relation.referencingLayerId() != tgt_referencing_id
+            or new_relation.referencedLayerId() != tgt_referenced_id
+        ):
+            return None
+
+        for referencing_field, referenced_field in field_pairs:
+            new_relation.addFieldPair(
+                str(referencing_field),
+                str(referenced_field),
+            )
+
+        strength = snapshot.get("strength")
+        if strength is not None and hasattr(new_relation, "setRelationStrength"):
+            new_relation.setRelationStrength(strength)
+
+        return new_relation
+
+    def remove_import_clone_relations(self, project: Optional[QgsProject] = None) -> int:
+        """
+        Remove project relations created for temporary import layers.
+
+        Returns:
+            Number of import-clone relations removed
+        """
+        project = project or QgsProject.instance()
+        if project is None:
+            return 0
+
+        relation_manager = project.relationManager()
+        if relation_manager is None:
+            return 0
+
+        removed = 0
+        for relation_id in list(relation_manager.relations().keys()):
+            if self._is_import_clone_relation_id(relation_id):
+                relation_manager.removeRelation(relation_id)
+                removed += 1
+        return removed
 
     def _remove_relations_for_layer(self, relation_manager: Any, layer_id: str) -> None:
         """Remove existing project relations that involve the given layer."""
@@ -1596,10 +1763,12 @@ class QGISLayerService(ILayerService):
         to prioritize QML style copying.
         """
         try:
-            # Copy form configuration
+            # Copy form configuration without sharing the QgsEditFormConfig object.
             if hasattr(source_layer, 'editFormConfig'):
                 source_form_config = source_layer.editFormConfig()
-                target_layer.setEditFormConfig(source_form_config)
+                target_layer.setEditFormConfig(
+                    self._clone_edit_form_config(source_form_config)
+                )
             
             # Copy field configuration including editor widgets and default values
             self._copy_field_configurations(source_layer, target_layer)

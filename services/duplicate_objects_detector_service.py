@@ -22,143 +22,132 @@ Usage:
     detector = DuplicateObjectsDetectorService(
         settings_manager=settings_manager,
         layer_service=layer_service,
-        translation_service=translation_service
     )
-    
+
     warnings = detector.detect_duplicate_objects()
 """
 
-from typing import List, Optional, Any, Union
+from typing import Any, List, Optional, Tuple, Union
+
 from qgis.PyQt.QtCore import QObject
 
 try:
-    from ..core.interfaces import ISettingsManager, ILayerService
     from ..core.data_structures import WarningData
+    from ..core.interfaces import ILayerService, ISettingsManager
     from ..core.ui_responsiveness import maybe_yield_to_ui
 except ImportError:
-    from core.interfaces import ISettingsManager, ILayerService
     from core.data_structures import WarningData
+    from core.interfaces import ILayerService, ISettingsManager
     from core.ui_responsiveness import maybe_yield_to_ui
 
 
 class DuplicateObjectsDetectorService(QObject):
     """
     Service for detecting duplicate objects with the same recording area and number.
-    
+
     Detects objects that have the same recording area and number within:
     - The "New Objects" layer (imported objects)
     - The original objects layer (existing objects)
     - Between both layers
     """
-    
+
     def __init__(self, settings_manager: ISettingsManager, layer_service: ILayerService):
         super().__init__()
-        """
-        Initialize the duplicate objects detector service.
-        
-        Args:
-            settings_manager: Service for accessing settings
-            layer_service: Service for accessing layers
-        """
         self._settings_manager = settings_manager
         self._layer_service = layer_service
-    
+
     def _find_layer_by_name(self, layer_name: str) -> Optional[Any]:
-        """
-        Find a layer by name in the current QGIS project.
-        
-        Args:
-            layer_name: The name of the layer to find
-            
-        Returns:
-            The layer if found, None otherwise
-        """
+        """Find a layer by name in the current QGIS project."""
         try:
             from qgis.core import QgsProject
-            
+
             project = QgsProject.instance()
             for layer in project.mapLayers().values():
                 if layer.name() == layer_name:
                     return layer
             return None
-        except Exception as e:
-            print(f"Error finding layer by name: {e}")
+        except Exception as exc:
+            print(f"Error finding layer by name: {exc}")
             return None
 
     def detect_duplicate_objects(self) -> List[Union[str, WarningData]]:
         """
         Detect duplicate objects with the same recording area and number.
-        
+
         Returns:
             List of warning messages or structured warning data about duplicate objects
         """
-        # Check if duplicate objects warnings are enabled
-        if not self._settings_manager.get_value('enable_duplicate_objects_warnings', True):
+        if not self._settings_manager.get_value("enable_duplicate_objects_warnings", True):
             print("[DEBUG] Duplicate objects warnings are disabled, skipping detection")
             return []
-        warnings = []
-        
+        warnings: List[Union[str, WarningData]] = []
+
         try:
-            # Get configuration from settings
-            objects_layer_id = self._settings_manager.get_value('objects_layer')
-            recording_areas_layer_id = self._settings_manager.get_value('recording_areas_layer')
-            number_field = self._settings_manager.get_value('objects_number_field')
-            
+            objects_layer_id = self._settings_manager.get_value("objects_layer")
+            recording_areas_layer_id = self._settings_manager.get_value("recording_areas_layer")
+            number_field = self._settings_manager.get_value("objects_number_field")
+
             if not objects_layer_id or not recording_areas_layer_id or not number_field:
                 return warnings
-            
-            # Get layers
+
             objects_layer = self._layer_service.get_layer_by_id(objects_layer_id)
             recording_areas_layer = self._layer_service.get_layer_by_id(recording_areas_layer_id)
-            
+
             if not objects_layer or not recording_areas_layer:
                 return warnings
-            
-            # Get the recording area field name
-            recording_area_field = self._get_recording_area_field(objects_layer, recording_areas_layer)
+
+            recording_area_field = self._resolve_recording_area_field(objects_layer)
             if not recording_area_field:
                 return warnings
-            
-            # Check for duplicates within the original objects layer
+
+            resolved_number_field = self._resolve_field_name_on_layer(objects_layer, number_field)
+            if not resolved_number_field:
+                return warnings
+
             original_warnings = self._detect_duplicates_within_layer(
-                objects_layer, recording_areas_layer, number_field, recording_area_field, objects_layer.name()
+                objects_layer,
+                recording_areas_layer,
+                resolved_number_field,
+                recording_area_field,
+                objects_layer.name(),
             )
             warnings.extend(original_warnings)
-            
-            # Check for duplicates within the "New Objects" layer
+
             new_objects_layer = self._find_layer_by_name("New Objects")
             if new_objects_layer:
                 new_warnings = self._detect_duplicates_within_layer(
-                    new_objects_layer, recording_areas_layer, number_field, recording_area_field, "New Objects"
+                    new_objects_layer,
+                    recording_areas_layer,
+                    resolved_number_field,
+                    recording_area_field,
+                    "New Objects",
                 )
                 warnings.extend(new_warnings)
-                
-                # Check for duplicates between original and new objects layers
+
                 between_warnings = self._detect_duplicates_between_layers(
-                    objects_layer, new_objects_layer, recording_areas_layer, 
-                    number_field, recording_area_field
+                    objects_layer,
+                    new_objects_layer,
+                    recording_areas_layer,
+                    resolved_number_field,
+                    recording_area_field,
                 )
                 warnings.extend(between_warnings)
 
             warnings = self._deduplicate_warnings_by_object_identity(warnings)
-            
-        except Exception as e:
-            print(f"Error in duplicate objects detection: {e}")
+
+        except Exception as exc:
+            print(f"Error in duplicate objects detection: {exc}")
             import traceback
+
             traceback.print_exc()
-        
+
         return warnings
-    
+
     def _deduplicate_warnings_by_object_identity(
         self,
         warnings: List[Union[str, WarningData]],
     ) -> List[Union[str, WarningData]]:
-        """
-        Keep a single warning per recording area / object number pair.
-
-        Avoids duplicate messages when the same conflict is reported from
-        within-layer and between-layer checks.
-        """
+        """Keep a single warning per recording area / object number pair."""
         deduplicated: List[Union[str, WarningData]] = []
         seen_keys = set()
 
@@ -175,247 +164,301 @@ class DuplicateObjectsDetectorService(QObject):
 
         return deduplicated
 
-    def _detect_duplicates_within_layer(self, 
-                                      objects_layer: Any, 
-                                      recording_areas_layer: Any, 
-                                      number_field: str, 
-                                      recording_area_field: str, 
-                                      layer_name: str) -> List[Union[str, WarningData]]:
-        """
-        Detect duplicates within a single layer.
-        
-        Args:
-            objects_layer: The objects layer to check
-            recording_areas_layer: The recording areas layer
-            number_field: The number field name
-            recording_area_field: The field name for recording area
-            layer_name: The name of the layer for warning messages
-            
-        Returns:
-            List of warning messages or structured warning data
-        """
-        warnings = []
-        
+    @staticmethod
+    def _normalize_identity_value(value: Any) -> Any:
+        """Normalize attribute values used in recording-area / number identity keys."""
+        if value is None:
+            return None
+        if isinstance(value, str):
+            stripped = value.strip()
+            if stripped == "" or stripped.lower() == "null":
+                return None
+            return stripped
         try:
-            # Get field indices
-            number_field_idx = objects_layer.fields().indexOf(number_field)
-            recording_area_field_idx = objects_layer.fields().indexOf(recording_area_field)
-            
-            if number_field_idx < 0 or recording_area_field_idx < 0:
-                return warnings
-            
-            # Group objects by recording area and number
-            duplicates = {}
+            if isinstance(value, float) and value.is_integer():
+                return int(value)
+        except (TypeError, ValueError):
+            pass
+        return value
+
+    @staticmethod
+    def _identity_value_is_set(value: Any) -> bool:
+        """Return True when a zone or number value can participate in duplicate detection."""
+        return DuplicateObjectsDetectorService._normalize_identity_value(value) is not None
+
+    def _get_field_index_case_insensitive(self, layer: Any, field_name: str) -> int:
+        """Return a field index, matching field names case-insensitively when needed."""
+        field_idx = layer.fields().indexOf(field_name)
+        if field_idx >= 0:
+            return field_idx
+        target = field_name.lower()
+        for field in layer.fields():
+            if field.name().lower() == target:
+                return layer.fields().indexOf(field.name())
+        return -1
+
+    def _resolve_field_name_on_layer(self, layer: Any, field_name: str) -> Optional[str]:
+        """Return the canonical field name present on ``layer`` for ``field_name``."""
+        field_idx = self._get_field_index_case_insensitive(layer, field_name)
+        if field_idx < 0:
+            return None
+        return layer.fields().at(field_idx).name()
+
+    def _field_exists_on_layer(self, layer: Any, field_name: str) -> bool:
+        """Return True when ``field_name`` exists on ``layer`` (case-insensitive)."""
+        return self._get_field_index_case_insensitive(layer, field_name) >= 0
+
+    def _get_recording_area_field_from_relation(
+        self,
+        objects_layer: Any,
+        recording_areas_layer: Any,
+    ) -> Optional[str]:
+        """Return the objects-layer field that references recording areas via project relations."""
+        try:
+            from qgis.core import QgsProject
+
+            relation_manager = QgsProject.instance().relationManager()
+            objects_layer_id = objects_layer.id()
+            recording_areas_layer_id = recording_areas_layer.id()
+            for relation in relation_manager.relations().values():
+                referencing_layer = relation.referencingLayer()
+                referenced_layer = relation.referencedLayer()
+                if referencing_layer is None or referenced_layer is None:
+                    continue
+                if (
+                    referencing_layer.id() == objects_layer_id
+                    and referenced_layer.id() == recording_areas_layer_id
+                ):
+                    field_pairs = relation.fieldPairs()
+                    if field_pairs:
+                        return list(field_pairs.keys())[0]
+        except Exception as exc:
+            print(f"Error resolving recording-area relation field: {exc}")
+        return None
+
+    def _resolve_recording_area_field(self, objects_layer: Any) -> Optional[str]:
+        """
+        Resolve the recording-area foreign-key field on the objects layer.
+
+        Uses QGIS relations first, then configured settings fallbacks.
+        """
+        recording_areas_layer_id = self._settings_manager.get_value("recording_areas_layer", "")
+        if recording_areas_layer_id:
+            recording_areas_layer = self._layer_service.get_layer_by_id(recording_areas_layer_id)
+            if recording_areas_layer:
+                relation_field = self._get_recording_area_field_from_relation(
+                    objects_layer,
+                    recording_areas_layer,
+                )
+                if relation_field and self._field_exists_on_layer(objects_layer, relation_field):
+                    return self._resolve_field_name_on_layer(objects_layer, relation_field)
+
+        configured_field = self._settings_manager.get_value("objects_recording_area_field", "")
+        if configured_field and self._field_exists_on_layer(objects_layer, configured_field):
+            return self._resolve_field_name_on_layer(objects_layer, configured_field)
+
+        alternative_field = self._settings_manager.get_value(
+            "alternative_objects_recording_area_field",
+            "",
+        )
+        if alternative_field and self._field_exists_on_layer(objects_layer, alternative_field):
+            return self._resolve_field_name_on_layer(objects_layer, alternative_field)
+
+        return None
+
+    def _feature_identity_key(
+        self,
+        feature: Any,
+        objects_layer: Any,
+        number_field: str,
+        recording_area_field: str,
+    ) -> Optional[Tuple[Any, Any]]:
+        """Build a (recording_area_id, object_number) identity key for a feature."""
+        number_idx = self._get_field_index_case_insensitive(objects_layer, number_field)
+        recording_area_idx = self._get_field_index_case_insensitive(
+            objects_layer,
+            recording_area_field,
+        )
+        if number_idx < 0 or recording_area_idx < 0:
+            return None
+
+        object_number = self._normalize_identity_value(feature.attribute(number_idx))
+        recording_area_id = self._normalize_identity_value(feature.attribute(recording_area_idx))
+        if not self._identity_value_is_set(recording_area_id) or not self._identity_value_is_set(
+            object_number
+        ):
+            return None
+        return (recording_area_id, object_number)
+
+    def _detect_duplicates_within_layer(
+        self,
+        objects_layer: Any,
+        recording_areas_layer: Any,
+        number_field: str,
+        recording_area_field: str,
+        layer_name: str,
+    ) -> List[Union[str, WarningData]]:
+        """Detect duplicates within a single layer."""
+        warnings: List[Union[str, WarningData]] = []
+
+        try:
+            duplicates: dict = {}
             for feature in objects_layer.getFeatures():
                 maybe_yield_to_ui()
-                recording_area_id = feature[recording_area_field_idx]
-                number = feature[number_field_idx]
-                
-                if recording_area_id and number:
-                    key = (recording_area_id, number)
-                    if key not in duplicates:
-                        duplicates[key] = []
-                    duplicates[key].append(feature)
-            
-            print(f"[DEBUG] Found {len(duplicates)} unique recording area/number combinations in {layer_name}")
-            
-            # Check for duplicates (more than one object with same recording area and number)
+                identity = self._feature_identity_key(
+                    feature,
+                    objects_layer,
+                    number_field,
+                    recording_area_field,
+                )
+                if identity is None:
+                    continue
+                duplicates.setdefault(identity, []).append(feature)
+
+            print(
+                f"[DEBUG] Found {len(duplicates)} unique recording area/number combinations in {layer_name}"
+            )
+
             for (recording_area_id, number), features in duplicates.items():
-                if len(features) > 1:
-                    # Get recording area name
-                    recording_area_name = self._get_recording_area_name(recording_areas_layer, recording_area_id)
-                    
-                    # Create structured warning data
-                    warning_data = WarningData(
+                if len(features) <= 1:
+                    continue
+                recording_area_name = self._get_recording_area_name(
+                    recording_areas_layer,
+                    recording_area_id,
+                )
+                warnings.append(
+                    WarningData(
                         message=self._create_duplicate_warning(
-                            recording_area_name, len(features), number, layer_name
+                            recording_area_name,
+                            len(features),
+                            number,
+                            layer_name,
                         ),
                         recording_area_name=recording_area_name,
                         layer_name=layer_name,
-                        filter_expression=f'"{recording_area_field}" = \'{recording_area_id}\' AND "{number_field}" = {number}',
-                        object_number=number
+                        filter_expression=(
+                            f'"{recording_area_field}" = \'{recording_area_id}\' '
+                            f'AND "{number_field}" = {number}'
+                        ),
+                        object_number=number,
                     )
-                    warnings.append(warning_data)
-            
-        except Exception as e:
-            print(f"[DEBUG] Error in _detect_duplicates_within_layer: {e}")
+                )
+
+        except Exception as exc:
+            print(f"[DEBUG] Error in _detect_duplicates_within_layer: {exc}")
             import traceback
+
             traceback.print_exc()
-        
+
         return warnings
-    
-    def _detect_duplicates_between_layers(self, 
-                                        original_objects_layer: Any, 
-                                        new_objects_layer: Any, 
-                                        recording_areas_layer: Any, 
-                                        number_field: str, 
-                                        recording_area_field: str) -> List[Union[str, WarningData]]:
-        """
-        Detect duplicates between "New Objects" and original objects layers.
-        
-        Args:
-            original_objects_layer: The original objects layer
-            new_objects_layer: The "New Objects" layer
-            recording_areas_layer: The recording areas layer
-            number_field: The number field name
-            recording_area_field: The field name for recording area
-            
-        Returns:
-            List of warning messages or structured warning data
-        """
-        warnings = []
-        
+
+    def _detect_duplicates_between_layers(
+        self,
+        original_objects_layer: Any,
+        new_objects_layer: Any,
+        recording_areas_layer: Any,
+        number_field: str,
+        recording_area_field: str,
+    ) -> List[Union[str, WarningData]]:
+        """Detect duplicates between "New Objects" and original objects layers."""
+        warnings: List[Union[str, WarningData]] = []
+
         try:
-            # Get field indices for both layers
-            original_number_field_idx = original_objects_layer.fields().indexOf(number_field)
-            new_number_field_idx = new_objects_layer.fields().indexOf(number_field)
-            
-            if original_number_field_idx < 0 or new_number_field_idx < 0:
-                return warnings
-            
-            # Get recording area field indices
-            original_recording_area_field_idx = original_objects_layer.fields().indexOf(recording_area_field)
-            new_recording_area_field_idx = new_objects_layer.fields().indexOf(recording_area_field)
-            
-            if original_recording_area_field_idx < 0 or new_recording_area_field_idx < 0:
-                return warnings
-            
-            # Create lookup dictionaries for original objects
-            original_objects = {}
+            original_objects: dict = {}
             for feature in original_objects_layer.getFeatures():
                 maybe_yield_to_ui()
-                recording_area_id = feature[original_recording_area_field_idx]
-                number = feature[original_number_field_idx]
-                
-                if recording_area_id and number:
-                    key = (recording_area_id, number)
-                    if key not in original_objects:
-                        original_objects[key] = []
-                    original_objects[key].append(feature)
-            
-            # Check new objects against original objects (one warning per zone/number)
+                identity = self._feature_identity_key(
+                    feature,
+                    original_objects_layer,
+                    number_field,
+                    recording_area_field,
+                )
+                if identity is None:
+                    continue
+                original_objects.setdefault(identity, []).append(feature)
+
             warned_between_layer_keys = set()
             for feature in new_objects_layer.getFeatures():
                 maybe_yield_to_ui()
-                recording_area_id = feature[new_recording_area_field_idx]
-                number = feature[new_number_field_idx]
-                
-                if recording_area_id and number:
-                    key = (recording_area_id, number)
-                    if key in original_objects and key not in warned_between_layer_keys:
-                        warned_between_layer_keys.add(key)
-                        # Get recording area name
-                        recording_area_name = self._get_recording_area_name(recording_areas_layer, recording_area_id)
-                        
-                        # Create structured warning data for between-layer duplicates
-                        warning_data = WarningData(
+                identity = self._feature_identity_key(
+                    feature,
+                    new_objects_layer,
+                    number_field,
+                    recording_area_field,
+                )
+                if identity is None:
+                    continue
+                if identity in original_objects and identity not in warned_between_layer_keys:
+                    warned_between_layer_keys.add(identity)
+                    recording_area_id, number = identity
+                    recording_area_name = self._get_recording_area_name(
+                        recording_areas_layer,
+                        recording_area_id,
+                    )
+                    warnings.append(
+                        WarningData(
                             message=self._create_duplicate_warning(
-                                recording_area_name, len(original_objects[key]), number, f"{original_objects_layer.name()} and New Objects"
+                                recording_area_name,
+                                len(original_objects[identity]),
+                                number,
+                                f"{original_objects_layer.name()} and New Objects",
                             ),
                             recording_area_name=recording_area_name,
                             layer_name=original_objects_layer.name(),
-                            filter_expression=f'"{recording_area_field}" = \'{recording_area_id}\' AND "{number_field}" = {number}',
+                            filter_expression=(
+                                f'"{recording_area_field}" = \'{recording_area_id}\' '
+                                f'AND "{number_field}" = {number}'
+                            ),
                             object_number=number,
                             second_layer_name="New Objects",
-                            second_filter_expression=f'"{recording_area_field}" = \'{recording_area_id}\' AND "{number_field}" = {number}'
+                            second_filter_expression=(
+                                f'"{recording_area_field}" = \'{recording_area_id}\' '
+                                f'AND "{number_field}" = {number}'
+                            ),
                         )
-                        warnings.append(warning_data)
-            
-        except Exception as e:
-            print(f"[DEBUG] Error in _detect_duplicates_between_layers: {e}")
+                    )
+
+        except Exception as exc:
+            print(f"[DEBUG] Error in _detect_duplicates_between_layers: {exc}")
             import traceback
+
             traceback.print_exc()
-        
+
         return warnings
-    
-    def _get_recording_area_field(self, objects_layer: Any, recording_areas_layer: Any) -> Optional[str]:
-        """
-        Get the field name in the objects layer that references the recording areas layer.
-        
-        Args:
-            objects_layer: The objects layer
-            recording_areas_layer: The recording areas layer
-            
-        Returns:
-            The field name that references the recording areas layer, or None if not found
-        """
-        try:
-            # Get the relation manager
-            from qgis.core import QgsProject
-            project = QgsProject.instance()
-            relation_manager = project.relationManager()
-            
-            # Find relations where the objects layer is the referencing layer
-            # and the recording areas layer is the referenced layer
-            for relation in relation_manager.relations().values():
-                if (relation.referencingLayer() == objects_layer and 
-                    relation.referencedLayer() == recording_areas_layer):
-                    
-                    # Get the field pairs
-                    field_pairs = relation.fieldPairs()
-                    
-                    # Return the first referencing field (should be the recording area field)
-                    if field_pairs:
-                        recording_area_field = list(field_pairs.keys())[0]
-                        return recording_area_field
-            
-            return None
-            
-        except Exception as e:
-            return None
-    
+
     def _get_recording_area_name(self, recording_areas_layer: Any, recording_area_id: Any) -> str:
-        """
-        Get the name of a recording area by its ID.
-        
-        Args:
-            recording_areas_layer: The recording areas layer
-            recording_area_id: The ID of the recording area
-            
-        Returns:
-            The name of the recording area, or the ID as string if name not found
-        """
+        """Get the name of a recording area by its ID."""
         try:
-            # Try to find a name field
-            name_fields = ['name', 'title', 'label', 'description', 'comment']
+            name_fields = ["name", "title", "label", "description", "comment"]
             for field_name in name_fields:
                 field_idx = recording_areas_layer.fields().indexOf(field_name)
                 if field_idx >= 0:
-                    # Find the feature with this ID
                     for feature in recording_areas_layer.getFeatures():
                         maybe_yield_to_ui()
                         if feature.id() == recording_area_id:
                             name_value = feature[field_idx]
-                            if name_value and str(name_value) != 'NULL':
+                            if name_value and str(name_value) != "NULL":
                                 return str(name_value)
-            
-            # Fallback to ID if no name found
             return str(recording_area_id)
-            
-        except Exception as e:
-            print(f"Error getting recording area name: {e}")
+        except Exception as exc:
+            print(f"Error getting recording area name: {exc}")
             return str(recording_area_id)
-    
-    def _create_duplicate_warning(self, 
-                                 recording_area_name: str, 
-                                 count: int, 
-                                 number: Any, 
-                                 layer_name: str) -> str:
-        """
-        Create a warning message for duplicate objects.
-        
-        Args:
-            recording_area_name: The name of the recording area
-            count: The number of duplicate objects
-            number: The object number
-            layer_name: The name of the layer where duplicates were found
-            
-        Returns:
-            The warning message
-        """
+
+    def _create_duplicate_warning(
+        self,
+        recording_area_name: str,
+        count: int,
+        number: Any,
+        layer_name: str,
+    ) -> str:
+        """Create a warning message for duplicate objects."""
         try:
-            message = self.tr(f"Recording Area '{recording_area_name}' has {count} objects with number {number} in {layer_name}")
+            message = self.tr(
+                f"Recording Area '{recording_area_name}' has {count} objects with number {number} in {layer_name}"
+            )
         except Exception:
-            message = f"Recording Area '{recording_area_name}' has {count} objects with number {number} in {layer_name}"
-        
-        return message 
+            message = (
+                f"Recording Area '{recording_area_name}' has {count} objects with number {number} "
+                f"in {layer_name}"
+            )
+        return message
