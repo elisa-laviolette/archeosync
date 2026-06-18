@@ -530,6 +530,8 @@ class TestImportSummaryDialog(unittest.TestCase):
             # Create mock project and layers
             mock_project = Mock()
             mock_project_class.instance.return_value = mock_project
+            self.mock_layer_service.repair_definitive_project_relations.return_value = 0
+            self.mock_layer_service.remove_import_clone_relations.return_value = 0
             
             # Create mock layers
             mock_objects_layer = Mock()
@@ -553,6 +555,9 @@ class TestImportSummaryDialog(unittest.TestCase):
             
             # Call the delete method
             self.dialog._delete_temporary_layers()
+            
+            self.mock_layer_service.repair_definitive_project_relations.assert_called_once()
+            self.mock_layer_service.remove_import_clone_relations.assert_called_once()
             
             # Check that removeMapLayer was called for each temporary layer
             self.assertEqual(mock_project.removeMapLayer.call_count, 3)

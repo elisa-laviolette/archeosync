@@ -709,6 +709,255 @@ class TestStyleCopying(unittest.TestCase):
             ]
         )
 
+    def test_repair_definitive_project_relations_restores_corrupted_relation(self):
+        """Repair must rebuild a definitive relation that QGIS repointed to a temp layer."""
+        from qgis.core import QgsRelation
+
+        objects_layer = QgsVectorLayer(
+            "Point?crs=EPSG:4326&field=id:integer&field=feature_id:integer",
+            "Objects",
+            "memory",
+        )
+        features_layer = QgsVectorLayer(
+            "Point?crs=EPSG:4326&field=id:integer",
+            "Features",
+            "memory",
+        )
+        new_objects_layer = QgsVectorLayer(
+            "Point?crs=EPSG:4326&field=id:integer&field=feature_id:integer",
+            "New Objects",
+            "memory",
+        )
+        for layer in (objects_layer, features_layer, new_objects_layer):
+            self.assertTrue(layer.isValid())
+
+        project = QgsProject.instance()
+        project.addMapLayer(features_layer, False)
+        project.addMapLayer(objects_layer, False)
+        project.addMapLayer(new_objects_layer, False)
+
+        relation_manager = project.relationManager()
+        relation_manager.removeRelation("objects_features")
+        corrupted = QgsRelation()
+        corrupted.setId("objects_features")
+        corrupted.setName("objects_features")
+        corrupted.setReferencingLayer(new_objects_layer.id())
+        corrupted.setReferencedLayer(features_layer.id())
+        corrupted.addFieldPair("feature_id", "id")
+        relation_manager.addRelation(corrupted)
+
+        peer_replacements = {objects_layer.id(): new_objects_layer.id()}
+        repaired = self.layer_service.repair_definitive_project_relations(
+            project,
+            peer_layer_replacements=peer_replacements,
+        )
+
+        self.assertGreaterEqual(repaired, 1)
+        definitive_relation = relation_manager.relation("objects_features")
+        self.assertTrue(definitive_relation.isValid())
+        self.assertEqual(
+            definitive_relation.referencingLayerId(),
+            objects_layer.id(),
+        )
+        self.assertEqual(
+            definitive_relation.referencedLayerId(),
+            features_layer.id(),
+        )
+
+        relation_manager.removeRelation("objects_features")
+        project.removeMapLayers(
+            [
+                objects_layer.id(),
+                features_layer.id(),
+                new_objects_layer.id(),
+            ]
+        )
+
+    def test_repair_definitive_project_relations_recreates_from_import_clone(self):
+        """Repair must recreate a deleted definitive relation from its import clone."""
+        objects_layer = QgsVectorLayer(
+            "Point?crs=EPSG:4326&field=id:integer&field=feature_id:integer",
+            "Objects",
+            "memory",
+        )
+        features_layer = QgsVectorLayer(
+            "Point?crs=EPSG:4326&field=id:integer",
+            "Features",
+            "memory",
+        )
+        new_objects_layer = QgsVectorLayer(
+            "Point?crs=EPSG:4326&field=id:integer&field=feature_id:integer",
+            "New Objects",
+            "memory",
+        )
+        new_features_layer = QgsVectorLayer(
+            "Point?crs=EPSG:4326&field=id:integer",
+            "New Features",
+            "memory",
+        )
+        for layer in (
+            objects_layer,
+            features_layer,
+            new_objects_layer,
+            new_features_layer,
+        ):
+            self.assertTrue(layer.isValid())
+
+        project = QgsProject.instance()
+        project.addMapLayer(features_layer, False)
+        project.addMapLayer(objects_layer, False)
+        project.addMapLayer(new_features_layer, False)
+        project.addMapLayer(new_objects_layer, False)
+
+        self._create_test_relation(
+            "archeosync_import_deadbeef",
+            new_objects_layer,
+            "feature_id",
+            new_features_layer,
+            "id",
+        )
+        clone_relation = project.relationManager().relation(
+            "archeosync_import_deadbeef"
+        )
+        clone_relation.setName("objects_features")
+
+        peer_replacements = {
+            objects_layer.id(): new_objects_layer.id(),
+            features_layer.id(): new_features_layer.id(),
+        }
+        repaired = self.layer_service.repair_definitive_project_relations(
+            project,
+            peer_layer_replacements=peer_replacements,
+        )
+
+        self.assertGreaterEqual(repaired, 1)
+        definitive_relation = project.relationManager().relation("objects_features")
+        self.assertTrue(definitive_relation.isValid())
+        self.assertEqual(
+            definitive_relation.referencingLayerId(),
+            objects_layer.id(),
+        )
+        self.assertEqual(
+            definitive_relation.referencedLayerId(),
+            features_layer.id(),
+        )
+
+        project.relationManager().removeRelation("objects_features")
+        project.relationManager().removeRelation("archeosync_import_deadbeef")
+        project.removeMapLayers(
+            [
+                objects_layer.id(),
+                features_layer.id(),
+                new_objects_layer.id(),
+                new_features_layer.id(),
+            ]
+        )
+
+    def test_full_import_cleanup_preserves_inter_definitive_relations(self):
+        """Configuring temp layers and running cleanup must keep definitive relations."""
+        objects_layer = QgsVectorLayer(
+            "Point?crs=EPSG:4326&field=id:integer&field=feature_id:integer",
+            "Objects",
+            "memory",
+        )
+        features_layer = QgsVectorLayer(
+            "Point?crs=EPSG:4326&field=id:integer",
+            "Features",
+            "memory",
+        )
+        new_objects_layer = QgsVectorLayer(
+            "Point?crs=EPSG:4326&field=id:integer&field=feature_id:integer",
+            "New Objects",
+            "memory",
+        )
+        new_features_layer = QgsVectorLayer(
+            "Point?crs=EPSG:4326&field=id:integer",
+            "New Features",
+            "memory",
+        )
+        for layer in (
+            objects_layer,
+            features_layer,
+            new_objects_layer,
+            new_features_layer,
+        ):
+            self.assertTrue(layer.isValid())
+
+        project = QgsProject.instance()
+        project.addMapLayer(features_layer, False)
+        project.addMapLayer(objects_layer, False)
+        project.addMapLayer(new_features_layer, False)
+        project.addMapLayer(new_objects_layer, False)
+
+        self._create_test_relation(
+            "objects_features",
+            objects_layer,
+            "feature_id",
+            features_layer,
+            "id",
+        )
+
+        peer_replacements = {
+            objects_layer.id(): new_objects_layer.id(),
+            features_layer.id(): new_features_layer.id(),
+        }
+
+        with patch.object(
+            QGISLayerService,
+            "copy_layer_style_and_forms",
+        ), patch.object(
+            QGISLayerService,
+            "_restore_field_and_form_configuration_after_style_copy",
+        ), patch.object(
+            QGISLayerService,
+            "_copy_layer_display_expression",
+        ), patch.object(
+            QGISLayerService,
+            "_remap_layer_relation_references",
+        ):
+            self.layer_service.configure_temporary_import_layer(
+                objects_layer,
+                new_objects_layer,
+                peer_layer_replacements=peer_replacements,
+            )
+            self.layer_service.configure_temporary_import_layer(
+                features_layer,
+                new_features_layer,
+                peer_layer_replacements=peer_replacements,
+            )
+
+        self.layer_service.repair_definitive_project_relations(
+            project,
+            peer_layer_replacements=peer_replacements,
+        )
+        self.layer_service.remove_import_clone_relations(project)
+        project.removeMapLayers(
+            [
+                new_objects_layer.id(),
+                new_features_layer.id(),
+            ]
+        )
+
+        relation_manager = project.relationManager()
+        definitive_relation = relation_manager.relation("objects_features")
+        self.assertTrue(definitive_relation.isValid())
+        self.assertEqual(
+            definitive_relation.referencingLayerId(),
+            objects_layer.id(),
+        )
+        self.assertEqual(
+            definitive_relation.referencedLayerId(),
+            features_layer.id(),
+        )
+
+        relation_manager.removeRelation("objects_features")
+        project.removeMapLayers(
+            [
+                objects_layer.id(),
+                features_layer.id(),
+            ]
+        )
+
     def test_copy_field_configurations(self):
         """Test the _copy_field_configurations method specifically."""
         from qgis.core import QgsDefaultValue

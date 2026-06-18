@@ -1064,7 +1064,9 @@ class QGISLayerService(ILayerService):
             layer_replacements[source_layer_id] = target_layer_id
 
             definitive_relation_snapshots = self._snapshot_definitive_project_relations(
-                relation_manager
+                relation_manager,
+                project,
+                peer_layer_replacements=layer_replacements,
             )
 
             self._remove_relations_for_layer(relation_manager, target_layer_id)
@@ -1135,6 +1137,7 @@ class QGISLayerService(ILayerService):
             self._restore_definitive_project_relations(
                 relation_manager,
                 definitive_relation_snapshots,
+                project,
             )
 
             return relation_id_mapping
@@ -1159,19 +1162,182 @@ class QGISLayerService(ILayerService):
             and layer.name() in IMPORT_LAYER_MAPPINGS
         )
 
+    def repair_definitive_project_relations(
+        self,
+        project: Optional[QgsProject] = None,
+        peer_layer_replacements: Optional[Dict[str, str]] = None,
+    ) -> int:
+        """
+        Reconcile definitive project relations before temporary import cleanup.
+
+        QGIS can repoint or delete definitive relations while import clones are added.
+        Rebuilds any missing or corrupted relation from normalized snapshots of
+        remaining definitive relations and import clones.
+
+        Returns:
+            Number of definitive relations recreated or repaired
+        """
+        project = project or QgsProject.instance()
+        if project is None:
+            return 0
+
+        relation_manager = project.relationManager()
+        if relation_manager is None:
+            return 0
+
+        reverse_peers = {
+            temp_id: def_id
+            for def_id, temp_id in (peer_layer_replacements or {}).items()
+        }
+        desired: Dict[str, Dict[str, Any]] = {}
+
+        for relation_id, relation in relation_manager.relations().items():
+            if self._is_import_clone_relation_id(relation_id):
+                continue
+            snapshot = self._normalize_relation_snapshot_layers(
+                self._snapshot_relation(relation),
+                reverse_peers,
+                project,
+            )
+            if self._snapshot_involves_temporary_import_layer(snapshot, project):
+                continue
+            desired[relation_id] = snapshot
+
+        for relation_id, relation in relation_manager.relations().items():
+            if not self._is_import_clone_relation_id(relation_id):
+                continue
+            snapshot = self._normalize_relation_snapshot_layers(
+                self._snapshot_relation(relation),
+                reverse_peers,
+                project,
+            )
+            if self._snapshot_involves_temporary_import_layer(snapshot, project):
+                continue
+            match_id = self._find_matching_definitive_relation_id(
+                relation_manager,
+                snapshot,
+            )
+            if match_id:
+                target_id = match_id
+            else:
+                relation_name = (snapshot.get("name") or "").strip()
+                if relation_name:
+                    target_id = relation_name
+                else:
+                    target_id = (
+                        f"{snapshot['referencing_id']}__"
+                        f"{snapshot['referenced_id']}"
+                    )
+            if target_id in desired:
+                continue
+            snapshot["id"] = target_id
+            desired[target_id] = snapshot
+
+        repaired = 0
+        for relation_id, snapshot in desired.items():
+            current_relation = relation_manager.relation(relation_id)
+            if self._relation_snapshot_matches(current_relation, snapshot):
+                continue
+            if self._restore_relation_from_snapshot(
+                relation_manager,
+                snapshot,
+                project,
+            ):
+                repaired += 1
+        return repaired
+
     def _snapshot_definitive_project_relations(
         self,
         relation_manager: Any,
+        project: QgsProject,
+        peer_layer_replacements: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Dict[str, Any]]:
         """
         Capture definitive project relations so they can be restored if QGIS mutates them.
+
+        Relations that already point at temporary import layers are normalized back to
+        definitive layer ids when ``peer_layer_replacements`` is provided.
         """
+        reverse_peers = {
+            temp_id: def_id
+            for def_id, temp_id in (peer_layer_replacements or {}).items()
+        }
         snapshots: Dict[str, Dict[str, Any]] = {}
         for relation_id, relation in relation_manager.relations().items():
             if self._is_import_clone_relation_id(relation_id):
                 continue
-            snapshots[relation_id] = self._snapshot_relation(relation)
+            snapshot = self._normalize_relation_snapshot_layers(
+                self._snapshot_relation(relation),
+                reverse_peers,
+                project,
+            )
+            if self._snapshot_involves_temporary_import_layer(snapshot, project):
+                continue
+            snapshots[relation_id] = snapshot
         return snapshots
+
+    def _normalize_relation_snapshot_layers(
+        self,
+        snapshot: Dict[str, Any],
+        reverse_peer_layer_ids: Dict[str, str],
+        project: QgsProject,
+    ) -> Dict[str, Any]:
+        """Rewrite temporary import layer ids in a relation snapshot to definitive ids."""
+        normalized = dict(snapshot)
+        for key in ("referencing_id", "referenced_id"):
+            layer_id = normalized.get(key, "")
+            if layer_id in reverse_peer_layer_ids:
+                normalized[key] = reverse_peer_layer_ids[layer_id]
+        return normalized
+
+    def _snapshot_involves_temporary_import_layer(
+        self,
+        snapshot: Dict[str, Any],
+        project: QgsProject,
+    ) -> bool:
+        """Return True when a snapshot still references a temporary import layer."""
+        for key in ("referencing_id", "referenced_id"):
+            layer = project.mapLayer(snapshot.get(key, ""))
+            if self._is_temporary_import_layer(layer):
+                return True
+        return False
+
+    def _find_matching_definitive_relation_id(
+        self,
+        relation_manager: Any,
+        snapshot: Dict[str, Any],
+    ) -> Optional[str]:
+        """Find an existing definitive relation id with the same layer pair and fields."""
+        key_layers = (
+            snapshot.get("referencing_id"),
+            snapshot.get("referenced_id"),
+        )
+        key_pairs = frozenset(
+            (str(referencing_field), str(referenced_field))
+            for referencing_field, referenced_field in self._normalize_relation_field_pairs(
+                snapshot.get("field_pairs")
+            )
+        )
+        for relation_id, relation in relation_manager.relations().items():
+            if self._is_import_clone_relation_id(relation_id):
+                continue
+            if (
+                relation.referencingLayerId(),
+                relation.referencedLayerId(),
+            ) != key_layers:
+                continue
+            field_pairs = (
+                relation.fieldPairs() if hasattr(relation, "fieldPairs") else {}
+            )
+            pairs = frozenset(
+                (str(referencing_field), str(referenced_field))
+                for referencing_field, referenced_field in self._normalize_relation_field_pairs(
+                    field_pairs
+                )
+            )
+            if pairs == key_pairs:
+                return relation_id
+        return None
 
     def _snapshot_relation(self, relation: Any) -> Dict[str, Any]:
         """Serialize a QgsRelation for later comparison or restoration."""
@@ -1208,25 +1374,33 @@ class QGISLayerService(ILayerService):
         self,
         relation_manager: Any,
         snapshots: Dict[str, Dict[str, Any]],
+        project: Optional[QgsProject] = None,
     ) -> None:
         """Re-create any definitive relation that was altered while cloning import relations."""
+        project = project or QgsProject.instance()
         for relation_id, snapshot in snapshots.items():
             current_relation = relation_manager.relation(relation_id)
             if self._relation_snapshot_matches(current_relation, snapshot):
                 continue
-            self._restore_relation_from_snapshot(relation_manager, snapshot)
+            self._restore_relation_from_snapshot(
+                relation_manager,
+                snapshot,
+                project,
+            )
 
     def _restore_relation_from_snapshot(
         self,
         relation_manager: Any,
         snapshot: Dict[str, Any],
-    ) -> None:
+        project: Optional[QgsProject] = None,
+    ) -> bool:
         """Restore a single definitive project relation from a snapshot."""
         from qgis.core import QgsRelation
 
+        project = project or QgsProject.instance()
         relation_id = snapshot.get("id")
         if not relation_id:
-            return
+            return False
 
         try:
             relation_manager.removeRelation(relation_id)
@@ -1239,13 +1413,25 @@ class QGISLayerService(ILayerService):
         if relation_name and hasattr(restored, "setName"):
             restored.setName(relation_name)
 
+        referencing_layer = (
+            project.mapLayer(snapshot["referencing_id"]) if project else None
+        )
+        referenced_layer = (
+            project.mapLayer(snapshot["referenced_id"]) if project else None
+        )
         self._bind_relation_layers(
             restored,
             snapshot["referencing_id"],
             snapshot["referenced_id"],
-            None,
-            None,
+            referencing_layer,
+            referenced_layer,
         )
+
+        if (
+            restored.referencingLayerId() != snapshot["referencing_id"]
+            or restored.referencedLayerId() != snapshot["referenced_id"]
+        ):
+            return False
 
         field_pairs = self._normalize_relation_field_pairs(snapshot.get("field_pairs"))
         for referencing_field, referenced_field in field_pairs:
@@ -1255,7 +1441,7 @@ class QGISLayerService(ILayerService):
         if strength is not None and hasattr(restored, "setRelationStrength"):
             restored.setRelationStrength(strength)
 
-        relation_manager.addRelation(restored)
+        return relation_manager.addRelation(restored) is not False
 
     def _build_cloned_relation(
         self,

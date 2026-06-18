@@ -56,6 +56,7 @@ try:
         LayerCopyJob,
         block_job_target_signals,
         build_layer_copy_jobs,
+        build_peer_temp_layer_replacements,
         ensure_job_expression_context,
         load_job_source_features,
         load_job_source_features_chunk,
@@ -72,6 +73,7 @@ except ImportError:
         LayerCopyJob,
         block_job_target_signals,
         build_layer_copy_jobs,
+        build_peer_temp_layer_replacements,
         ensure_job_expression_context,
         load_job_source_features,
         load_job_source_features_chunk,
@@ -1760,6 +1762,23 @@ class ImportSummaryDockWidget(QDockWidget):
             from qgis.core import QgsProject
             
             project = QgsProject.instance()
+
+            if self._layer_service and hasattr(
+                self._layer_service, "repair_definitive_project_relations"
+            ):
+                peer_replacements = build_peer_temp_layer_replacements(
+                    project.mapLayers(),
+                    self._get_definitive_layer_id,
+                )
+                repaired = self._layer_service.repair_definitive_project_relations(
+                    project,
+                    peer_layer_replacements=peer_replacements,
+                )
+                if repaired:
+                    print(
+                        f"Repaired {repaired} definitive project relation(s) "
+                        "before import cleanup"
+                    )
 
             if self._layer_service and hasattr(
                 self._layer_service, "remove_import_clone_relations"

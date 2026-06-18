@@ -536,6 +536,20 @@ class ILayerService(ABC):
         pass
 
     @abstractmethod
+    def repair_definitive_project_relations(
+        self,
+        project: Any = None,
+        peer_layer_replacements: Optional[Dict[str, str]] = None,
+    ) -> int:
+        """
+        Reconcile definitive project relations before temporary import cleanup.
+
+        Returns:
+            Number of definitive relations recreated or repaired
+        """
+        pass
+
+    @abstractmethod
     def create_empty_layer_copy(self, source_layer_id: str, new_layer_name: str) -> Optional[str]:
         """
         Create an empty layer with the same structure (fields, geometry type, CRS) as the source layer.
