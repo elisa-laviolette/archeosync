@@ -377,9 +377,11 @@ class QGISProjectCreationService(QObject):
                                     background_layer_id: Optional[str] = None,
                                     extent_crs_authid: Optional[str] = None) -> bool:
         """
-        Create a global field project with layers clipped to an extent.
+        Create a global field project with empty editable layers for the extent.
 
-        Recording areas and extra layers are exported as read-only context.
+        Recording areas and extra layers are exported as read-only context clipped
+        or filtered to the extent. Objects, features, small finds, and alternative
+        objects are created as empty layers (same structure as the source project).
         No project variables or form default expressions are applied.
         """
         try:
@@ -454,13 +456,11 @@ class QGISProjectCreationService(QObject):
                         extent_crs_authid=extent_crs_authid,
                     )
                 else:
-                    success = self._create_extent_intersect_layer_copy(
+                    success = self._create_empty_layer_copy(
                         source_layer_id=layer_id,
                         output_path=output_path,
                         layer_name=layer_name,
-                        extent_geometry=extent_geometry,
                         project=project,
-                        extent_crs_authid=extent_crs_authid,
                     )
                 if not success:
                     print(f"Warning: Failed to export layer {layer_name} for global project")
@@ -487,10 +487,8 @@ class QGISProjectCreationService(QObject):
                 if alt_info:
                     alt_name = alt_info['name']
                     alt_path = os.path.join(project_dir, f"{alt_name}.gpkg")
-                    if self._create_alternative_objects_layer_copy(
+                    if self._create_empty_layer_copy(
                         source_layer_id=alternative_objects_layer_id,
-                        recording_areas_layer_id=recording_areas_layer_id,
-                        recording_area_ids=recording_area_ids,
                         output_path=alt_path,
                         layer_name=alt_name,
                         project=project,

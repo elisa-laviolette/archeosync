@@ -353,14 +353,43 @@ class TestProjectCreationService:
     def test_create_global_recording_areas_uses_sql_filtered_layer_when_ids_present(self):
         """Global recording areas should use the same SQL subset export as zone projects."""
         extent = QgsGeometry.fromWkt("POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))")
-        mock_recording_layer = Mock(spec=QgsVectorLayer)
-        mock_recording_layer.primaryKeyFields.return_value = []
-        mock_recording_layer.fields.return_value.indexOf.return_value = 0
+        recording_layer = QgsVectorLayer(
+            "Polygon?crs=EPSG:4326&field=id:integer",
+            "Zones",
+            "memory",
+        )
+        self.layer_service.get_layer_by_id.return_value = recording_layer
         mock_project = Mock()
-        self.layer_service.get_recording_area_ids_intersecting_geometry.return_value = [1, 2]
+
+        with patch.object(
+            self.project_service,
+            "_create_filtered_layer",
+            return_value=True,
+        ) as mock_filtered_export:
+            result = self.project_service._create_global_recording_areas_layer_copy(
+                recording_areas_layer_id="ra",
+                recording_area_ids=[1, 2],
+                output_path="/tmp/zones.gpkg",
+                layer_name="Zones",
+                extent_geometry=extent,
+                project=mock_project,
+            )
+
+        assert result is True
+        mock_filtered_export.assert_called_once()
+        assert mock_filtered_export.call_args[0][3] == "id IN (1, 2)"
+
+    def test_create_global_field_project_uses_empty_editable_layers(self):
+        """Global projects must export empty objects/features/small finds layers."""
+        extent = QgsGeometry.fromWkt("POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))")
+        mock_recording_layer = MagicMock()
+        self.layer_service.get_recording_area_ids_intersecting_geometry.return_value = [1]
         self.layer_service.get_layer_info.side_effect = lambda layer_id: {
             "ra": {"name": "Zones", "id": "ra"},
             "obj": {"name": "Objects", "id": "obj"},
+            "feat": {"name": "Features", "id": "feat"},
+            "sf": {"name": "Small Finds", "id": "sf"},
+            "alt": {"name": "Alt Objects", "id": "alt"},
         }.get(layer_id)
         self.layer_service.get_layer_by_id.return_value = mock_recording_layer
 
@@ -368,21 +397,26 @@ class TestProjectCreationService:
              patch.object(self.project_service, "_create_clipped_raster", return_value=True), \
              patch.object(
                  self.project_service,
-                 "_create_filtered_layer",
+                 "_create_global_recording_areas_layer_copy",
                  return_value=True,
-             ) as mock_filtered_export, \
+             ) as mock_recording_export, \
+             patch.object(
+                 self.project_service,
+                 "_create_empty_layer_copy",
+                 return_value=True,
+             ) as mock_empty_export, \
              patch.object(
                  self.project_service,
                  "_create_extent_intersect_layer_copy",
                  return_value=True,
-             ), \
+             ) as mock_extent_export, \
              patch.object(self.project_service, "_apply_readonly_layers_in_project"), \
              patch.object(self.project_service, "_copy_project_relations_to_field_project"), \
              patch.object(self.project_service, "_inject_relations_into_qgs_xml"), \
              patch("services.project_creation_service.write_project_metadata"), \
              patch("services.project_creation_service.QgsProject") as mock_qgs_project:
             instance = Mock()
-            instance.crs.return_value = QgsCoordinateReferenceSystem("EPSG:4326")
+            instance.crs.return_value = Mock(isValid=Mock(return_value=True))
             mock_qgs_project.return_value = instance
             instance.write.return_value = True
             instance.mapLayers.return_value = {}
@@ -390,10 +424,10 @@ class TestProjectCreationService:
             self.settings_manager.get_value.side_effect = lambda key, default=None: {
                 "recording_areas_layer": "ra",
                 "objects_layer": "obj",
-                "features_layer": "",
-                "small_finds_layer": "",
+                "features_layer": "feat",
+                "small_finds_layer": "sf",
                 "extra_field_layers": [],
-                "alternative_objects_layer": "",
+                "alternative_objects_layer": "alt",
             }.get(key, default)
 
             result = self.project_service.create_global_field_project(
@@ -403,8 +437,10 @@ class TestProjectCreationService:
             )
 
         assert result is True
-        mock_filtered_export.assert_called_once()
-        assert mock_filtered_export.call_args[0][3] == "id IN (1, 2)"
+        mock_recording_export.assert_called_once()
+        mock_extent_export.assert_not_called()
+        empty_layer_ids = {call.kwargs["source_layer_id"] for call in mock_empty_export.call_args_list}
+        assert empty_layer_ids == {"obj", "feat", "sf", "alt"}
 
     def test_has_relationship_with_recording_areas_with_relation(self):
         """Test relationship detection when a proper QGIS relation exists."""

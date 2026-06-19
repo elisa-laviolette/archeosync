@@ -202,10 +202,10 @@ Field projects inherit visual consistency through existing style copying; themes
 
 ### Global field projects
 **Creation (`QGISProjectCreationService.create_global_field_project`)**:
-- Clips configured vector layers (objects, features, small finds, recording areas) to a user-defined extent (layer source: union of selected features, or union of all features when nothing is selected—not the layer bounding box). Recording areas are exported with the same SQL primary-key subset + Geopackage copy as per-zone projects (`id IN (...)`); spatial clipping for other layers uses `QgsFeatureRequest` when needed so PostgreSQL is not sent QGIS-only `$geometry` SQL. Attribute-only extra layers (e.g. lookup tables) are copied in full.
-- Respects any **layer filter** already applied in the main project (subset string or filter expression) when exporting objects and alternative objects, combined with extent or recording-area constraints.
-- Exports optional **alternative objects** table (no geometry) filtered by recording areas in the extent
-- Includes **extra field layers** and **recording areas** as read-only context (`setReadOnly`, `archeosync/readonly` custom property)
+- Defines the project extent from a user-defined polygon (layer source: union of selected features, or union of all features when nothing is selected—not the layer bounding box).
+- Creates **empty** editable layers (objects, features, small finds, alternative objects) with the same structure as the source project.
+- Exports **recording areas** intersecting the extent as read-only context, using the same SQL primary-key subset + Geopackage copy as per-zone projects (`id IN (...)`), with spatial clipping as fallback when needed.
+- Includes **extra field layers** as read-only context (`setReadOnly`, `archeosync/readonly` custom property), filtered or clipped to the extent when they have a spatial component.
 - No project variables or form default injection
 
 **Import (`FieldProjectImportService`)**:
@@ -243,7 +243,7 @@ Service for detecting duplicate objects with the same recording area and number:
 ### QGISProjectCreationService
 QGIS-specific implementation for field project creation and packaging including:
 - **Per recording area**: Automatic empty layer creation ("Objects", "Features"); spatial bookmark on the recording area geometry; initial map view (`QgsProjectViewSettings` + injected `mapcanvas` extent/rotation in the `.qgs` XML) set from that bookmark and from the main project canvas rotation so the field project opens zoomed and oriented like the source project
-- **Global project**: Extent-clipped copies of existing data; read-only context layers
+- **Global project**: Empty editable layers (objects, features, small finds, alternative objects); read-only context layers filtered or clipped to the extent
 - Layer configuration for offline editing with extra layers support
 - Project packaging with area of interest
 - Automatic cleanup of temporary layers

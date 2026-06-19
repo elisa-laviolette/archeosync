@@ -625,7 +625,7 @@ class IProjectCreationService(ABC):
                                     background_layer_id: Optional[str] = None,
                                     extent_crs_authid: Optional[str] = None) -> bool:
         """
-        Create a global QGIS field project clipped to an extent.
+        Create a global QGIS field project for an extent with empty editable layers.
 
         Args:
             extent_geometry_wkt: WKT polygon defining the project extent
