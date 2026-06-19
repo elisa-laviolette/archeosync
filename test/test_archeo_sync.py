@@ -213,6 +213,75 @@ class TestArcheoSyncMapThemes:
 
         apply_theme.assert_called_once_with("import_map_theme")
 
+
+@pytest.mark.unit
+class TestArcheoSyncImportArchiveScope:
+    """Tests for scoping archive operations to the current import session."""
+
+    def setup_method(self):
+        try:
+            from archeo_sync import ArcheoSyncPlugin
+            self.plugin_cls = ArcheoSyncPlugin
+        except ImportError:
+            self.plugin_cls = None
+
+    def _plugin(self):
+        plugin = self.plugin_cls.__new__(self.plugin_cls)
+        plugin._settings_manager = Mock()
+        plugin._map_theme_service = Mock()
+        plugin._iface = Mock()
+        plugin._csv_import_service = Mock()
+        plugin._field_project_import_service = Mock()
+        return plugin
+
+    @pytest.mark.skipif(
+        not QGIS_AVAILABLE,
+        reason="ArcheoSyncPlugin import requires QGIS",
+    )
+    def test_handle_import_data_clears_stale_project_archive_when_importing_csv_only(self):
+        plugin = self._plugin()
+        dialog = Mock()
+        dialog.get_selected_csv_files.return_value = ["/data/points.csv"]
+        dialog.get_selected_completed_projects.return_value = []
+
+        plugin._process_csv_files = Mock(return_value=12)
+        plugin._csv_import_service.get_last_import_stats.return_value = {"csv_duplicates": 0}
+
+        with patch.object(plugin, "_apply_configured_map_theme"), \
+             patch.object(plugin, "_show_import_summary") as show_summary:
+            plugin._handle_import_data_accepted(dialog)
+
+        plugin._field_project_import_service.clear_last_imported_projects.assert_called_once()
+        show_summary.assert_called_once()
+        summary_data, kwargs = show_summary.call_args
+        assert summary_data[0]["csv_points_count"] == 12
+        assert kwargs["archive_csv"] is True
+        assert kwargs["archive_projects"] is False
+
+    @pytest.mark.skipif(
+        not QGIS_AVAILABLE,
+        reason="ArcheoSyncPlugin import requires QGIS",
+    )
+    def test_handle_import_data_clears_stale_csv_archive_when_importing_projects_only(self):
+        plugin = self._plugin()
+        dialog = Mock()
+        dialog.get_selected_csv_files.return_value = []
+        dialog.get_selected_completed_projects.return_value = ["/data/project_a"]
+
+        plugin._process_completed_projects = Mock(
+            return_value={"objects_count": 3, "features_count": 0, "small_finds_count": 0}
+        )
+
+        with patch.object(plugin, "_apply_configured_map_theme"), \
+             patch.object(plugin, "_show_import_summary") as show_summary:
+            plugin._handle_import_data_accepted(dialog)
+
+        plugin._csv_import_service.clear_last_imported_files.assert_called_once()
+        show_summary.assert_called_once()
+        _summary_data, kwargs = show_summary.call_args
+        assert kwargs["archive_csv"] is False
+        assert kwargs["archive_projects"] is True
+
     @pytest.mark.skipif(
         not QGIS_AVAILABLE,
         reason="ArcheoSyncPlugin import requires QGIS",

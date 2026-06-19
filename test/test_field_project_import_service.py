@@ -190,6 +190,50 @@ class TestFieldProjectImportService:
     @patch.object(FieldProjectImportService, "_filter_duplicates")
     @patch.object(FieldProjectImportService, "_process_individual_layers_with_matching")
     @patch.object(FieldProjectImportService, "_scan_project_layers")
+    def test_import_field_projects_tracks_only_successfully_processed_paths(
+        self,
+        mock_scan_layers,
+        mock_process_layers,
+        mock_filter_duplicates,
+        mock_create_merged_layer,
+    ):
+        """Only projects processed without error should be queued for archiving."""
+        good_project = "/test/good_project"
+        bad_project = "/test/bad_project"
+        fake_feature = create_iterable_mock_feature()
+
+        def scan_side_effect(project_path, project_import_layers=None):
+            if project_path == bad_project:
+                raise RuntimeError("scan failed")
+            return {
+                "objects": ["Objects.gpkg"],
+                "features": [],
+                "small_finds": [],
+                "alternative_objects": [],
+            }
+
+        mock_scan_layers.side_effect = scan_side_effect
+        mock_process_layers.return_value = {
+            "objects": [fake_feature],
+            "features": [],
+            "small_finds": [],
+        }
+        mock_filter_duplicates.side_effect = lambda features, *_args: features
+        mock_create_merged_layer.return_value = Mock()
+
+        with patch("services.field_project_import_service.QgsProject") as mock_project:
+            mock_project.instance.return_value.addMapLayer.return_value = None
+            result = self.field_import_service.import_field_projects(
+                [good_project, bad_project]
+            )
+
+        assert result.is_valid is True
+        assert self.field_import_service.get_last_imported_projects() == [good_project]
+
+    @patch.object(FieldProjectImportService, "_create_merged_layer")
+    @patch.object(FieldProjectImportService, "_filter_duplicates")
+    @patch.object(FieldProjectImportService, "_process_individual_layers_with_matching")
+    @patch.object(FieldProjectImportService, "_scan_project_layers")
     @patch.object(FieldProjectImportService, "_get_configured_layer_info")
     def test_import_zone_number_warnings_when_some_objects_kept(
         self,

@@ -984,6 +984,7 @@ class CSVImportService(ICSVImportService):
         Returns:
             ValidationResult indicating if import was successful or any error messages
         """
+        self._last_imported_files = []
         # Validate CSV files first
         validation_result = self.validate_csv_files(csv_files)
         if not validation_result.is_valid:
@@ -1220,6 +1221,10 @@ class CSVImportService(ICSVImportService):
             List of imported file paths, or empty list if no import has been performed
         """
         return getattr(self, '_last_imported_files', [])
+    
+    def clear_last_imported_files(self) -> None:
+        """Clear pending CSV archive paths from a previous import session."""
+        self._last_imported_files = []
     
     def archive_last_imported_files(self) -> None:
         """

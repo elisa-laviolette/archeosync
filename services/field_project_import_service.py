@@ -107,6 +107,8 @@ class FieldProjectImportService(QObject):
             return ValidationResult(True, "No projects to import")
         
         try:
+            self._last_imported_projects = []
+            successfully_imported_project_paths: List[str] = []
             # Get existing layers to check for duplicates
             existing_objects_layer = self._get_existing_layer('objects_layer')
             existing_features_layer = self._get_existing_layer('features_layer')
@@ -165,6 +167,7 @@ class FieldProjectImportService(QObject):
                         all_objects_features.extend(converted)
                     
                     processed_projects += 1
+                    successfully_imported_project_paths.append(project_path)
                     
                 except Exception as e:
                     print(f"Error processing project {project_path}: {str(e)}")
@@ -211,7 +214,7 @@ class FieldProjectImportService(QObject):
                 )
             
             # Store imported projects for later archiving instead of archiving immediately
-            self._last_imported_projects = project_paths
+            self._last_imported_projects = successfully_imported_project_paths
             
             # Store import statistics for summary
             self._last_import_stats = {
@@ -288,6 +291,10 @@ class FieldProjectImportService(QObject):
             List of imported project paths, or empty list if no import has been performed
         """
         return getattr(self, '_last_imported_projects', [])
+    
+    def clear_last_imported_projects(self) -> None:
+        """Clear pending field-project archive paths from a previous import session."""
+        self._last_imported_projects = []
     
     def archive_last_imported_projects(self) -> None:
         """

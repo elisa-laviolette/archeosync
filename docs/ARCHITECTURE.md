@@ -227,7 +227,7 @@ QGIS-specific implementation for field project import and processing including:
 - **Layer Creation**: Creates new "New Objects", "New Features", and "New Small Finds" layers in the project
 - **Temporary Layer Configuration**: For each temporary import layer (`New Objects`, etc.), snapshots definitive project relations, clones them with new ``archeosync_import_*`` ids (remapping definitive layer ids to temporary ids and, when present, peer temporary import layers via ``build_peer_temp_layer_replacements``), restores any definitive relation altered by QGIS, then copies symbology, display expression, and form configuration using cloned ``QgsEditFormConfig`` objects (so remapping never mutates definitive forms), re-applies field widgets and edit form (QML/virtual-field copy can reset them), and finally binds `RelationReference` widgets to the cloned relations via `target_layer.referencingRelations(field_index)` (QGIS only lists relations that apply to the temporary layer in the field widget UI; stale definitive-layer relation ids are replaced and `ReferencedLayerId` is refreshed). After validation, ``repair_definitive_project_relations`` reconciles any definitive relation QGIS repointed or removed during import, then import-clone relations are removed before temporary layers are deleted so definitive project relations remain intact.
 - **Feature Collection**: Collects all features from completed field recordings
-- **Automatic Archiving**: Moves imported field projects to the configured archive folder after successful import
+- **Automatic Archiving**: After validation, moves only the CSV files and field projects imported in the current session to the configured archive folders (unselected items and data types from a previous session are not archived)
 - **Validation**: Validates project structure and data integrity
 
 ### DuplicateObjectsDetectorService
@@ -275,7 +275,7 @@ QGIS-specific implementation for CSV import operations including:
 - **Temporary Layer Configuration**: Copies symbology (renderer only), display expression, overlapping field widgets, and project relations from the configured total station points layer to ``Imported_CSV_Points``. Full QML/form copy is skipped because CSV temp layers usually have a different schema than the definitive topo layer (loading the complete style tree can crash QGIS).
 - Comprehensive error handling and validation
 - Interactive column mapping dialog integration
-- **Automatic Archiving**: Moves imported CSV files to configured archive folder after successful import
+- **Automatic Archiving**: After validation, moves only the CSV files imported in the current session to the configured archive folder
 
 ## UI Components
 

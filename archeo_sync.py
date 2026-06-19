@@ -639,7 +639,13 @@ class ArcheoSyncPlugin(QObject):
 
         if self._has_pending_import_temporary_layers():
             summary_data = self._summary_data_from_temporary_import_layers()
-            self._show_import_summary(summary_data)
+            self._show_import_summary(
+                summary_data,
+                archive_csv=bool(self._csv_import_service.get_last_imported_files()),
+                archive_projects=bool(
+                    self._field_project_import_service.get_last_imported_projects()
+                ),
+            )
             return
 
         dialog = ImportDataDialog(
@@ -704,6 +710,12 @@ class ArcheoSyncPlugin(QObject):
             # Get selected items
             selected_csv_files = dialog.get_selected_csv_files()
             selected_completed_projects = dialog.get_selected_completed_projects()
+
+            # Drop stale archive tracking for data types not part of this import session.
+            if not selected_csv_files:
+                self._csv_import_service.clear_last_imported_files()
+            if not selected_completed_projects:
+                self._field_project_import_service.clear_last_imported_projects()
             
             from qgis.PyQt.QtWidgets import QMessageBox
             
@@ -718,11 +730,15 @@ class ArcheoSyncPlugin(QObject):
                 'objects_duplicates': 0,
                 'small_finds_duplicates': 0
             }
+
+            csv_imported = False
+            projects_imported = False
             
             # Process CSV files if any are selected
             if selected_csv_files:
                 csv_result = self._process_csv_files(selected_csv_files)
                 if csv_result is not None:
+                    csv_imported = True
                     summary_data['csv_points_count'] = csv_result
                     csv_stats = self._csv_import_service.get_last_import_stats()
                     summary_data['csv_duplicates'] = csv_stats.get('csv_duplicates', 0)
@@ -731,6 +747,7 @@ class ArcheoSyncPlugin(QObject):
             if selected_completed_projects:
                 project_stats = self._process_completed_projects(selected_completed_projects)
                 if project_stats:
+                    projects_imported = True
                     summary_data.update(project_stats)
             
             # Show summary dialog if any data was imported
@@ -742,7 +759,11 @@ class ArcheoSyncPlugin(QObject):
                 summary_data.get('duplicate_objects_warnings') or
                 summary_data['small_finds_count'] > 0):
                 
-                self._show_import_summary(summary_data)
+                self._show_import_summary(
+                    summary_data,
+                    archive_csv=csv_imported,
+                    archive_projects=projects_imported,
+                )
             
         except Exception as e:
             from qgis.PyQt.QtWidgets import QMessageBox
@@ -859,7 +880,13 @@ class ArcheoSyncPlugin(QObject):
             )
             return None
     
-    def _show_import_summary(self, summary_data: Dict[str, int]) -> None:
+    def _show_import_summary(
+        self,
+        summary_data: Dict[str, int],
+        *,
+        archive_csv: bool = True,
+        archive_projects: bool = True,
+    ) -> None:
         """
         Show the import summary dock widget.
 
@@ -914,6 +941,8 @@ class ArcheoSyncPlugin(QObject):
                 csv_import_service=self._csv_import_service,
                 field_project_import_service=self._field_project_import_service,
                 layer_service=self._layer_service,
+                archive_csv=archive_csv,
+                archive_projects=archive_projects,
                 parent=self._iface.mainWindow()
             )
             

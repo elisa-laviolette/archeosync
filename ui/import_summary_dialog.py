@@ -211,13 +211,15 @@ class ImportSummaryDockWidget(QDockWidget):
     All user-facing strings are wrapped in self.tr() for translation.
     """
     
-    def __init__(self, 
+    def __init__(self,
                  summary_data: ImportSummaryData,
                  iface=None,
                  settings_manager=None,
                  csv_import_service=None,
                  field_project_import_service=None,
                  layer_service=None,
+                 archive_csv: bool = True,
+                 archive_projects: bool = True,
                  parent=None):
         """
         Initialize the import summary dock widget.
@@ -229,6 +231,8 @@ class ImportSummaryDockWidget(QDockWidget):
             csv_import_service: CSV import service for archiving files after validation
             field_project_import_service: Field project import service for archiving projects after validation
             layer_service: Layer service for layer operations
+            archive_csv: Whether CSV files from the current import session should be archived on validation
+            archive_projects: Whether field projects from the current import session should be archived on validation
             parent: Parent widget for the dock widget
         """
         print(f"[DEBUG][UI] ImportSummaryDockWidget created with {len(getattr(summary_data, 'distance_warnings', []))} distance warnings")
@@ -241,6 +245,8 @@ class ImportSummaryDockWidget(QDockWidget):
         self._csv_import_service = csv_import_service
         self._field_project_import_service = field_project_import_service
         self._layer_service = layer_service
+        self._archive_csv = archive_csv
+        self._archive_projects = archive_projects
         self._parent = parent
         
         self._validation_running = False
@@ -1821,12 +1827,12 @@ class ImportSummaryDockWidget(QDockWidget):
         """Archive imported files and folders after successful validation."""
         try:
             # Archive CSV files if CSV import service is available
-            if self._csv_import_service:
+            if self._archive_csv and self._csv_import_service:
                 self._csv_import_service.archive_last_imported_files()
                 print("Archived CSV files after validation")
             
             # Archive field projects if field project import service is available
-            if self._field_project_import_service:
+            if self._archive_projects and self._field_project_import_service:
                 self._field_project_import_service.archive_last_imported_projects()
                 print("Archived field projects after validation")
                 

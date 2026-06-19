@@ -708,6 +708,40 @@ class TestImportSummaryDialog(unittest.TestCase):
             mock_archive.assert_called_once()
             self.mock_iface.removeDockWidget.assert_called_once_with(self.dialog)
             mock_delete_later.assert_called_once()
+
+    def test_archive_imported_data_only_archives_csv_when_configured(self):
+        """Only the data types imported in the current session should be archived."""
+        dock = ImportSummaryDockWidget(
+            summary_data=self.summary_data,
+            iface=self.mock_iface,
+            settings_manager=self.mock_settings_manager,
+            csv_import_service=self.mock_csv_import_service,
+            field_project_import_service=self.mock_field_project_import_service,
+            layer_service=self.mock_layer_service,
+            archive_csv=True,
+            archive_projects=False,
+            parent=self.parent,
+        )
+        dock._archive_imported_data()
+        self.mock_csv_import_service.archive_last_imported_files.assert_called_once()
+        self.mock_field_project_import_service.archive_last_imported_projects.assert_not_called()
+
+    def test_archive_imported_data_only_archives_projects_when_configured(self):
+        """Project archiving is skipped when the current session did not import projects."""
+        dock = ImportSummaryDockWidget(
+            summary_data=self.summary_data,
+            iface=self.mock_iface,
+            settings_manager=self.mock_settings_manager,
+            csv_import_service=self.mock_csv_import_service,
+            field_project_import_service=self.mock_field_project_import_service,
+            layer_service=self.mock_layer_service,
+            archive_csv=False,
+            archive_projects=True,
+            parent=self.parent,
+        )
+        dock._archive_imported_data()
+        self.mock_csv_import_service.archive_last_imported_files.assert_not_called()
+        self.mock_field_project_import_service.archive_last_imported_projects.assert_called_once()
     
     def test_validate_button_error_handling(self):
         """Test that validate button handles errors gracefully."""
