@@ -202,11 +202,11 @@ class FieldProjectImportService(QObject):
                     self._apply_definitive_layer_style(small_finds_layer, "small_finds_layer")
                     layers_created += 1
 
-            # When every imported object was filtered out, no "New Objects" layer exists
-            # for the async duplicate detector; compute warnings synchronously in that case only.
-            if all_objects_features and not filtered_objects_features:
+            # Zone/number warnings apply to objects kept after duplicate filtering (non-exact
+            # conflicts). Exact duplicates are silently removed and must not trigger warnings.
+            if filtered_objects_features and existing_objects_layer:
                 zone_number_duplicate_warnings = self._build_zone_number_duplicate_warnings(
-                    all_objects_features,
+                    filtered_objects_features,
                     existing_objects_layer,
                 )
             
@@ -1299,12 +1299,57 @@ class FieldProjectImportService(QObject):
         """Normalize attribute values used in object duplicate identity keys."""
         if value is None:
             return None
+        if isinstance(value, str):
+            stripped = value.strip()
+            if stripped == "" or stripped.lower() == "null":
+                return None
+            return stripped
         try:
             if isinstance(value, float) and value.is_integer():
                 return int(value)
         except (TypeError, ValueError):
             pass
         return value
+
+    def _get_field_index_case_insensitive_on_fields(self, fields: Any, field_name: str) -> int:
+        """Return a field index on a QgsFields collection, matching names case-insensitively."""
+        field_idx = fields.indexOf(field_name)
+        if field_idx >= 0:
+            return field_idx
+        target = field_name.lower()
+        for field in fields:
+            if field.name().lower() == target:
+                return fields.indexOf(field.name())
+        return -1
+
+    def _get_feature_attribute_case_insensitive(self, feature: Any, field_name: str) -> Any:
+        """Read a feature attribute by field name using the feature's own field schema."""
+        if not field_name:
+            return None
+        fields = feature.fields()
+        if fields is None:
+            return None
+        field_idx = self._get_field_index_case_insensitive_on_fields(fields, field_name)
+        if field_idx < 0:
+            return None
+        return feature.attribute(field_idx)
+
+    def _resolve_field_name_on_layer(self, layer: Any, field_name: str) -> Optional[str]:
+        """Return the canonical field name present on ``layer`` for ``field_name``."""
+        field_idx = self._get_field_index_case_insensitive(layer, field_name)
+        if field_idx < 0:
+            return None
+        return layer.fields().at(field_idx).name()
+
+    def _resolve_field_name_on_feature(self, feature: Any, field_name: str) -> Optional[str]:
+        """Return the canonical field name present on ``feature`` for ``field_name``."""
+        fields = feature.fields()
+        if fields is None:
+            return None
+        field_idx = self._get_field_index_case_insensitive_on_fields(fields, field_name)
+        if field_idx < 0:
+            return None
+        return fields.at(field_idx).name()
 
     def _get_objects_recording_area_field(self, objects_layer: Any) -> Optional[str]:
         """
@@ -1343,10 +1388,16 @@ class FieldProjectImportService(QObject):
             from qgis.core import QgsProject
 
             relation_manager = QgsProject.instance().relationManager()
+            objects_layer_id = objects_layer.id()
+            recording_areas_layer_id = recording_areas_layer.id()
             for relation in relation_manager.relations().values():
+                referencing_layer = relation.referencingLayer()
+                referenced_layer = relation.referencedLayer()
+                if referencing_layer is None or referenced_layer is None:
+                    continue
                 if (
-                    relation.referencingLayer() == objects_layer
-                    and relation.referencedLayer() == recording_areas_layer
+                    referencing_layer.id() == objects_layer_id
+                    and referenced_layer.id() == recording_areas_layer_id
                 ):
                     field_pairs = relation.fieldPairs()
                     if field_pairs:
@@ -1357,14 +1408,7 @@ class FieldProjectImportService(QObject):
 
     def _get_field_index_case_insensitive(self, layer: Any, field_name: str) -> int:
         """Return a field index, matching field names case-insensitively when needed."""
-        field_idx = layer.fields().indexOf(field_name)
-        if field_idx >= 0:
-            return field_idx
-        target = field_name.lower()
-        for field in layer.fields():
-            if field.name().lower() == target:
-                return layer.fields().indexOf(field.name())
-        return -1
+        return self._get_field_index_case_insensitive_on_fields(layer.fields(), field_name)
 
     def _get_object_identity_key(
         self,
@@ -1381,11 +1425,13 @@ class FieldProjectImportService(QObject):
         if not number_field or reference_layer is None:
             return None
 
-        number_idx = self._get_field_index_case_insensitive(reference_layer, number_field)
-        if number_idx < 0:
+        resolved_number_field = self._resolve_field_name_on_layer(reference_layer, number_field)
+        if not resolved_number_field:
             return None
 
-        object_number = self._normalize_object_identity_value(feature.attribute(number_idx))
+        object_number = self._normalize_object_identity_value(
+            self._get_feature_attribute_case_insensitive(feature, resolved_number_field)
+        )
         if object_number is None or object_number == "":
             return None
 
@@ -1396,6 +1442,9 @@ class FieldProjectImportService(QObject):
             relation_field = self._get_objects_recording_area_field(reference_layer)
             if relation_field:
                 candidate_recording_fields.append(relation_field)
+            configured_field = self._settings_manager.get_value("objects_recording_area_field", "")
+            if configured_field and configured_field not in candidate_recording_fields:
+                candidate_recording_fields.append(configured_field)
             alternative_field = self._settings_manager.get_value(
                 "alternative_objects_recording_area_field",
                 "",
@@ -1405,14 +1454,11 @@ class FieldProjectImportService(QObject):
 
         recording_area_id = None
         for field_name in candidate_recording_fields:
-            recording_area_idx = self._get_field_index_case_insensitive(
-                reference_layer,
-                field_name,
-            )
-            if recording_area_idx < 0:
+            resolved_field = self._resolve_field_name_on_feature(feature, field_name)
+            if not resolved_field:
                 continue
             recording_area_id = self._normalize_object_identity_value(
-                feature.attribute(recording_area_idx)
+                self._get_feature_attribute_case_insensitive(feature, resolved_field)
             )
             if recording_area_id is not None and recording_area_id != "":
                 break
@@ -1431,8 +1477,8 @@ class FieldProjectImportService(QObject):
         """
         Detect zone/number conflicts in the import batch and against definitive objects.
 
-        Used when every imported object was filtered out so no temporary layer exists
-        for the async duplicate detector. Runs in a single pass over each layer.
+        Computed synchronously during import so the summary can show warnings immediately,
+        including when some objects remain in New Objects (async detector merges later).
         """
         if not imported_features or reference_layer is None:
             return []

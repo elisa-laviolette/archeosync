@@ -188,6 +188,62 @@ class TestFieldProjectImportService:
 
     @patch.object(FieldProjectImportService, "_create_merged_layer")
     @patch.object(FieldProjectImportService, "_filter_duplicates")
+    @patch.object(FieldProjectImportService, "_process_individual_layers_with_matching")
+    @patch.object(FieldProjectImportService, "_scan_project_layers")
+    @patch.object(FieldProjectImportService, "_get_configured_layer_info")
+    def test_import_zone_number_warnings_when_some_objects_kept(
+        self,
+        mock_configured_layers,
+        mock_scan_layers,
+        mock_process_layers,
+        mock_filter_duplicates,
+        mock_create_merged_layer,
+    ):
+        """Zone/number conflicts must be reported even when some objects remain in New Objects."""
+        project_path = "/test/project1"
+        fake_feature = create_iterable_mock_feature()
+        warning = Mock()
+
+        mock_configured_layers.return_value = {
+            "objects": {"name": "Objects", "geometry_type": 2, "field_types": {}},
+            "features": {"name": None, "geometry_type": None, "field_types": {}},
+            "small_finds": {"name": None, "geometry_type": None, "field_types": {}},
+        }
+        mock_scan_layers.return_value = {
+            "objects": ["Objects.gpkg"],
+            "features": [],
+            "small_finds": [],
+            "alternative_objects": [],
+        }
+        mock_process_layers.return_value = {
+            "objects": [fake_feature],
+            "features": [],
+            "small_finds": [],
+        }
+        mock_filter_duplicates.side_effect = lambda features, *_args: features
+        mock_create_merged_layer.return_value = create_mock_layer_with_fields()
+
+        with patch(
+            "services.field_project_import_service.QgsProject"
+        ) as mock_project, patch.object(
+            self.field_import_service,
+            "_get_existing_layer",
+            return_value=Mock(),
+        ), patch.object(
+            self.field_import_service,
+            "_build_zone_number_duplicate_warnings",
+            return_value=[warning],
+        ) as mock_build_warnings:
+            mock_project.instance.return_value.addMapLayer = Mock()
+            result = self.field_import_service.import_field_projects([project_path])
+
+        assert result.is_valid is True
+        mock_build_warnings.assert_called_once()
+        stats = self.field_import_service.get_last_import_stats()
+        assert stats["duplicate_objects_warnings"] == [warning]
+
+    @patch.object(FieldProjectImportService, "_create_merged_layer")
+    @patch.object(FieldProjectImportService, "_filter_duplicates")
     @patch.object(FieldProjectImportService, "_convert_alternative_features_to_objects")
     @patch.object(FieldProjectImportService, "_process_alternative_objects_layers")
     @patch.object(FieldProjectImportService, "_process_individual_layers_with_matching")
@@ -474,6 +530,68 @@ class TestFieldProjectImportService:
             )
 
         assert filtered == [geometric_feature, no_geom_feature]
+
+    def _make_fields_with_order(self, field_names):
+        """Build a mock QgsFields whose indexOf respects field order."""
+        mock_fields = Mock()
+
+        def index_of(field_name):
+            lowered = {name.lower(): idx for idx, name in enumerate(field_names)}
+            return lowered.get(field_name.lower(), -1)
+
+        def at(index):
+            field = Mock()
+            field.name.return_value = field_names[index]
+            return field
+
+        mock_fields.indexOf.side_effect = index_of
+        mock_fields.at.side_effect = at
+        return mock_fields
+
+    def _make_feature_with_schema(self, field_names, values_by_field):
+        """Build a mock feature whose attribute indices follow its own field order."""
+        fields = self._make_fields_with_order(field_names)
+        feature = Mock()
+        feature.fields.return_value = fields
+        feature.attribute.side_effect = lambda index: values_by_field[field_names[index]]
+        return feature
+
+    def test_get_object_identity_key_reads_attributes_from_feature_schema(self):
+        """Identity keys must use each feature's field order, not the reference layer's."""
+        reference_layer = Mock()
+        reference_layer.fields.return_value = self._make_fields_with_order(["zone", "number"])
+
+        existing_feature = self._make_feature_with_schema(
+            ["zone", "number"],
+            {"zone": 42, "number": 7},
+        )
+        import_feature = self._make_feature_with_schema(
+            ["number", "zone"],
+            {"number": 7, "zone": 42},
+        )
+
+        self.settings_manager.get_value.side_effect = lambda key, default="": {
+            "objects_number_field": "number",
+            "objects_recording_area_field": "zone",
+            "alternative_objects_recording_area_field": "",
+        }.get(key, default)
+
+        with patch.object(
+            self.field_import_service,
+            "_get_objects_recording_area_field",
+            return_value="zone",
+        ):
+            existing_key = self.field_import_service._get_object_identity_key(
+                existing_feature,
+                reference_layer,
+            )
+            import_key = self.field_import_service._get_object_identity_key(
+                import_feature,
+                reference_layer,
+            )
+
+        assert existing_key == (42, 7)
+        assert import_key == (42, 7)
 
     def test_build_zone_number_duplicate_warnings_between_layers(self):
         """Import with same zone/number as definitive object produces a warning."""

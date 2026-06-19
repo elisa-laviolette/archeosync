@@ -234,7 +234,7 @@ QGIS-specific implementation for field project import and processing including:
 Service for detecting duplicate objects with the same recording area and number:
 - **Multi-Layer Detection**: Detects duplicates within "New Objects" layer, original "Objects" layer, and between both layers
 - **Recording Area Integration**: Resolves the recording-area field from QGIS relations first, then from configured ``objects_recording_area_field`` or ``alternative_objects_recording_area_field`` settings; field names are matched case-insensitively and numeric values are normalized (e.g. ``7`` vs ``7.0``)
-- **Import-time conflicts**: When every imported object is filtered out (no ``New Objects`` layer), ``FieldProjectImportService`` records zone/number conflicts synchronously for the summary; otherwise duplicate-object warnings are produced asynchronously by ``DuplicateObjectsDetectorService`` after the summary panel opens
+- **Import-time conflicts**: ``FieldProjectImportService`` records zone/number conflicts synchronously during import (reading each feature's own field schema so GeoPackage field order cannot skew identity keys); ``DuplicateObjectsDetectorService`` then merges additional findings asynchronously when the summary panel opens
 - **Detailed Warnings**: Provides specific information about recording area names and object numbers for each duplicate
 - **Translation Support**: Full internationalization support for warning messages
 - **Error Handling**: Graceful handling of missing configuration or layers without failing the import process

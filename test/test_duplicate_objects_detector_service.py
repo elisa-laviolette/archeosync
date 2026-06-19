@@ -91,7 +91,13 @@ class TestDuplicateObjectsDetectorService(unittest.TestCase):
             lowered = {name.lower(): idx for idx, name in enumerate(field_names)}
             return lowered.get(field_name.lower(), -1)
 
+        def at(index):
+            field = Mock()
+            field.name.return_value = field_names[index]
+            return field
+
         mock_fields.indexOf.side_effect = index_of
+        mock_fields.at.side_effect = at
         mock_layer.fields.return_value = mock_fields
         return mock_layer
 
@@ -186,6 +192,39 @@ class TestDuplicateObjectsDetectorService(unittest.TestCase):
             resolved = self.service._resolve_recording_area_field(mock_layer)
 
         self.assertEqual(resolved, "zone_ref")
+
+    def test_detect_duplicates_between_layers_uses_alternative_recording_field(self):
+        """New Objects may store the recording area in the alternative field name."""
+        original_layer = self._mock_layer_with_fields(["zone_fk", "number"])
+        new_layer = self._mock_layer_with_fields(["zone_text", "number"])
+        original_layer.name.return_value = "Objects"
+        original_layer.getFeatures.return_value = [
+            self._mock_feature_with_values({"zone_fk": 3, "number": 12}),
+        ]
+        new_layer.getFeatures.return_value = [
+            self._mock_feature_with_values({"zone_text": 3, "number": 12}),
+        ]
+
+        def get_value(key, default=None):
+            return {
+                "recording_areas_layer": "ra-layer-id",
+                "objects_recording_area_field": "zone_fk",
+                "alternative_objects_recording_area_field": "zone_text",
+            }.get(key, default)
+
+        self.mock_settings_manager.get_value.side_effect = get_value
+        self.service._get_recording_area_name = Mock(return_value="Area C")
+
+        warnings = self.service._detect_duplicates_between_layers(
+            original_layer,
+            new_layer,
+            Mock(),
+            "number",
+            "zone_fk",
+        )
+
+        self.assertEqual(len(warnings), 1)
+        self.assertEqual(warnings[0].object_number, 12)
 
     def test_detect_duplicates_between_layers(self):
         """Imported object with same zone/number as definitive layer triggers a warning."""

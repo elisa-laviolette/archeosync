@@ -266,6 +266,34 @@ class DuplicateObjectsDetectorService(QObject):
 
         return None
 
+    def _collect_recording_area_field_candidates(
+        self,
+        objects_layer: Any,
+        preferred_field: Optional[str] = None,
+    ) -> List[str]:
+        """Return ordered recording-area field names to try on ``objects_layer``."""
+        candidates: List[str] = []
+
+        def add_candidate(field_name: Optional[str]) -> None:
+            if not field_name:
+                return
+            resolved = self._resolve_field_name_on_layer(objects_layer, field_name)
+            if resolved and resolved not in candidates:
+                candidates.append(resolved)
+
+        add_candidate(preferred_field)
+        add_candidate(self._resolve_recording_area_field(objects_layer))
+
+        configured_field = self._settings_manager.get_value("objects_recording_area_field", "")
+        add_candidate(configured_field)
+
+        alternative_field = self._settings_manager.get_value(
+            "alternative_objects_recording_area_field",
+            "",
+        )
+        add_candidate(alternative_field)
+        return candidates
+
     def _feature_identity_key(
         self,
         feature: Any,
@@ -274,19 +302,37 @@ class DuplicateObjectsDetectorService(QObject):
         recording_area_field: str,
     ) -> Optional[Tuple[Any, Any]]:
         """Build a (recording_area_id, object_number) identity key for a feature."""
-        number_idx = self._get_field_index_case_insensitive(objects_layer, number_field)
-        recording_area_idx = self._get_field_index_case_insensitive(
-            objects_layer,
-            recording_area_field,
-        )
-        if number_idx < 0 or recording_area_idx < 0:
+        resolved_number_field = self._resolve_field_name_on_layer(objects_layer, number_field)
+        if not resolved_number_field:
+            return None
+
+        number_idx = self._get_field_index_case_insensitive(objects_layer, resolved_number_field)
+        if number_idx < 0:
             return None
 
         object_number = self._normalize_identity_value(feature.attribute(number_idx))
-        recording_area_id = self._normalize_identity_value(feature.attribute(recording_area_idx))
-        if not self._identity_value_is_set(recording_area_id) or not self._identity_value_is_set(
-            object_number
+        if not self._identity_value_is_set(object_number):
+            return None
+
+        recording_area_id = None
+        for candidate_field in self._collect_recording_area_field_candidates(
+            objects_layer,
+            preferred_field=recording_area_field,
         ):
+            recording_area_idx = self._get_field_index_case_insensitive(
+                objects_layer,
+                candidate_field,
+            )
+            if recording_area_idx < 0:
+                continue
+            candidate_value = self._normalize_identity_value(
+                feature.attribute(recording_area_idx)
+            )
+            if self._identity_value_is_set(candidate_value):
+                recording_area_id = candidate_value
+                break
+
+        if not self._identity_value_is_set(recording_area_id):
             return None
         return (recording_area_id, object_number)
 
