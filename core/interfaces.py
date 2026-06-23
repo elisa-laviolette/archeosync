@@ -25,7 +25,7 @@ Example usage:
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, Optional, Dict, List
+from typing import Any, Optional, Dict, List, Tuple
 from pathlib import Path
 from dataclasses import dataclass
 
@@ -429,8 +429,16 @@ class ILayerService(ABC):
         pass
 
     @abstractmethod
-    def get_related_objects_info(self, recording_area_feature, objects_layer_id: str, 
-                                number_field: Optional[str], level_field: Optional[str]) -> Dict[str, Any]:
+    def get_related_objects_info(
+        self,
+        recording_area_feature,
+        objects_layer_id: str,
+        number_field: Optional[str],
+        level_field: Optional[str],
+        recording_areas_layer_id: Optional[str] = None,
+        related_features_cache: Optional[Dict[Tuple[str, Any], List[Any]]] = None,
+        unfiltered: bool = False,
+    ) -> Dict[str, Any]:
         """
         Get information about objects related to a recording area feature.
         
@@ -439,6 +447,9 @@ class ILayerService(ABC):
             objects_layer_id: The objects layer ID
             number_field: The number field name (optional)
             level_field: The level field name (optional)
+            recording_areas_layer_id: The recording areas layer ID (required unless unfiltered)
+            related_features_cache: Optional cache for repeated lookups during dialog preparation
+            unfiltered: When True, ignore QGIS layer display filters while still scoping to the recording area
             
         Returns:
             Dictionary with 'last_number' and 'last_level' values, or empty strings if not found

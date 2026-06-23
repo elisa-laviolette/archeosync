@@ -91,8 +91,8 @@ Choose **Per recording area** (default) or **Global project** at the top of the 
 2. Go to **Plugins > ArcheoSync > Prepare Recording**
 3. The dialog will show:
    - **Recording Areas**: Names from layer display expressions, sorted alphabetically
-   - **Next Object Number**: Editable column with automatic calculation based on existing data
-   - **Next Level**: Editable column with intelligent increment logic:
+   - **Next Object Number**: Editable column with automatic calculation based on existing objects in the recording area (ignoring any QGIS layer display filter on the objects layer)
+   - **Next Level**: Editable column with intelligent increment logic (objects layer read the same way; features/small finds levels remain per recording area):
   - Letter + number patterns (e.g., 'A1' → 'A2', 'B3' → 'B4')
   - Pure numeric strings increment numerically (e.g., '5' → '6')
   - Mixed content appends '1' (e.g., 'Level A' → 'Level A1')

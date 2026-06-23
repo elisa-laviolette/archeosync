@@ -1228,6 +1228,52 @@ class TestQGISLayerService(unittest.TestCase):
         mock_relation.getRelatedFeatures.assert_called_once_with(mock_feature)
         self.assertIn(('objects_layer_id', 42), related_features_cache)
 
+    def test_get_related_objects_info_unfiltered_ignores_layer_filters_but_keeps_zone_relation(self):
+        """Unfiltered mode must clear layer filters but still scope to the recording area."""
+        mock_feature = Mock()
+        mock_feature.id.return_value = 1
+
+        mock_obj_feature = Mock()
+        mock_obj_feature.attribute.return_value = 42
+
+        mock_relation = Mock()
+        mock_relation.getRelatedFeatures.return_value = [mock_obj_feature]
+
+        mock_layer = Mock()
+        mock_layer.subsetString.return_value = '"status" = 1'
+        mock_layer.filterExpression.return_value = '"visible" = 1'
+        mock_fields = Mock()
+        mock_fields.indexOf.return_value = 0
+        mock_layer.fields.return_value = mock_fields
+
+        with patch.object(self.layer_service, 'get_layer_by_id', return_value=mock_layer):
+            with patch.object(
+                self.layer_service,
+                '_find_relation_to_recording_area',
+                return_value=mock_relation,
+            ) as mock_find_relation:
+                result = self.layer_service.get_related_objects_info(
+                    mock_feature,
+                    'objects_layer_id',
+                    'number_field',
+                    None,
+                    recording_areas_layer_id='recording_layer_id',
+                    unfiltered=True,
+                )
+
+        self.assertEqual(result['last_number'], '42')
+        mock_find_relation.assert_called_once_with('objects_layer_id', 'recording_layer_id')
+        mock_relation.getRelatedFeatures.assert_called_once_with(mock_feature)
+        subset_calls = mock_layer.setSubsetString.call_args_list
+        self.assertEqual(subset_calls[0][0][0], '')
+        self.assertEqual(subset_calls[-1][0][0], '"status" = 1')
+        mock_layer.setFilterExpression.assert_any_call('')
+        self.assertEqual(
+            mock_layer.setFilterExpression.call_args_list[-1][0][0],
+            '"visible" = 1',
+        )
+        mock_layer.getFeatures.assert_not_called()
+
     def test_calculate_next_level_empty_last_level(self):
         """Test calculating next level when last level is empty."""
         # Mock field info for string field

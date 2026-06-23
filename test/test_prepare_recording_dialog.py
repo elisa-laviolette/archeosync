@@ -13,7 +13,7 @@ __date__ = '2025-07-01'
 __copyright__ = 'Copyright 2025, Elisa Caron-Laviolette'
 
 import unittest
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch, MagicMock, call
 from qgis.PyQt import QtWidgets
 from qgis.PyQt.QtCore import Qt
 
@@ -421,6 +421,53 @@ class TestPrepareRecordingDialog(unittest.TestCase):
         # Verify background image dropdown was created
         background_widget = self.dialog._entities_table.cellWidget(0, 5)  # Background image column
         self.assertIsInstance(background_widget, QtWidgets.QComboBox)
+
+    def test_populate_entities_table_reads_objects_layer_unfiltered(self):
+        """Next number/level must use the full objects layer, not zone-filtered features."""
+        def mock_get_value(key, default=None):
+            if key == 'recording_areas_layer':
+                return 'recording_layer_id'
+            elif key == 'objects_layer':
+                return 'objects_layer_id'
+            elif key == 'objects_number_field':
+                return 'number_field'
+            elif key == 'objects_level_field':
+                return 'level_field'
+            return default
+
+        self.mock_settings_manager.get_value.side_effect = mock_get_value
+        self.dialog._create_entities_table(self.dialog._entities_table.parent().layout())
+
+        mock_layer = Mock()
+        mock_layer.displayExpression.return_value = ''
+        mock_fields = Mock()
+        mock_fields.indexOf.return_value = 0
+        mock_layer.fields.return_value = mock_fields
+        self.mock_layer_service.get_layer_by_id.return_value = mock_layer
+
+        mock_feature = Mock()
+        mock_feature.id.return_value = 1
+        mock_feature.attribute.return_value = 'Test Area'
+
+        self.mock_layer_service.get_related_objects_info.return_value = {
+            'last_number': '10',
+            'last_level': 'Level A',
+        }
+        self.mock_layer_service.calculate_next_level.return_value = 'Level B'
+
+        self.dialog._populate_entities_table([mock_feature])
+
+        objects_calls = [
+            call
+            for call in self.mock_layer_service.get_related_objects_info.call_args_list
+            if call.args[1] == 'objects_layer_id'
+        ]
+        self.assertTrue(objects_calls, "Expected at least one objects-layer lookup")
+        for call in objects_calls:
+            self.assertTrue(
+                call.kwargs.get('unfiltered'),
+                "Objects layer lookups must pass unfiltered=True",
+            )
 
     def test_populate_entities_table_uses_highest_level_across_all_configured_layers(self):
         """Next level must be based on highest last level across objects/features/small_finds."""

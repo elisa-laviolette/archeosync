@@ -120,8 +120,10 @@ Interface for QGIS layer operations:
     objects_layer_id: str,
     number_field: Optional[str],
     level_field: Optional[str],
-    recording_areas_layer_id: Optional[str] = None
-) -> Dict[str, Any]`
+    recording_areas_layer_id: Optional[str] = None,
+    related_features_cache: Optional[Dict[Tuple[str, Any], List[Any]]] = None,
+    unfiltered: bool = False
+) -> Dict[str, Any]` — when `unfiltered=True`, ignores QGIS layer display filters but still scopes objects to the recording area via relations; used by **Prepare Recording** for next object number/level
 - `calculate_next_level(
     last_level: str,
     level_field: str,

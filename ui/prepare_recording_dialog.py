@@ -611,6 +611,7 @@ class PrepareRecordingDialog(QtWidgets.QDialog):
                     level_field,
                     recording_areas_layer_id,
                     related_features_cache=related_features_cache,
+                    unfiltered=True,
                 )
                 
                 # Add last number
@@ -642,6 +643,7 @@ class PrepareRecordingDialog(QtWidgets.QDialog):
                         level_field,
                         recording_areas_layer_id,
                         related_features_cache=related_features_cache,
+                        unfiltered=True,
                     )
                 highest_last_level = self._get_highest_last_level_across_configured_layers(
                     feature=feature,
@@ -708,6 +710,7 @@ class PrepareRecordingDialog(QtWidgets.QDialog):
                 configured_level_field,
                 recording_areas_layer_id,
                 related_features_cache=related_features_cache,
+                unfiltered=(layer_setting_key == 'objects_layer'),
             )
             last_level = str(layer_info.get('last_level', '') or '')
             if last_level:

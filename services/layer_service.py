@@ -483,6 +483,28 @@ class QGISLayerService(ILayerService):
         self._recording_area_relation_cache[cache_key] = relation
         return relation
 
+    def _get_related_features_ignoring_layer_filters(
+        self,
+        relation,
+        recording_area_feature,
+        objects_layer: QgsVectorLayer,
+    ) -> List[Any]:
+        """Return related features while temporarily ignoring QGIS layer display filters."""
+        original_subset = (objects_layer.subsetString() or "").strip()
+        original_filter_expression = ""
+        if hasattr(objects_layer, "filterExpression"):
+            original_filter_expression = (objects_layer.filterExpression() or "").strip()
+
+        try:
+            objects_layer.setSubsetString("")
+            if hasattr(objects_layer, "setFilterExpression"):
+                objects_layer.setFilterExpression("")
+            return list(relation.getRelatedFeatures(recording_area_feature))
+        finally:
+            objects_layer.setSubsetString(original_subset)
+            if hasattr(objects_layer, "setFilterExpression"):
+                objects_layer.setFilterExpression(original_filter_expression)
+
     def get_selected_features_count(self, layer_id: str) -> int:
         """
         Get the number of selected features in a layer.
@@ -595,7 +617,8 @@ class QGISLayerService(ILayerService):
         number_field: Optional[str],
         level_field: Optional[str],
         recording_areas_layer_id: Optional[str] = None,
-        related_features_cache: Optional[Dict[Tuple[str, int], List[Any]]] = None,
+        related_features_cache: Optional[Dict[Tuple[str, Any], List[Any]]] = None,
+        unfiltered: bool = False,
     ) -> Dict[str, Any]:
         """
         Get information about objects related to a recording area feature.
@@ -609,6 +632,8 @@ class QGISLayerService(ILayerService):
                 - This is now required because QgsFeature does not provide a .layer() method.
             related_features_cache: Optional cache keyed by ``(child_layer_id, recording_area_feature.id())``
                 so repeated lookups during dialog preparation reuse ``getRelatedFeatures`` results.
+            unfiltered: When True, ignore QGIS layer display filters (subset string / filter
+                expression) while still scoping objects to the recording area via relations.
         
         Returns:
             Dictionary with 'last_number' and 'last_level' values, or empty strings if not found
@@ -631,6 +656,12 @@ class QGISLayerService(ILayerService):
             )
             if relation is None:
                 related_objects = []
+            elif unfiltered:
+                related_objects = self._get_related_features_ignoring_layer_filters(
+                    relation,
+                    recording_area_feature,
+                    objects_layer,
+                )
             else:
                 related_objects = list(relation.getRelatedFeatures(recording_area_feature))
             if related_features_cache is not None:
