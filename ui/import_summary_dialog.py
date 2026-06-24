@@ -60,6 +60,8 @@ try:
         ensure_job_expression_context,
         load_job_source_features,
         load_job_source_features_chunk,
+        remove_pending_import_layers,
+        reset_import_session_tracking,
         unblock_job_target_signals,
     )
 except ImportError:
@@ -77,6 +79,8 @@ except ImportError:
         ensure_job_expression_context,
         load_job_source_features,
         load_job_source_features_chunk,
+        remove_pending_import_layers,
+        reset_import_session_tracking,
         unblock_job_target_signals,
     )
 
@@ -314,7 +318,79 @@ class ImportSummaryDockWidget(QDockWidget):
             warnings_layout.addLayout(warning_item_layout)
         content_layout.addLayout(warnings_layout)
         print("[DEBUG][UI] Added out-of-bounds warnings layout to content_layout")
-    
+
+    def _append_warning_entries_section(
+        self,
+        parent_layout: QtWidgets.QVBoxLayout,
+        section_title: str,
+        title_color: str,
+        item_color: str,
+        between_layers_button_color: str,
+        warnings: List[Any],
+    ) -> None:
+        """
+        Append one titled warning list to ``parent_layout``.
+
+        Each call creates its own nested layout so multiple warning groups (for example
+        duplicate objects and skipped numbers) stay visible together.
+        """
+        if not warnings:
+            return
+
+        section_layout = QtWidgets.QVBoxLayout()
+        title_label = QtWidgets.QLabel(self.tr(section_title))
+        title_label.setStyleSheet(f"font-weight: bold; color: {title_color};")
+        section_layout.addWidget(title_label)
+
+        for warning in warnings:
+            maybe_yield_to_ui()
+            warning_item_layout = QtWidgets.QHBoxLayout()
+
+            if hasattr(warning, "message"):
+                warning_text = warning.message
+            else:
+                warning_text = str(warning)
+
+            warning_item = QtWidgets.QLabel(f"• {warning_text}")
+            warning_item.setStyleSheet(f"color: {item_color}; margin-left: 10px;")
+            warning_item.setWordWrap(True)
+            warning_item_layout.addWidget(warning_item)
+
+            if hasattr(warning, "message") and self._iface:
+                if getattr(warning, "second_layer_name", None):
+                    button = QtWidgets.QPushButton(self.tr("Select and Show Both Entities"))
+                    button.setStyleSheet(
+                        f"background-color: {between_layers_button_color}; color: white; "
+                        "border: none; padding: 5px; border-radius: 3px;"
+                    )
+                    button.clicked.connect(
+                        lambda checked, w=warning: self._open_both_filtered_attribute_tables(w)
+                    )
+                else:
+                    button = QtWidgets.QPushButton(self.tr("Select and Show Entities"))
+                    button.setStyleSheet(
+                        "background-color: #4CAF50; color: white; border: none; "
+                        "padding: 5px; border-radius: 3px;"
+                    )
+                    button.clicked.connect(
+                        lambda checked, w=warning: self._open_filtered_attribute_table(w)
+                    )
+                warning_item_layout.addWidget(button)
+
+            warning_item_layout.addStretch()
+            section_layout.addLayout(warning_item_layout)
+
+        parent_layout.addLayout(section_layout)
+
+    def _should_show_objects_section(self) -> bool:
+        """Return True when the summary should include the objects group box."""
+        return (
+            self._summary_data.objects_count > 0
+            or getattr(self._summary_data, "duplicate_objects_warnings", [])
+            or getattr(self._summary_data, "skipped_numbers_warnings", [])
+            or getattr(self._summary_data, "alternative_objects_merged_count", 0) > 0
+        )
+
     def _setup_ui(self) -> None:
         """Set up the user interface components."""
         title_text = self.tr("Import Summary")
@@ -442,7 +518,7 @@ class ImportSummaryDockWidget(QDockWidget):
             content_layout.addWidget(features_group)
         
         # Objects section
-        if self._summary_data.objects_count > 0:
+        if self._should_show_objects_section():
             objects_group = self._create_objects_section()
             content_layout.addWidget(objects_group)
         
@@ -691,86 +767,24 @@ class ImportSummaryDockWidget(QDockWidget):
             layout.addLayout(duplicates_layout)
         
         # Duplicate objects warnings
-        if hasattr(self._summary_data, 'duplicate_objects_warnings') and self._summary_data.duplicate_objects_warnings:
-            warnings_layout = QtWidgets.QVBoxLayout()
-            warnings_label = QtWidgets.QLabel(self.tr("Duplicate Objects Warnings:"))
-            warnings_label.setStyleSheet("font-weight: bold; color: #FF4500;")
-            warnings_layout.addWidget(warnings_label)
-            
-            for warning in self._summary_data.duplicate_objects_warnings:
-                maybe_yield_to_ui()
-                warning_item_layout = QtWidgets.QHBoxLayout()
-                
-                # Warning text - check if it has the expected attributes
-                if hasattr(warning, 'message'):
-                    warning_text = warning.message
-                else:
-                    warning_text = str(warning)
-                
-                warning_item = QtWidgets.QLabel(f"• {warning_text}")
-                warning_item.setStyleSheet("color: #FF4500; margin-left: 10px;")
-                warning_item.setWordWrap(True)
-                warning_item_layout.addWidget(warning_item)
-                
-                # Add button if we have structured data and QGIS interface
-                if hasattr(warning, 'message') and self._iface:
-                    if getattr(warning, "second_layer_name", None):
-                        # Between-layer warning - open both tables
-                        button = QtWidgets.QPushButton(self.tr("Select and Show Both Entities"))
-                        button.setStyleSheet("background-color: #FF6B35; color: white; border: none; padding: 5px; border-radius: 3px;")
-                        button.clicked.connect(lambda checked, w=warning: self._open_both_filtered_attribute_tables(w))
-                    else:
-                        # Single layer warning
-                        button = QtWidgets.QPushButton(self.tr("Select and Show Entities"))
-                        button.setStyleSheet("background-color: #4CAF50; color: white; border: none; padding: 5px; border-radius: 3px;")
-                        button.clicked.connect(lambda checked, w=warning: self._open_filtered_attribute_table(w))
-                    warning_item_layout.addWidget(button)
-                
-                warning_item_layout.addStretch()
-                warnings_layout.addLayout(warning_item_layout)
-            
-            layout.addLayout(warnings_layout)
-        
+        self._append_warning_entries_section(
+            layout,
+            "Duplicate Objects Warnings:",
+            "#FF4500",
+            "#FF4500",
+            "#FF6B35",
+            getattr(self._summary_data, "duplicate_objects_warnings", []) or [],
+        )
+
         # Skipped numbers warnings
-        if hasattr(self._summary_data, 'skipped_numbers_warnings') and self._summary_data.skipped_numbers_warnings:
-            warnings_layout = QtWidgets.QVBoxLayout()
-            warnings_label = QtWidgets.QLabel(self.tr("Skipped Numbers Warnings:"))
-            warnings_label.setStyleSheet("font-weight: bold; color: #FF8C00;")
-            warnings_layout.addWidget(warnings_label)
-            
-            for warning in self._summary_data.skipped_numbers_warnings:
-                maybe_yield_to_ui()
-                warning_item_layout = QtWidgets.QHBoxLayout()
-                
-                # Warning text - check if it has the expected attributes
-                if hasattr(warning, 'message'):
-                    warning_text = warning.message
-                else:
-                    warning_text = str(warning)
-                
-                warning_item = QtWidgets.QLabel(f"• {warning_text}")
-                warning_item.setStyleSheet("color: #FF8C00; margin-left: 10px;")
-                warning_item.setWordWrap(True)
-                warning_item_layout.addWidget(warning_item)
-                
-                # Add button if we have structured data and QGIS interface
-                if hasattr(warning, 'message') and self._iface:
-                    if getattr(warning, "second_layer_name", None):
-                        # Between-layer warning - open both tables
-                        button = QtWidgets.QPushButton(self.tr("Select and Show Both Entities"))
-                        button.setStyleSheet("background-color: #FF6B35; color: white; border: none; padding: 5px; border-radius: 3px;")
-                        button.clicked.connect(lambda checked, w=warning: self._open_both_filtered_attribute_tables(w))
-                    else:
-                        # Single layer warning
-                        button = QtWidgets.QPushButton(self.tr("Select and Show Entities"))
-                        button.setStyleSheet("background-color: #4CAF50; color: white; border: none; padding: 5px; border-radius: 3px;")
-                        button.clicked.connect(lambda checked, w=warning: self._open_filtered_attribute_table(w))
-                    warning_item_layout.addWidget(button)
-                
-                warning_item_layout.addStretch()
-                warnings_layout.addLayout(warning_item_layout)
-            
-            layout.addLayout(warnings_layout)
+        self._append_warning_entries_section(
+            layout,
+            "Skipped Numbers Warnings:",
+            "#FF8C00",
+            "#FF8C00",
+            "#FF6B35",
+            getattr(self._summary_data, "skipped_numbers_warnings", []) or [],
+        )
         
         return group
     
@@ -1172,6 +1186,11 @@ class ImportSummaryDockWidget(QDockWidget):
             if reply == yes_val:
                 # Delete temporary layers
                 self._delete_temporary_layers()
+                reset_import_session_tracking(
+                    csv_import_service=self._csv_import_service,
+                    field_project_import_service=self._field_project_import_service,
+                    layer_service=self._layer_service,
+                )
                 
                 # Delete the dock widget from the interface
                 if self._iface:
@@ -1353,6 +1372,34 @@ class ImportSummaryDockWidget(QDockWidget):
             )
         return steps
 
+    _WARNING_RESULT_KEYS: Tuple[str, ...] = (
+        "duplicate_objects_warnings",
+        "skipped_numbers_warnings",
+        "out_of_bounds_warnings",
+        "distance_warnings",
+        "missing_total_station_warnings",
+        "duplicate_total_station_identifiers_warnings",
+        "height_difference_warnings",
+    )
+
+    def _planned_warning_result_keys(self) -> set:
+        """Return summary-data attribute names that the current refresh plan will update."""
+        return {
+            step[0]
+            for step in self._warning_refresh_plan
+            if step[0] is not None
+        }
+
+    def _apply_accumulated_warning_refresh_results(self) -> None:
+        """
+        Apply detector results collected so far onto ``ImportSummaryData``.
+
+        Only attributes present in ``_warning_refresh_results`` are updated so a
+        completed step never clears warnings from another step that is still pending.
+        """
+        for result_key, warnings in self._warning_refresh_results.items():
+            setattr(self._summary_data, result_key, list(warnings or []))
+
     def _run_prepare_layers_for_warning_detection(self) -> List[Any]:
         """Sync virtual fields before running detectors."""
         self._sync_virtual_fields_to_temporary_import_layers()
@@ -1399,7 +1446,9 @@ class ImportSummaryDockWidget(QDockWidget):
             if not self._warnings_analysis_running:
                 return
             if result_key is not None:
-                self._warning_refresh_results[result_key] = warnings
+                self._warning_refresh_results[result_key] = list(warnings or [])
+                self._apply_accumulated_warning_refresh_results()
+                self._recreate_summary_content()
             self._warning_refresh_index += 1
             self._update_warnings_analysis_progress(
                 self._warning_refresh_index,
@@ -1423,54 +1472,16 @@ class ImportSummaryDockWidget(QDockWidget):
 
         self._dispatch_warning_detection_step(status_label, runner, on_success, on_error)
 
-    def _merge_duplicate_object_warnings(
-        self,
-        existing_warnings: List[Any],
-        detected_warnings: List[Any],
-    ) -> List[Any]:
-        """Merge import-time and detector warnings, keeping one entry per zone/number."""
-        merged = list(existing_warnings or [])
-        seen_identities = set()
-        for warning in merged:
-            if isinstance(warning, WarningData):
-                seen_identities.add((warning.recording_area_name, warning.object_number))
-
-        for warning in detected_warnings or []:
-            if isinstance(warning, WarningData):
-                identity = (warning.recording_area_name, warning.object_number)
-                if identity in seen_identities:
-                    continue
-                seen_identities.add(identity)
-            merged.append(warning)
-        return merged
-
     def _finalize_warning_refresh(self) -> None:
         """Apply collected warnings and rebuild the summary panel on the next event-loop tick."""
         try:
-            for result_key, warnings in self._warning_refresh_results.items():
-                if result_key == "duplicate_objects_warnings":
-                    existing = list(getattr(self._summary_data, result_key, []) or [])
-                    setattr(
-                        self._summary_data,
-                        result_key,
-                        self._merge_duplicate_object_warnings(existing, warnings),
-                    )
-                else:
-                    setattr(self._summary_data, result_key, warnings)
-            for result_key in (
-                "duplicate_objects_warnings",
-                "skipped_numbers_warnings",
-                "out_of_bounds_warnings",
-                "distance_warnings",
-                "missing_total_station_warnings",
-                "duplicate_total_station_identifiers_warnings",
-                "height_difference_warnings",
-            ):
-                if result_key not in self._warning_refresh_results:
-                    if result_key == "duplicate_objects_warnings" and getattr(
-                        self._summary_data, result_key, []
-                    ):
-                        continue
+            self._apply_accumulated_warning_refresh_results()
+            planned_keys = self._planned_warning_result_keys()
+            for result_key in self._WARNING_RESULT_KEYS:
+                if result_key in planned_keys:
+                    if result_key not in self._warning_refresh_results:
+                        setattr(self._summary_data, result_key, [])
+                elif result_key not in self._warning_refresh_results:
                     setattr(self._summary_data, result_key, [])
 
             QTimer.singleShot(1, self._complete_warning_refresh_ui)
@@ -1657,7 +1668,7 @@ class ImportSummaryDockWidget(QDockWidget):
             content_layout.addWidget(features_group)
         
         # Objects section
-        if self._summary_data.objects_count > 0:
+        if self._should_show_objects_section():
             objects_group = self._create_objects_section()
             content_layout.addWidget(objects_group)
         
@@ -1766,57 +1777,12 @@ class ImportSummaryDockWidget(QDockWidget):
         """Delete temporary layers after features have been copied to definitive layers."""
         try:
             from qgis.core import QgsProject
-            
-            project = QgsProject.instance()
 
-            if self._layer_service and hasattr(
-                self._layer_service, "repair_definitive_project_relations"
-            ):
-                peer_replacements = build_peer_temp_layer_replacements(
-                    project.mapLayers(),
-                    self._get_definitive_layer_id,
-                )
-                repaired = self._layer_service.repair_definitive_project_relations(
-                    project,
-                    peer_layer_replacements=peer_replacements,
-                )
-                if repaired:
-                    print(
-                        f"Repaired {repaired} definitive project relation(s) "
-                        "before import cleanup"
-                    )
-
-            if self._layer_service and hasattr(
-                self._layer_service, "remove_import_clone_relations"
-            ):
-                removed = self._layer_service.remove_import_clone_relations(project)
-                if removed:
-                    print(
-                        f"Removed {removed} temporary import relation clone(s) "
-                        "before deleting temp layers"
-                    )
-            
-            # Define temporary layer names to delete
-            temporary_layer_names = ["New Objects", "New Features", "New Small Finds", "Imported_CSV_Points"]
-            
-            layers_to_remove = []
-            
-            # Find temporary layers
-            for layer in project.mapLayers().values():
-                if layer.name() in temporary_layer_names:
-                    layers_to_remove.append(layer.id())
-                    print(f"Found temporary layer to delete: {layer.name()}")
-            
-            # Remove temporary layers from project
-            for layer_id in layers_to_remove:
-                project.removeMapLayer(layer_id)
-                print(f"Deleted temporary layer: {layer_id}")
-            
-            if layers_to_remove:
-                print(f"Successfully deleted {len(layers_to_remove)} temporary layer(s)")
-            else:
-                print("No temporary layers found to delete")
-                
+            remove_pending_import_layers(
+                QgsProject.instance(),
+                layer_service=self._layer_service,
+                get_setting=self._get_definitive_layer_id,
+            )
         except Exception as e:
             print(f"Error deleting temporary layers: {e}")
             import traceback

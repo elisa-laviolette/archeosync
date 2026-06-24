@@ -30,6 +30,8 @@ IMPORT_LAYER_MAPPINGS: Dict[str, str] = {
     "Imported_CSV_Points": "total_station_points_layer",
 }
 
+TEMPORARY_IMPORT_LAYER_NAMES = tuple(IMPORT_LAYER_MAPPINGS.keys())
+
 _FID_FIELD_NAMES = frozenset({"fid", "id", "gid", "objectid", "featureid"})
 
 
@@ -440,6 +442,107 @@ def build_layer_copy_jobs(
         )
 
     return jobs
+
+
+def remove_pending_import_layers(
+    project: Any,
+    layer_service: Optional[Any] = None,
+    get_setting: Optional[Callable[[str, Any], Any]] = None,
+) -> int:
+    """
+    Remove temporary import layers and related relation clones from the project.
+
+    Called before a new import and when the user cancels a pending import so stale
+    memory layers are never reused after source files change on disk.
+
+    Args:
+        project: QgsProject instance
+        layer_service: Optional layer service for relation cleanup
+        get_setting: Optional settings lookup for peer layer replacement mapping
+
+    Returns:
+        Number of map layers removed
+    """
+    if project is None:
+        return 0
+
+    try:
+        if layer_service is not None and get_setting is not None and hasattr(
+            layer_service, "repair_definitive_project_relations"
+        ):
+            peer_replacements = build_peer_temp_layer_replacements(
+                project.mapLayers(),
+                get_setting,
+            )
+            repaired = layer_service.repair_definitive_project_relations(
+                project,
+                peer_layer_replacements=peer_replacements,
+            )
+            if repaired:
+                print(
+                    f"Repaired {repaired} definitive project relation(s) "
+                    "before import cleanup"
+                )
+
+        if layer_service is not None and hasattr(
+            layer_service, "remove_import_clone_relations"
+        ):
+            removed = layer_service.remove_import_clone_relations(project)
+            if removed:
+                print(
+                    f"Removed {removed} temporary import relation clone(s) "
+                    "before deleting temp layers"
+                )
+
+        layers_to_remove: List[str] = []
+        for layer in project.mapLayers().values():
+            if layer.name() in TEMPORARY_IMPORT_LAYER_NAMES:
+                layers_to_remove.append(layer.id())
+                print(f"Found temporary layer to delete: {layer.name()}")
+
+        if layer_service is not None and hasattr(layer_service, "invalidate_layer_cache"):
+            for layer_id in layers_to_remove:
+                layer_service.invalidate_layer_cache(layer_id)
+        elif layer_service is not None and hasattr(layer_service, "clear_caches"):
+            layer_service.clear_caches()
+
+        for layer_id in layers_to_remove:
+            project.removeMapLayer(layer_id)
+            print(f"Deleted temporary layer: {layer_id}")
+
+        if layers_to_remove:
+            print(f"Successfully deleted {len(layers_to_remove)} temporary layer(s)")
+        else:
+            print("No temporary layers found to delete")
+
+        return len(layers_to_remove)
+    except Exception as exc:
+        print(f"Error deleting temporary import layers: {exc}")
+        import traceback
+
+        traceback.print_exc()
+        return 0
+
+
+def reset_import_session_tracking(
+    csv_import_service: Optional[Any] = None,
+    field_project_import_service: Optional[Any] = None,
+    layer_service: Optional[Any] = None,
+) -> None:
+    """
+    Clear pending archive paths and in-memory layer caches after import cancellation.
+
+    Ensures a subsequent import does not reuse bookkeeping or metadata from a
+    cancelled session.
+    """
+    if csv_import_service is not None and hasattr(csv_import_service, "clear_last_imported_files"):
+        csv_import_service.clear_last_imported_files()
+    if field_project_import_service is not None and hasattr(
+        field_project_import_service, "clear_last_imported_projects"
+    ):
+        field_project_import_service.clear_last_imported_projects()
+    if layer_service is not None and hasattr(layer_service, "clear_caches"):
+        layer_service.clear_caches()
 
 
 def build_peer_temp_layer_replacements(

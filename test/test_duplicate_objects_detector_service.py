@@ -49,14 +49,66 @@ class TestDuplicateObjectsDetectorService(unittest.TestCase):
     
     def test_detect_duplicate_objects_no_new_objects_layer(self):
         """Test that no warnings are returned when no new objects layer is found."""
-        self.mock_settings_manager.get_value.side_effect = lambda key, default=None: "test_field"
-        mock_layer = Mock()
-        self.mock_layer_service.get_layer_by_id.return_value = mock_layer
-        self.mock_layer_service.get_layer_by_name.return_value = None
-        
-        warnings = self.service.detect_duplicate_objects()
-        
+        self.mock_settings_manager.get_value.side_effect = lambda key, default=None: {
+            "enable_duplicate_objects_warnings": True,
+            "objects_layer": "obj-id",
+            "recording_areas_layer": "ra-id",
+            "objects_number_field": "number",
+        }.get(key, default)
+        mock_layer = self._mock_layer_with_fields(["zone", "number"])
+        recording_areas_layer = Mock()
+        recording_areas_layer.getFeatures.return_value = []
+        self.mock_layer_service.get_layer_by_id.side_effect = lambda layer_id: {
+            "obj-id": mock_layer,
+            "ra-id": recording_areas_layer,
+        }.get(layer_id)
+        self.service._find_layer_by_name = Mock(return_value=None)
+        self.service._resolve_recording_area_field = Mock(return_value="zone")
+        self.service._resolve_field_name_on_layer = Mock(return_value="number")
+
+        with patch.object(self.service, "_build_identity_index", return_value={}) as mock_index, \
+             patch.object(self.service, "_build_recording_area_name_lookup", return_value={}), \
+             patch.object(self.service, "_warnings_from_within_layer_duplicates") as mock_within:
+            warnings = self.service.detect_duplicate_objects()
+
         self.assertEqual(warnings, [])
+        mock_index.assert_not_called()
+        mock_within.assert_not_called()
+
+    def test_detect_duplicate_objects_skips_within_definitive_layer(self):
+        """Internal duplicates in the definitive layer must not produce warnings."""
+        objects_layer = self._mock_layer_with_fields(["zone", "number"])
+        objects_layer.name.return_value = "Objets relevés"
+        recording_areas_layer = Mock()
+        recording_areas_layer.getFeatures.return_value = []
+        new_objects_layer = self._mock_layer_with_fields(["zone", "number"])
+
+        self.mock_settings_manager.get_value.side_effect = lambda key, default=None: {
+            "enable_duplicate_objects_warnings": True,
+            "objects_layer": "obj-id",
+            "recording_areas_layer": "ra-id",
+            "objects_number_field": "number",
+        }.get(key, default)
+        self.mock_layer_service.get_layer_by_id.side_effect = lambda layer_id: {
+            "obj-id": objects_layer,
+            "ra-id": recording_areas_layer,
+        }.get(layer_id)
+        self.service._find_layer_by_name = Mock(return_value=new_objects_layer)
+        self.service._resolve_recording_area_field = Mock(return_value="zone")
+        self.service._resolve_field_name_on_layer = Mock(return_value="number")
+
+        with patch.object(self.service, "_build_identity_index", side_effect=[{(1, 1): [Mock(), Mock()]}, {}]), \
+             patch.object(self.service, "_build_recording_area_name_lookup", return_value={}), \
+             patch.object(self.service, "_warnings_from_within_layer_duplicates", return_value=[]) as mock_within, \
+             patch.object(self.service, "_detect_duplicates_between_layers", return_value=[]) as mock_between:
+            warnings = self.service.detect_duplicate_objects()
+
+        self.assertEqual(warnings, [])
+        mock_within.assert_called_once()
+        self.assertEqual(mock_within.call_args[0][5], "New Objects")
+        mock_between.assert_called_once()
+        original_index = mock_between.call_args.kwargs["original_index"]
+        self.assertEqual(len(original_index[(1, 1)]), 2)
     
     def test_deduplicate_warnings_by_object_identity(self):
         """Only one warning per recording area / object number should be kept."""
@@ -253,32 +305,33 @@ class TestDuplicateObjectsDetectorService(unittest.TestCase):
     
     def test_get_recording_area_name_fallback(self):
         """Test getting recording area name with fallback to ID."""
-        # Mock layer service to return None for display expression
         mock_recording_areas_layer = Mock()
-        mock_recording_areas_layer.displayExpression.return_value = ""
-        
+        mock_fields = Mock()
+        mock_fields.indexOf.return_value = -1
+        mock_recording_areas_layer.fields.return_value = mock_fields
+
+        mock_feature = Mock()
+        mock_feature.isValid.return_value = False
+        mock_recording_areas_layer.getFeature.return_value = mock_feature
+
         name = self.service._get_recording_area_name(mock_recording_areas_layer, 1)
-        
+
         self.assertEqual(name, "1")
-    
+
     def test_get_recording_area_name_with_display_expression(self):
         """Test getting recording area name using display expression."""
-        # Mock layer with display expression
         mock_recording_areas_layer = Mock()
-        
-        # Mock fields to return a field at index 0
         mock_fields = Mock()
-        mock_fields.indexOf.return_value = 0  # Name field found at index 0
+        mock_fields.indexOf.return_value = 0
         mock_recording_areas_layer.fields.return_value = mock_fields
-        
-        # Mock feature with name
+
         mock_feature = Mock()
-        mock_feature.id.return_value = 1
-        mock_feature.__getitem__.return_value = "Display Name"  # Use __getitem__ instead of attribute
-        mock_recording_areas_layer.getFeatures.return_value = [mock_feature]
-        
+        mock_feature.isValid.return_value = True
+        mock_feature.__getitem__.return_value = "Display Name"
+        mock_recording_areas_layer.getFeature.return_value = mock_feature
+
         name = self.service._get_recording_area_name(mock_recording_areas_layer, 1)
-        
+
         self.assertEqual(name, "Display Name")
     
     def test_create_duplicate_warning_message(self):
@@ -294,6 +347,75 @@ class TestDuplicateObjectsDetectorService(unittest.TestCase):
         self.assertIn("123", warning)
         self.assertIn("Test Layer", warning)
         self.assertIn("2", warning)
+
+    def test_build_identity_index_resolves_fields_once_per_layer(self):
+        """Field resolution must not repeat for every feature in a large layer."""
+        mock_layer = self._mock_layer_with_fields(["zone", "number"])
+        features = [
+            self._mock_feature_with_values({"zone": idx % 3, "number": idx})
+            for idx in range(200)
+        ]
+        mock_layer.getFeatures.return_value = features
+
+        with patch.object(
+            self.service,
+            "_collect_recording_area_field_candidates",
+            wraps=self.service._collect_recording_area_field_candidates,
+        ) as mock_collect:
+            index = self.service._build_identity_index(
+                mock_layer,
+                "number",
+                "zone",
+            )
+
+        self.assertEqual(len(index), 200)
+        self.assertEqual(mock_collect.call_count, 1)
+
+    def test_build_recording_area_name_lookup_indexes_all_features(self):
+        """Recording area names are resolved once into a lookup table."""
+        mock_recording_areas_layer = Mock()
+        mock_fields = Mock()
+        mock_fields.indexOf.side_effect = lambda name: 0 if name == "name" else -1
+        mock_recording_areas_layer.fields.return_value = mock_fields
+
+        features = []
+        for feature_id, label in [(1, "Area One"), (2, "Area Two")]:
+            feature = Mock()
+            feature.id.return_value = feature_id
+            feature.__getitem__.return_value = label
+            features.append(feature)
+        mock_recording_areas_layer.getFeatures.return_value = features
+
+        lookup = self.service._build_recording_area_name_lookup(mock_recording_areas_layer)
+
+        self.assertEqual(lookup[1], "Area One")
+        self.assertEqual(lookup[2], "Area Two")
+
+    def test_detect_duplicates_between_layers_reuses_original_index(self):
+        """Between-layer detection should not rescan the original objects layer."""
+        original_layer = self._mock_layer_with_fields(["zone", "number"])
+        new_layer = self._mock_layer_with_fields(["zone", "number"])
+        original_layer.name.return_value = "Objects"
+        new_layer.getFeatures.return_value = [
+            self._mock_feature_with_values({"zone": 3, "number": 12}),
+        ]
+
+        original_index = {
+            (3, 12): [self._mock_feature_with_values({"zone": 3, "number": 12})],
+        }
+        self.service._get_recording_area_name = Mock(return_value="Area C")
+
+        warnings = self.service._detect_duplicates_between_layers(
+            original_layer,
+            new_layer,
+            Mock(),
+            "number",
+            "zone",
+            original_index=original_index,
+        )
+
+        original_layer.getFeatures.assert_not_called()
+        self.assertEqual(len(warnings), 1)
 
 
 if __name__ == '__main__':

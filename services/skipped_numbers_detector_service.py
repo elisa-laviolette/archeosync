@@ -8,7 +8,9 @@ identifies gaps in the numbering sequence.
 Key Features:
 - Detects gaps in object numbering within recording areas (definitive + temporary)
 - At import time, ignores gaps that already exist in the definitive objects layer alone;
-  only reports numbering holes introduced or revealed relative to that baseline
+  only reports numbering holes introduced or revealed relative to that baseline, including
+  a gap between a consecutive definitive block and the next imported number even when a
+  higher definitive number already implied a wider hole
 - Provides detailed warnings about skipped numbers
 - Supports translation for warning messages
 - Integrates with existing warning display system
@@ -224,7 +226,65 @@ class SkippedNumbersDetectorService(QObject):
                 gaps.append(missing)
         
         return gaps
-    
+
+    def _consecutive_run_length_ending_at(self, sorted_numbers: List[int], value: int) -> int:
+        """
+        Return how many consecutive integers ending at ``value`` exist in ``sorted_numbers``.
+
+        Example: for [1, 2, 3, 10] and value 3, returns 3 (the run 1-2-3).
+        """
+        number_set = set(sorted_numbers)
+        if value not in number_set:
+            return 0
+
+        length = 1
+        current = value - 1
+        while current in number_set:
+            length += 1
+            current -= 1
+        return length
+
+    def _find_novel_gaps_between_layers(
+        self,
+        original_numbers: List[int],
+        new_numbers: List[int],
+        all_numbers: List[int],
+    ) -> List[int]:
+        """
+        Return numbering gaps that should be reported at import time.
+
+        Pre-existing holes in the definitive layer alone are ignored, except when a
+        temporary object continues immediately after a consecutive definitive block and
+        leaves a gap before the next imported number (e.g. definitive 1-2-3 and 10,
+        imported 5 -> warn for 4 but not for 6-9 before definitive 10).
+        """
+        sorted_all = sorted(all_numbers)
+        original_set = set(original_numbers)
+        new_set = set(new_numbers)
+        combined_gaps = self._find_gaps_in_sequence(sorted_all)
+
+        gaps_in_definitive_only: List[int] = []
+        if len(original_numbers) >= 2:
+            gaps_in_definitive_only = self._find_gaps_in_sequence(sorted(original_numbers))
+        definitive_gap_set = set(gaps_in_definitive_only)
+
+        novel_gaps: List[int] = []
+        for gap in combined_gaps:
+            if gap not in definitive_gap_set:
+                novel_gaps.append(gap)
+                continue
+
+            lower_neighbor = max(number for number in sorted_all if number < gap)
+            upper_neighbor = min(number for number in sorted_all if number > gap)
+            if (
+                lower_neighbor in original_set
+                and upper_neighbor in new_set
+                and self._consecutive_run_length_ending_at(sorted(original_numbers), lower_neighbor) >= 2
+            ):
+                novel_gaps.append(gap)
+
+        return novel_gaps
+
     def _get_context_numbers_for_gaps(self, numbers: List[int], gaps: List[int]) -> List[int]:
         """
         Get the numbers before and after gaps to provide context.
@@ -270,7 +330,9 @@ class SkippedNumbersDetectorService(QObject):
         Compares the union of definitive and temporary object numbers per recording area.
         Warnings are emitted only for gaps that are not already present when considering
         the definitive layer alone, so pre-existing holes in project data do not surface
-        during import review.
+        during import review. A gap between a consecutive definitive block and the next
+        imported number is still reported even if a higher definitive number already
+        created a wider hole in the sequence.
         
         Args:
             original_objects_layer: The original objects layer
@@ -350,19 +412,13 @@ class SkippedNumbersDetectorService(QObject):
                 
                 # Sort and find gaps in the combined sequence
                 all_numbers.sort()
-                gaps = self._find_gaps_in_sequence(all_numbers)
-                
-                if gaps:
-                    # Gaps that already exist using only definitive objects are not import issues.
-                    gaps_in_definitive_only: List[int] = []
-                    if len(original_numbers) >= 2:
-                        sorted_original = sorted(original_numbers)
-                        gaps_in_definitive_only = self._find_gaps_in_sequence(sorted_original)
-                    definitive_gap_set = set(gaps_in_definitive_only)
-                    novel_gaps = [g for g in gaps if g not in definitive_gap_set]
-                    if not novel_gaps:
-                        continue
-                    
+                novel_gaps = self._find_novel_gaps_between_layers(
+                    original_numbers,
+                    new_numbers,
+                    all_numbers,
+                )
+
+                if novel_gaps:
                     # Get recording area name
                     recording_area_name = self._get_recording_area_name(recording_areas_layer, recording_area_id)
                     

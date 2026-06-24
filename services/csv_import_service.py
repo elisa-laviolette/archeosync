@@ -1225,6 +1225,8 @@ class CSVImportService(ICSVImportService):
     def clear_last_imported_files(self) -> None:
         """Clear pending CSV archive paths from a previous import session."""
         self._last_imported_files = []
+        self._last_import_count = 0
+        self._last_import_stats = {}
     
     def archive_last_imported_files(self) -> None:
         """

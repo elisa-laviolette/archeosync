@@ -1695,24 +1695,12 @@ class QGISProjectCreationService(QObject):
         try:
             print(f"[DEBUG] Creating structure for layer: {layer_name}")
             
-            from qgis.core import QgsVectorFileWriter, QgsWkbTypes
+            from qgis.core import QgsVectorFileWriter
             
-            # Determine geometry type from source layer
-            geom_type = source_layer.geometryType()
-            if geom_type == QgsWkbTypes.PolygonGeometry:
-                geom_string = "Polygon"
-            elif geom_type == QgsWkbTypes.LineGeometry:
-                geom_string = "LineString"
-            else:
-                geom_string = "Point"
+            uri = self._memory_layer_uri_for_vector_layer(source_layer)
+            print(f"[DEBUG] Memory layer URI for structure export: {uri}")
             
-            print(f"[DEBUG] Geometry type: {geom_type} -> {geom_string}")
-            
-            # Handle custom CRS properly
-            crs_string = self._get_crs_string(source_layer.crs())
-            print(f"[DEBUG] CRS string: {crs_string}")
-            
-            temp_layer = QgsVectorLayer(f"{geom_string}?crs={crs_string}", "temp", "memory")
+            temp_layer = QgsVectorLayer(uri, "temp", "memory")
             
             if not temp_layer.isValid():
                 print(f"Error: Could not create temporary layer for {layer_name}")
@@ -2330,6 +2318,8 @@ class QGISProjectCreationService(QObject):
             geom_string = "LineString"
         elif geometry_type == QgsWkbTypes.PolygonGeometry:
             geom_string = "MultiPolygon" if QgsWkbTypes.isMultiType(wkb_type) else "Polygon"
+        elif geometry_type == QgsWkbTypes.NullGeometry:
+            geom_string = "NoGeometry"
         else:
             geom_string = "Polygon"
         return f"{geom_string}?crs={crs_string}"

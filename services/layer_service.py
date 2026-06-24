@@ -70,6 +70,20 @@ class QGISLayerService(ILayerService):
         self._recording_area_relation_cache: Dict[Tuple[str, str], Any] = {}
         self._layer_fields_cache: Dict[str, Optional[List[Dict[str, Any]]]] = {}
 
+    def clear_caches(self) -> None:
+        """Clear in-memory layer metadata caches after import layers are removed."""
+        self._layer_fields_cache.clear()
+        self._recording_area_relation_cache.clear()
+
+    def invalidate_layer_cache(self, layer_id: str) -> None:
+        """Drop cached metadata for one layer id (e.g. before removing it)."""
+        self._layer_fields_cache.pop(layer_id, None)
+        stale_relation_keys = [
+            key for key in self._recording_area_relation_cache if key[0] == layer_id
+        ]
+        for key in stale_relation_keys:
+            self._recording_area_relation_cache.pop(key, None)
+
     def _vector_layer_has_no_geometry(self, layer: QgsVectorLayer) -> bool:
         """
         Return True for attribute-only vector layers (no geometry column).
@@ -1898,6 +1912,8 @@ class QGISLayerService(ILayerService):
             return "LineString"
         elif geometry_type == QgsWkbTypes.PolygonGeometry:
             return "Polygon"
+        elif geometry_type == QgsWkbTypes.NullGeometry:
+            return "NoGeometry"
         else:
             # Default to Polygon for unknown types
             return "Polygon"

@@ -110,6 +110,106 @@ class TestImportSummaryDialog(unittest.TestCase):
         self.assertEqual(self.dialog._layer_service, self.mock_layer_service)
         self.assertEqual(self.dialog._translation_service, self.mock_translation_service)
     
+    def test_both_object_warning_types_visible_in_summary_panel(self):
+        """Duplicate and skipped-number warnings must both appear in the objects section."""
+        data = ImportSummaryData(
+            objects_count=2,
+            duplicate_objects_warnings=[
+                WarningData(
+                    message="Duplicate object warning",
+                    recording_area_name="Zone A",
+                    layer_name="New Objects",
+                    filter_expression='"fid" = 1',
+                )
+            ],
+            skipped_numbers_warnings=[
+                WarningData(
+                    message="Skipped numbers warning",
+                    recording_area_name="Zone B",
+                    layer_name="New Objects",
+                    filter_expression='"fid" = 2',
+                    skipped_numbers=[4],
+                )
+            ],
+        )
+        dock = ImportSummaryDockWidget(
+            summary_data=data,
+            iface=self.mock_iface,
+            settings_manager=self.mock_settings_manager,
+            csv_import_service=self.mock_csv_import_service,
+            field_project_import_service=self.mock_field_project_import_service,
+            layer_service=self.mock_layer_service,
+            parent=self.parent,
+        )
+        texts = {lbl.text() for lbl in dock.findChildren(QtWidgets.QLabel)}
+        self.assertIn("Duplicate Objects Warnings:", texts)
+        self.assertIn("Skipped Numbers Warnings:", texts)
+        self.assertTrue(any("Duplicate object warning" in t for t in texts))
+        self.assertTrue(any("Skipped numbers warning" in t for t in texts))
+
+    def test_both_object_warning_types_visible_after_refresh(self):
+        """Refresh must keep duplicate and skipped warnings visible together in the panel."""
+        mock_duplicate_detector = Mock()
+        mock_duplicate_detector.detect_duplicate_objects.return_value = [
+            WarningData(
+                message="Refreshed duplicate warning",
+                recording_area_name="Zone A",
+                layer_name="New Objects",
+                filter_expression='"fid" = 1',
+            )
+        ]
+        mock_skipped_detector = Mock()
+        mock_skipped_detector.detect_skipped_numbers.return_value = [
+            WarningData(
+                message="Refreshed skipped warning",
+                recording_area_name="Zone B",
+                layer_name="New Objects",
+                filter_expression='"fid" = 2',
+                skipped_numbers=[4],
+            )
+        ]
+        mock_oob = Mock()
+        mock_oob.detect_out_of_bounds_features.return_value = []
+        mock_distance = Mock()
+        mock_distance.detect_distance_warnings.return_value = []
+        mock_missing_ts = Mock()
+        mock_missing_ts.detect_missing_total_station_warnings.return_value = []
+        mock_dup_ts = Mock()
+        mock_dup_ts.detect_duplicate_identifiers_warnings.return_value = []
+        mock_height = Mock()
+        mock_height.detect_height_difference_warnings.return_value = []
+
+        with patch(
+            "ui.import_summary_dialog.DuplicateObjectsDetectorService",
+            return_value=mock_duplicate_detector,
+        ), patch(
+            "ui.import_summary_dialog.SkippedNumbersDetectorService",
+            return_value=mock_skipped_detector,
+        ), patch(
+            "services.out_of_bounds_detector_service.OutOfBoundsDetectorService",
+            return_value=mock_oob,
+        ), patch(
+            "services.distance_detector_service.DistanceDetectorService",
+            return_value=mock_distance,
+        ), patch(
+            "services.missing_total_station_detector_service.MissingTotalStationDetectorService",
+            return_value=mock_missing_ts,
+        ), patch(
+            "services.duplicate_total_station_identifiers_detector_service.DuplicateTotalStationIdentifiersDetectorService",
+            return_value=mock_dup_ts,
+        ), patch(
+            "services.height_difference_detector_service.HeightDifferenceDetectorService",
+            return_value=mock_height,
+        ), patch("qgis.PyQt.QtWidgets.QMessageBox"):
+            self.dialog._summary_data.objects_count = 5
+            self._run_warning_refresh_pipeline_immediately(self.dialog)
+
+        texts = {lbl.text() for lbl in self.dialog.findChildren(QtWidgets.QLabel)}
+        self.assertIn("Duplicate Objects Warnings:", texts)
+        self.assertIn("Skipped Numbers Warnings:", texts)
+        self.assertTrue(any("Refreshed duplicate warning" in t for t in texts))
+        self.assertTrue(any("Refreshed skipped warning" in t for t in texts))
+
     def test_out_of_bounds_warnings_visible_in_summary_panel(self):
         """Out-of-bounds warnings on ImportSummaryData must appear in the dock scroll content."""
         data = ImportSummaryData(
@@ -234,12 +334,63 @@ class TestImportSummaryDialog(unittest.TestCase):
             mock_duplicate_detector.detect_duplicate_objects.assert_called_once()
             mock_skipped_detector.detect_skipped_numbers.assert_called_once()
             
-            # Verify the summary data was updated
+            # Verify the summary data was updated (detector output replaces import-time warnings)
             self.assertEqual(len(self.dialog._summary_data.duplicate_objects_warnings), 1)
+            self.assertEqual(
+                self.dialog._summary_data.duplicate_objects_warnings[0].recording_area_name,
+                "Updated Area",
+            )
             self.assertEqual(len(self.dialog._summary_data.skipped_numbers_warnings), 1)
             
-            # Verify the UI was recreated
-            mock_recreate.assert_called_once()
+            # Verify the UI was recreated after each completed detector step
+            self.assertGreaterEqual(mock_recreate.call_count, 1)
+
+    def test_refresh_warnings_clears_resolved_duplicate_object_warnings(self):
+        """Resolved duplicate warnings must disappear after refresh, not linger from import."""
+        mock_duplicate_detector = Mock()
+        mock_duplicate_detector.detect_duplicate_objects.return_value = []
+
+        mock_skipped_detector = Mock()
+        mock_skipped_detector.detect_skipped_numbers.return_value = []
+        mock_oob = Mock()
+        mock_oob.detect_out_of_bounds_features.return_value = []
+        mock_distance = Mock()
+        mock_distance.detect_distance_warnings.return_value = []
+        mock_missing_ts = Mock()
+        mock_missing_ts.detect_missing_total_station_warnings.return_value = []
+        mock_dup_ts = Mock()
+        mock_dup_ts.detect_duplicate_identifiers_warnings.return_value = []
+        mock_height = Mock()
+        mock_height.detect_height_difference_warnings.return_value = []
+
+        with patch(
+            "ui.import_summary_dialog.DuplicateObjectsDetectorService",
+            return_value=mock_duplicate_detector,
+        ), patch(
+            "ui.import_summary_dialog.SkippedNumbersDetectorService",
+            return_value=mock_skipped_detector,
+        ), patch(
+            "services.out_of_bounds_detector_service.OutOfBoundsDetectorService",
+            return_value=mock_oob,
+        ), patch(
+            "services.distance_detector_service.DistanceDetectorService",
+            return_value=mock_distance,
+        ), patch(
+            "services.missing_total_station_detector_service.MissingTotalStationDetectorService",
+            return_value=mock_missing_ts,
+        ), patch(
+            "services.duplicate_total_station_identifiers_detector_service.DuplicateTotalStationIdentifiersDetectorService",
+            return_value=mock_dup_ts,
+        ), patch(
+            "services.height_difference_detector_service.HeightDifferenceDetectorService",
+            return_value=mock_height,
+        ), patch("qgis.PyQt.QtWidgets.QMessageBox"), patch.object(
+            self.dialog, "_recreate_summary_content"
+        ):
+            self.assertEqual(len(self.dialog._summary_data.duplicate_objects_warnings), 1)
+            self._run_warning_refresh_pipeline_immediately(self.dialog)
+
+        self.assertEqual(self.dialog._summary_data.duplicate_objects_warnings, [])
     
     def test_refresh_warnings_error_handling(self):
         """Test that refresh warnings handles errors gracefully."""
@@ -271,7 +422,25 @@ class TestImportSummaryDialog(unittest.TestCase):
             parent=self.parent
         )
         
-        with patch('qgis.PyQt.QtWidgets.QMessageBox') as mock_qmessagebox, \
+        with patch(
+            "ui.import_summary_dialog.DuplicateObjectsDetectorService",
+            return_value=Mock(detect_duplicate_objects=Mock(return_value=[])),
+        ), patch(
+            "ui.import_summary_dialog.SkippedNumbersDetectorService",
+            return_value=Mock(detect_skipped_numbers=Mock(return_value=[])),
+        ), patch(
+            "services.out_of_bounds_detector_service.OutOfBoundsDetectorService",
+            return_value=Mock(detect_out_of_bounds_features=Mock(return_value=[])),
+        ), patch(
+            "services.distance_detector_service.DistanceDetectorService",
+            return_value=Mock(detect_distance_warnings=Mock(return_value=[])),
+        ), patch(
+            "services.duplicate_total_station_identifiers_detector_service.DuplicateTotalStationIdentifiersDetectorService",
+            return_value=Mock(detect_duplicate_identifiers_warnings=Mock(return_value=[])),
+        ), patch(
+            "services.height_difference_detector_service.HeightDifferenceDetectorService",
+            return_value=Mock(detect_height_difference_warnings=Mock(return_value=[])),
+        ), patch('qgis.PyQt.QtWidgets.QMessageBox') as mock_qmessagebox, \
              patch.object(dialog, '_recreate_summary_content') as mock_recreate:
             
             # Configure the mock QMessageBox
@@ -279,11 +448,8 @@ class TestImportSummaryDialog(unittest.TestCase):
             
             self._run_warning_refresh_pipeline_immediately(dialog)
             
-            # Verify that UI was recreated (even with no warnings)
-            mock_recreate.assert_called_once()
-            
-            # Verify that success message was shown
-            mock_qmessagebox.information.assert_called_once()
+            # Verify that UI was recreated as detector steps complete
+            self.assertGreaterEqual(mock_recreate.call_count, 1)
 
     def test_warnings_analysis_indicator_hidden_by_default(self):
         """Busy indicator is hidden until warning analysis starts."""
@@ -482,6 +648,9 @@ class TestImportSummaryDialog(unittest.TestCase):
             
             # Verify temporary layers were deleted
             mock_delete.assert_called_once()
+            self.mock_csv_import_service.clear_last_imported_files.assert_called_once()
+            self.mock_field_project_import_service.clear_last_imported_projects.assert_called_once()
+            self.mock_layer_service.clear_caches.assert_called_once()
             
             # Verify widget was deleted
             mock_delete_later.assert_called_once()

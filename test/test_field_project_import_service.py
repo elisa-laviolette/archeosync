@@ -7,6 +7,7 @@ that match configured layer names and geometry types.
 """
 
 import os
+import tempfile
 import pytest
 from unittest.mock import Mock, patch, MagicMock
 from typing import List
@@ -137,7 +138,28 @@ class TestFieldProjectImportService:
         
         assert result.is_valid is True
         assert "No projects to import" in result.message
-    
+
+    @patch("services.import_validation_service.remove_pending_import_layers")
+    @patch("services.field_project_import_service.QgsProject")
+    def test_import_field_projects_clears_pending_temp_layers_first(
+        self, mock_project, mock_remove_pending
+    ):
+        """Each import must drop leftover temporary layers before reading source files."""
+        mock_project.instance.return_value = Mock()
+        with patch.object(
+            self.field_import_service,
+            "_scan_project_layers",
+            return_value={
+                "objects": [],
+                "features": [],
+                "small_finds": [],
+                "alternative_objects": [],
+            },
+        ):
+            self.field_import_service.import_field_projects(["/tmp/project"])
+
+        mock_remove_pending.assert_called_once()
+
     @patch('os.path.exists')
     @patch('services.field_project_import_service.QgsVectorLayer')
     def test_import_field_projects_no_layers_found(self, mock_vector_layer, mock_exists):
@@ -366,10 +388,20 @@ class TestFieldProjectImportService:
 
         mock_vector_layer.side_effect = vector_layer_side_effect
 
-        with patch.object(
+        with patch("os.path.isfile", return_value=True), patch.object(
+            self.field_import_service,
+            "_snapshot_geopackage_for_read",
+            return_value=(file_path, None),
+        ), patch.object(
+            self.field_import_service,
+            "_cleanup_geopackage_snapshot",
+        ), patch.object(
             self.field_import_service,
             "_ogr_sub_layer_names",
             return_value=["objects_data"],
+        ), patch(
+            "services.field_project_import_service.QgsFeature",
+            side_effect=lambda feature: feature,
         ):
             features = self.field_import_service._collect_features_from_geopackage(
                 file_path,
@@ -378,6 +410,56 @@ class TestFieldProjectImportService:
             )
 
         assert len(features) == 2
+
+    @patch("services.field_project_import_service.QgsVectorLayer")
+    def test_collect_features_prefers_configured_layer_over_larger_sublayer(
+        self, mock_vector_layer
+    ):
+        """After edits, the configured layer must win even if another sublayer has more rows."""
+        file_path = "/tmp/Objects.gpkg"
+        updated_feature = create_iterable_mock_feature()
+        stale_features = [create_iterable_mock_feature() for _ in range(50)]
+
+        def make_layer(features):
+            layer = Mock()
+            layer.isValid.return_value = True
+            layer.reload = Mock()
+            layer.getFeatures.return_value = features
+            layer.geometryType.return_value = 2
+            return layer
+
+        def vector_layer_side_effect(uri, name, provider):
+            if uri.endswith("|layername=Objects"):
+                return make_layer([updated_feature])
+            if uri.endswith("|layername=legacy_copy"):
+                return make_layer(stale_features)
+            return make_layer([])
+
+        mock_vector_layer.side_effect = vector_layer_side_effect
+
+        with patch.object(
+            self.field_import_service,
+            "_snapshot_geopackage_for_read",
+            return_value=(file_path, None),
+        ), patch.object(
+            self.field_import_service,
+            "_ogr_sub_layer_names",
+            return_value=["legacy_copy"],
+        ), patch.object(
+            self.field_import_service,
+            "_cleanup_geopackage_snapshot",
+        ), patch(
+            "services.field_project_import_service.QgsFeature",
+            side_effect=lambda feature: feature,
+        ):
+            features = self.field_import_service._collect_features_from_geopackage(
+                file_path,
+                "Objects",
+                2,
+            )
+
+        assert len(features) == 1
+        assert features[0] is updated_feature
 
     @patch("services.field_project_import_service.QgsVectorLayer")
     def test_collect_features_imports_despite_geometry_mismatch_when_non_empty(self, mock_vector_layer):
@@ -390,15 +472,125 @@ class TestFieldProjectImportService:
         layer.featureCount.return_value = 1
         layer.getFeatures.return_value = [feature]
         layer.geometryType.return_value = 4  # NullGeometry / no geom table
+        layer.reload = Mock()
 
         mock_vector_layer.return_value = layer
 
-        features = self.field_import_service._collect_features_from_geopackage(
-            file_path,
-            "Objects",
-            2,
-        )
+        with patch("os.path.isfile", return_value=True), patch.object(
+            self.field_import_service,
+            "_snapshot_geopackage_for_read",
+            return_value=(file_path, None),
+        ), patch.object(
+            self.field_import_service,
+            "_cleanup_geopackage_snapshot",
+        ), patch.object(
+            self.field_import_service,
+            "_ogr_sub_layer_names",
+            return_value=[],
+        ), patch(
+            "services.field_project_import_service.QgsFeature",
+            side_effect=lambda feature: feature,
+        ):
+            features = self.field_import_service._collect_features_from_geopackage(
+                file_path,
+                "Objects",
+                2,
+            )
         assert len(features) == 1
+        layer.reload.assert_called_once()
+
+    def test_read_fresh_layer_features_reloads_before_reading(self):
+        """GeoPackage reads must reload the provider so disk edits are visible."""
+        feature = create_iterable_mock_feature()
+        layer = Mock()
+        layer.isValid.return_value = True
+        layer.reload = Mock()
+        layer.getFeatures.return_value = [feature]
+
+        with patch("services.field_project_import_service.QgsFeature", side_effect=lambda f: f):
+            features = self.field_import_service._read_fresh_layer_features(layer)
+
+        assert features == [feature]
+        layer.reload.assert_called_once()
+        layer.getFeatures.assert_called_once()
+
+    def test_snapshot_geopackage_for_read_creates_temp_copy(self):
+        """Imports must read a snapshot so OGR pooled handles cannot serve stale data."""
+        with tempfile.NamedTemporaryFile(suffix=".gpkg", delete=False) as handle:
+            source_path = handle.name
+
+        cleanup_path = None
+        try:
+            import sqlite3
+
+            connection = sqlite3.connect(source_path)
+            connection.execute("CREATE TABLE snapshot_probe(value INTEGER)")
+            connection.execute("INSERT INTO snapshot_probe VALUES (42)")
+            connection.commit()
+            connection.close()
+
+            with patch.object(
+                self.field_import_service,
+                "_release_ogr_handles_for_geopackage",
+            ):
+                read_path, cleanup_path = self.field_import_service._snapshot_geopackage_for_read(
+                    source_path
+                )
+
+            self.assertNotEqual(read_path, source_path)
+            self.assertEqual(read_path, cleanup_path)
+            self.assertTrue(os.path.isfile(read_path))
+
+            copied = sqlite3.connect(read_path)
+            value = copied.execute("SELECT value FROM snapshot_probe").fetchone()[0]
+            copied.close()
+            self.assertEqual(value, 42)
+        finally:
+            self.field_import_service._cleanup_geopackage_snapshot(cleanup_path)
+            if os.path.isfile(source_path):
+                os.remove(source_path)
+
+    @patch("services.field_project_import_service.QgsVectorLayer")
+    def test_collect_features_from_geopackage_reads_snapshot_path(self, mock_vector_layer):
+        """Feature collection must open OGR layers on the snapshot path, not the original pool key."""
+        file_path = "/tmp/Objects.gpkg"
+
+        def make_layer(is_valid, features):
+            layer = Mock()
+            layer.isValid.return_value = is_valid
+            layer.getFeatures.return_value = features
+            layer.reload = Mock()
+            layer.geometryType.return_value = 2
+            return layer
+
+        mock_vector_layer.side_effect = lambda uri, name, provider: make_layer(
+            True,
+            [create_iterable_mock_feature()],
+        )
+
+        with patch("os.path.isfile", return_value=True), patch.object(
+            self.field_import_service,
+            "_snapshot_geopackage_for_read",
+            return_value=(file_path, "/tmp/snap-Objects.gpkg"),
+        ) as mock_snapshot, patch.object(
+            self.field_import_service,
+            "_cleanup_geopackage_snapshot",
+        ) as mock_cleanup, patch.object(
+            self.field_import_service,
+            "_ogr_sub_layer_names",
+            return_value=[],
+        ):
+            features = self.field_import_service._collect_features_from_geopackage(
+                file_path,
+                "Objects",
+                2,
+            )
+
+        mock_snapshot.assert_called_once_with(file_path)
+        mock_cleanup.assert_called_once_with("/tmp/snap-Objects.gpkg")
+        self.assertEqual(len(features), 1)
+        opened_uri = mock_vector_layer.call_args_list[0][0][0]
+        self.assertTrue(opened_uri.startswith("/tmp/snap-Objects.gpkg"))
 
     def test_is_valid_geometry_type_accepts_null_geometry_for_polygon_layers(self):
         layer = Mock()

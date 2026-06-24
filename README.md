@@ -170,8 +170,7 @@ After successful import, the plugin displays a comprehensive summary dialog show
 - **Duplicate Detection**: Number of duplicates detected and filtered out during import for each data type
 - **Duplicate Objects Warnings**: Detailed warnings about objects with the same recording area and number
   - Detects duplicates within the "New Objects" layer (imported objects)
-  - Detects duplicates within the original "Objects" layer (existing objects)
-  - Detects duplicates between both layers
+  - Detects conflicts between "New Objects" and the definitive "Objects" layer
   - Shows specific recording area names and object numbers for each duplicate
   - Color-coded warnings in orange for easy identification
 

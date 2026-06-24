@@ -134,6 +134,35 @@ class TestSkippedNumbersDetectorService(unittest.TestCase):
             
             self.assertEqual(warnings, [])
     
+    def test_consecutive_run_length_ending_at(self):
+        """Test consecutive run length ending at a value."""
+        self.assertEqual(self.service._consecutive_run_length_ending_at([1, 2, 3, 10], 3), 3)
+        self.assertEqual(self.service._consecutive_run_length_ending_at([1, 5], 1), 1)
+        self.assertEqual(self.service._consecutive_run_length_ending_at([1, 3], 3), 1)
+
+    def test_find_novel_gaps_between_layers(self):
+        """Novel gaps include cross-layer holes after consecutive definitive blocks."""
+        novel = self.service._find_novel_gaps_between_layers(
+            [1, 2, 3, 10],
+            [5],
+            [1, 2, 3, 5, 10],
+        )
+        self.assertEqual(novel, [4])
+
+        sandwiched = self.service._find_novel_gaps_between_layers(
+            [1, 5],
+            [3],
+            [1, 3, 5],
+        )
+        self.assertEqual(sandwiched, [])
+
+        within_new = self.service._find_novel_gaps_between_layers(
+            [],
+            [4, 6],
+            [4, 6],
+        )
+        self.assertEqual(within_new, [5])
+
     def test_find_gaps_in_sequence(self):
         """Test that gaps are correctly identified in a sequence."""
         # Test with gaps
@@ -340,4 +369,89 @@ class TestSkippedNumbersDetectorService(unittest.TestCase):
 
         self.assertEqual(len(warnings), 1)
         self.assertIsInstance(warnings[0], WarningData)
-        self.assertEqual(warnings[0].skipped_numbers, [4]) 
+        self.assertEqual(warnings[0].skipped_numbers, [4])
+
+    def test_detect_skipped_numbers_between_layers_warns_gap_after_consecutive_definitive_block(self):
+        """Warn when temp continues after a consecutive definitive block with a distant higher number."""
+        self.mock_settings_manager.get_value.side_effect = lambda key, default=None: "test_field"
+
+        mock_objects_layer = Mock()
+        mock_objects_layer.name.return_value = "Objects"
+        mock_objects_layer.fields.return_value = self._object_fields_mock()
+        mock_new_objects_layer = Mock()
+        mock_new_objects_layer.name.return_value = "New Objects"
+        mock_new_objects_layer.fields.return_value = self._object_fields_mock()
+        mock_recording_areas_layer = Mock()
+
+        mock_objects_layer.getFeatures.return_value = [
+            self._feature(1, 1),
+            self._feature(1, 2),
+            self._feature(1, 3),
+            self._feature(1, 10),
+        ]
+        mock_new_objects_layer.getFeatures.return_value = [self._feature(1, 5)]
+
+        mock_recording_areas_layer.fields.return_value.indexOf.return_value = -1
+
+        mock_project = Mock()
+        mock_project.mapLayers.return_value = {"new_objects_id": mock_new_objects_layer}
+
+        mock_relation = Mock()
+        mock_relation.referencingLayer.return_value = mock_objects_layer
+        mock_relation.referencedLayer.return_value = mock_recording_areas_layer
+        mock_relation.fieldPairs.return_value = {"recording_area_field": "id"}
+
+        mock_relation_manager = Mock()
+        mock_relation_manager.relations.return_value = {"relation1": mock_relation}
+        mock_project.relationManager.return_value = mock_relation_manager
+
+        self.mock_layer_service.get_layer_by_id.side_effect = [mock_objects_layer, mock_recording_areas_layer]
+
+        with patch("qgis.core.QgsProject.instance", return_value=mock_project):
+            warnings = self.service.detect_skipped_numbers()
+
+        self.assertEqual(len(warnings), 1)
+        self.assertEqual(warnings[0].skipped_numbers, [4])
+
+    def test_detect_skipped_numbers_between_layers_does_not_warn_deeper_definitive_hole(self):
+        """Gaps between temp and a higher definitive number stay suppressed when already missing."""
+        self.mock_settings_manager.get_value.side_effect = lambda key, default=None: "test_field"
+
+        mock_objects_layer = Mock()
+        mock_objects_layer.name.return_value = "Objects"
+        mock_objects_layer.fields.return_value = self._object_fields_mock()
+        mock_new_objects_layer = Mock()
+        mock_new_objects_layer.name.return_value = "New Objects"
+        mock_new_objects_layer.fields.return_value = self._object_fields_mock()
+        mock_recording_areas_layer = Mock()
+
+        mock_objects_layer.getFeatures.return_value = [
+            self._feature(1, 1),
+            self._feature(1, 2),
+            self._feature(1, 3),
+            self._feature(1, 10),
+        ]
+        mock_new_objects_layer.getFeatures.return_value = [self._feature(1, 5)]
+
+        mock_recording_areas_layer.fields.return_value.indexOf.return_value = -1
+
+        mock_project = Mock()
+        mock_project.mapLayers.return_value = {"new_objects_id": mock_new_objects_layer}
+
+        mock_relation = Mock()
+        mock_relation.referencingLayer.return_value = mock_objects_layer
+        mock_relation.referencedLayer.return_value = mock_recording_areas_layer
+        mock_relation.fieldPairs.return_value = {"recording_area_field": "id"}
+
+        mock_relation_manager = Mock()
+        mock_relation_manager.relations.return_value = {"relation1": mock_relation}
+        mock_project.relationManager.return_value = mock_relation_manager
+
+        self.mock_layer_service.get_layer_by_id.side_effect = [mock_objects_layer, mock_recording_areas_layer]
+
+        with patch("qgis.core.QgsProject.instance", return_value=mock_project):
+            warnings = self.service.detect_skipped_numbers()
+
+        self.assertEqual(warnings[0].skipped_numbers, [4])
+        self.assertNotIn(6, warnings[0].skipped_numbers)
+        self.assertNotIn(7, warnings[0].skipped_numbers) 

@@ -638,15 +638,47 @@ class ArcheoSyncPlugin(QObject):
             return
 
         if self._has_pending_import_temporary_layers():
-            summary_data = self._summary_data_from_temporary_import_layers()
-            self._show_import_summary(
-                summary_data,
-                archive_csv=bool(self._csv_import_service.get_last_imported_files()),
-                archive_projects=bool(
-                    self._field_project_import_service.get_last_imported_projects()
-                ),
+            from qgis.PyQt.QtWidgets import QMessageBox
+            from .services.import_validation_service import reset_import_session_tracking
+
+            msg_box = QMessageBox(self._iface.mainWindow())
+            msg_box.setIcon(QMessageBox.Question)
+            msg_box.setWindowTitle(self.tr("Pending Import"))
+            msg_box.setText(
+                self.tr(
+                    "A previous import is still pending in this project. "
+                    "Do you want to continue reviewing it or discard it and import new data?"
+                )
             )
-            return
+            continue_button = msg_box.addButton(
+                self.tr("Continue Review"),
+                QMessageBox.AcceptRole,
+            )
+            discard_button = msg_box.addButton(
+                self.tr("Discard and Import New Data"),
+                QMessageBox.DestructiveRole,
+            )
+            msg_box.setDefaultButton(continue_button)
+            msg_box.exec()
+            clicked = msg_box.clickedButton()
+
+            if clicked == discard_button:
+                self._clear_pending_import_layers_before_new_import()
+                reset_import_session_tracking(
+                    csv_import_service=self._csv_import_service,
+                    field_project_import_service=self._field_project_import_service,
+                    layer_service=self._layer_service,
+                )
+            else:
+                summary_data = self._summary_data_from_temporary_import_layers()
+                self._show_import_summary(
+                    summary_data,
+                    archive_csv=bool(self._csv_import_service.get_last_imported_files()),
+                    archive_projects=bool(
+                        self._field_project_import_service.get_last_imported_projects()
+                    ),
+                )
+                return
 
         dialog = ImportDataDialog(
             settings_manager=self._settings_manager,
@@ -665,6 +697,22 @@ class ArcheoSyncPlugin(QObject):
             if self._layer_service.get_layer_by_name(name) is not None:
                 return True
         return False
+
+    def _clear_pending_import_layers_before_new_import(self) -> None:
+        """
+        Remove leftover temporary import layers before reading source files again.
+
+        Prevents a cancelled or partially closed import from reusing stale memory
+        layers when the user starts a new import with updated field-project data.
+        """
+        from qgis.core import QgsProject
+        from .services.import_validation_service import remove_pending_import_layers
+
+        remove_pending_import_layers(
+            QgsProject.instance(),
+            layer_service=self._layer_service,
+            get_setting=self._settings_manager.get_value,
+        )
 
     def _summary_data_from_temporary_import_layers(self) -> Dict[str, int]:
         """
@@ -705,6 +753,7 @@ class ArcheoSyncPlugin(QObject):
     def _handle_import_data_accepted(self, dialog) -> None:
         """Handle the case when import data dialog is accepted."""
         try:
+            self._clear_pending_import_layers_before_new_import()
             self._apply_configured_map_theme('import_map_theme')
 
             # Get selected items

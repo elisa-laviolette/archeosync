@@ -17,6 +17,10 @@ try:
         build_layer_copy_jobs,
         build_peer_temp_layer_replacements,
         load_job_source_features_chunk,
+        remove_pending_import_layers,
+        reset_import_session_tracking,
+        TEMPORARY_IMPORT_LAYER_NAMES,
+        IMPORT_LAYER_MAPPINGS,
         DEFAULT_COPY_BATCH_SIZE,
     )
 except ImportError:
@@ -28,7 +32,12 @@ except ImportError:
         LayerFieldMapping,
         _feature_id,
         build_layer_copy_jobs,
+        build_peer_temp_layer_replacements,
         load_job_source_features_chunk,
+        remove_pending_import_layers,
+        reset_import_session_tracking,
+        TEMPORARY_IMPORT_LAYER_NAMES,
+        IMPORT_LAYER_MAPPINGS,
         DEFAULT_COPY_BATCH_SIZE,
     )
 
@@ -399,6 +408,64 @@ class TestBuildPeerTempLayerReplacements(unittest.TestCase):
             replacements,
             {"def_objects_id": "temp_objects_id"},
         )
+
+
+class TestRemovePendingImportLayers(unittest.TestCase):
+    """Tests for cleaning up temporary import layers between sessions."""
+
+    def test_remove_pending_import_layers_deletes_known_temp_layers(self):
+        temp_layer = Mock()
+        temp_layer.name.return_value = "New Objects"
+        temp_layer.id.return_value = "temp_objects_id"
+
+        other_layer = Mock()
+        other_layer.name.return_value = "Recording Areas"
+        other_layer.id.return_value = "areas_id"
+
+        project = Mock()
+        project.mapLayers.return_value = {
+            "temp_objects_id": temp_layer,
+            "areas_id": other_layer,
+        }
+
+        layer_service = Mock()
+        layer_service.remove_import_clone_relations.return_value = 0
+        layer_service.repair_definitive_project_relations.return_value = 0
+
+        removed = remove_pending_import_layers(
+            project,
+            layer_service=layer_service,
+            get_setting=lambda key, default="": default,
+        )
+
+        self.assertEqual(removed, 1)
+        project.removeMapLayer.assert_called_once_with("temp_objects_id")
+        layer_service.invalidate_layer_cache.assert_called_once_with("temp_objects_id")
+
+    def test_temporary_import_layer_names_match_mappings(self):
+        self.assertEqual(
+            set(TEMPORARY_IMPORT_LAYER_NAMES),
+            set(IMPORT_LAYER_MAPPINGS.keys()),
+        )
+
+
+class TestResetImportSessionTracking(unittest.TestCase):
+    """Tests for clearing import bookkeeping after cancellation."""
+
+    def test_reset_import_session_tracking_clears_services(self):
+        csv_service = Mock()
+        project_service = Mock()
+        layer_service = Mock()
+
+        reset_import_session_tracking(
+            csv_import_service=csv_service,
+            field_project_import_service=project_service,
+            layer_service=layer_service,
+        )
+
+        csv_service.clear_last_imported_files.assert_called_once()
+        project_service.clear_last_imported_projects.assert_called_once()
+        layer_service.clear_caches.assert_called_once()
 
 
 if __name__ == "__main__":

@@ -37,6 +37,8 @@ Usage:
 import copy
 import os
 import re
+import shutil
+import tempfile
 import unicodedata
 from typing import List, Dict, Optional, Any, Iterable, Tuple
 from dataclasses import dataclass
@@ -107,6 +109,16 @@ class FieldProjectImportService(QObject):
             return ValidationResult(True, "No projects to import")
         
         try:
+            from .import_validation_service import remove_pending_import_layers
+
+            project = QgsProject.instance()
+            if project is not None:
+                remove_pending_import_layers(
+                    project,
+                    layer_service=self._layer_service,
+                    get_setting=self._settings_manager.get_value,
+                )
+
             self._last_imported_projects = []
             successfully_imported_project_paths: List[str] = []
             # Get existing layers to check for duplicates
@@ -295,6 +307,7 @@ class FieldProjectImportService(QObject):
     def clear_last_imported_projects(self) -> None:
         """Clear pending field-project archive paths from a previous import session."""
         self._last_imported_projects = []
+        self._last_import_stats = {}
     
     def archive_last_imported_projects(self) -> None:
         """
@@ -1809,6 +1822,121 @@ class FieldProjectImportService(QObject):
             raw_names.append(basename)
         return self._expand_layer_name_candidates(raw_names)
 
+    def _normalized_geopackage_path(self, file_path: str) -> str:
+        """Return a canonical absolute path for GeoPackage cache invalidation."""
+        return os.path.normcase(os.path.abspath(os.path.normpath(file_path)))
+
+    def _release_ogr_handles_for_geopackage(self, file_path: str) -> None:
+        """
+        Drop pooled OGR handles and project layers that still reference a GeoPackage.
+
+        QGIS keeps GeoPackage datasets open in a global connection pool. After a
+        cancelled import the pool may still serve the previous file snapshot even
+        when the on-disk GeoPackage was modified externally.
+        """
+        if not file_path:
+            return
+
+        normalized_path = self._normalized_geopackage_path(file_path)
+
+        try:
+            project = QgsProject.instance()
+            if project is not None:
+                layers_to_remove: List[str] = []
+                for layer_id, layer in project.mapLayers().items():
+                    if QgsVectorLayer is None or not isinstance(layer, QgsVectorLayer):
+                        continue
+                    source = layer.source() or ""
+                    base_source = source.split("|", 1)[0]
+                    if self._normalized_geopackage_path(base_source) == normalized_path:
+                        layers_to_remove.append(layer_id)
+                for layer_id in layers_to_remove:
+                    project.removeMapLayer(layer_id)
+        except Exception as exc:
+            print(f"Warning: could not remove project layers for {file_path}: {exc}")
+
+        for candidate in {file_path, normalized_path}:
+            try:
+                from qgis.core import QgsProviderRegistry
+
+                metadata = QgsProviderRegistry.instance().providerMetadata("ogr")
+                if metadata is not None and hasattr(metadata, "invalidateConnections"):
+                    metadata.invalidateConnections(candidate)
+            except Exception as exc:
+                print(f"Warning: could not invalidate OGR connections for {candidate}: {exc}")
+
+    def _checkpoint_geopackage_wal(self, file_path: str) -> None:
+        """Merge WAL pages into the main GeoPackage file before copying it."""
+        try:
+            import sqlite3
+
+            connection = sqlite3.connect(file_path, timeout=5.0)
+            connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            connection.close()
+        except Exception as exc:
+            print(f"Warning: WAL checkpoint failed for {file_path}: {exc}")
+
+    def _snapshot_geopackage_for_read(self, file_path: str) -> Tuple[str, Optional[str]]:
+        """
+        Copy a GeoPackage to a temporary file so OGR reads the current on-disk content.
+
+        Uses SQLite's online backup API so uncheckpointed WAL changes are included.
+        Falls back to WAL checkpoint + file copy when backup is unavailable.
+
+        Returns:
+            Tuple of (path_to_read, temp_path_to_delete_or_None)
+        """
+        if not file_path or not os.path.isfile(file_path):
+            return file_path, None
+
+        self._release_ogr_handles_for_geopackage(file_path)
+
+        fd, temp_path = tempfile.mkstemp(
+            suffix=".gpkg",
+            prefix="archeosync_import_",
+        )
+        os.close(fd)
+
+        try:
+            import sqlite3
+
+            source_conn = sqlite3.connect(f"file:{file_path}?mode=ro", uri=True)
+            dest_conn = sqlite3.connect(temp_path)
+            source_conn.backup(dest_conn)
+            dest_conn.close()
+            source_conn.close()
+            print(
+                f"[DEBUG] GeoPackage snapshot created via SQLite backup: "
+                f"{file_path} -> {temp_path}"
+            )
+            return temp_path, temp_path
+        except Exception as exc:
+            print(
+                f"Warning: SQLite backup failed for {file_path}: {exc}. "
+                "Falling back to WAL checkpoint + file copy."
+            )
+            try:
+                self._checkpoint_geopackage_wal(file_path)
+                shutil.copy2(file_path, temp_path)
+                return temp_path, temp_path
+            except OSError as copy_exc:
+                print(
+                    f"Warning: could not snapshot GeoPackage {file_path} for fresh read: {copy_exc}. "
+                    "Falling back to direct OGR access."
+                )
+                self._cleanup_geopackage_snapshot(temp_path)
+                return file_path, None
+
+    def _cleanup_geopackage_snapshot(self, temp_path: Optional[str]) -> None:
+        """Remove a temporary GeoPackage snapshot created for import reads."""
+        if not temp_path:
+            return
+        try:
+            if os.path.isfile(temp_path):
+                os.remove(temp_path)
+        except OSError as exc:
+            print(f"Warning: could not delete temporary GeoPackage snapshot {temp_path}: {exc}")
+
     def _ogr_sub_layer_names(self, file_path: str) -> List[str]:
         """List OGR layer names contained in a GeoPackage file."""
         names: List[str] = []
@@ -1855,6 +1983,62 @@ class FieldProjectImportService(QObject):
         layer_name = layer_name.strip().strip("|")
         return layer_name or None
 
+    def _read_fresh_layer_features(self, layer: Any) -> List[Any]:
+        """
+        Reload an OGR-backed layer from disk and return detached feature copies.
+
+        QGIS may keep GeoPackage pages cached between imports in the same session.
+        Each import reads a temporary snapshot of the file so pooled OGR handles
+        cannot return data from a previous cancelled import.
+        """
+        if layer is None or not getattr(layer, "isValid", lambda: False)():
+            return []
+
+        try:
+            if hasattr(layer, "reload"):
+                layer.reload()
+            else:
+                provider = layer.dataProvider() if hasattr(layer, "dataProvider") else None
+                if provider is not None and hasattr(provider, "reloadData"):
+                    provider.reloadData()
+        except Exception as exc:
+            print(f"Warning: could not reload layer before reading features: {exc}")
+
+        features: List[Any] = []
+        for feature in layer.getFeatures():
+            if QgsFeature is not None:
+                features.append(QgsFeature(feature))
+            else:
+                features.append(feature)
+        return features
+
+    def _try_read_geopackage_layer_features(
+        self,
+        read_path: str,
+        layer_name: str,
+        source_path: str,
+        expected_geometry_type: Optional[Any],
+    ) -> List[Any]:
+        """Read detached features from one GeoPackage sublayer."""
+        uri = f"{read_path}|layername={layer_name}"
+        layer = QgsVectorLayer(uri, layer_name, "ogr")
+        if not layer.isValid():
+            return []
+
+        layer_features = self._read_fresh_layer_features(layer)
+        if not layer_features:
+            return []
+
+        if (
+            expected_geometry_type is not None
+            and not self._is_valid_geometry_type(layer, expected_geometry_type)
+        ):
+            print(
+                f"Warning: geometry type mismatch for {source_path} ({layer_name}), "
+                f"importing {len(layer_features)} feature(s) anyway"
+            )
+        return layer_features
+
     def _collect_features_from_geopackage(
         self,
         file_path: str,
@@ -1862,63 +2046,80 @@ class FieldProjectImportService(QObject):
         expected_geometry_type: Optional[Any],
     ) -> List[Any]:
         """
-        Read features from the GeoPackage sublayer that yields the most rows.
+        Read features from the configured GeoPackage layer.
 
-        Tries configured layer names, the file basename, and every OGR sublayer.
-        Geometry mismatches are ignored when the candidate layer contains features.
+        Preferred layer names (configured name, file basename) are tried first so a
+        re-import after edits does not accidentally read a different sublayer that
+        still contains more rows. Other OGR sublayers are only used as a fallback.
         """
         if not file_path or not os.path.isfile(file_path):
             return []
 
-        candidate_names = self._expand_layer_name_candidates(
-            self._preferred_layer_names(file_path, configured_name)
-            + self._ogr_sub_layer_names(file_path)
-        )
+        read_path, snapshot_path = self._snapshot_geopackage_for_read(file_path)
+        try:
+            preferred_names = self._expand_layer_name_candidates(
+                self._preferred_layer_names(read_path, configured_name)
+            )
+            sublayer_names = self._expand_layer_name_candidates(
+                self._ogr_sub_layer_names(read_path)
+            )
+            fallback_names = [
+                layer_name
+                for layer_name in sublayer_names
+                if layer_name not in preferred_names
+            ]
 
-        best_features: List[Any] = []
-        best_layer_name: Optional[str] = None
-
-        for layer_name in candidate_names:
-            uri = f"{file_path}|layername={layer_name}"
-            layer = QgsVectorLayer(uri, layer_name, "ogr")
-            if not layer.isValid():
-                continue
-            layer_features = list(layer.getFeatures())
-            if not layer_features:
-                continue
-            if (
-                expected_geometry_type is not None
-                and not self._is_valid_geometry_type(layer, expected_geometry_type)
-            ):
-                print(
-                    f"Warning: geometry type mismatch for {file_path} ({layer_name}), "
-                    f"importing {len(layer_features)} feature(s) anyway"
+            for layer_name in preferred_names:
+                layer_features = self._try_read_geopackage_layer_features(
+                    read_path,
+                    layer_name,
+                    file_path,
+                    expected_geometry_type,
                 )
-            if len(layer_features) > len(best_features):
-                best_features = layer_features
-                best_layer_name = layer_name
-
-        if not best_features:
-            fallback = QgsVectorLayer(
-                file_path,
-                self._geopackage_basename(file_path) or "layer",
-                "ogr",
-            )
-            if fallback.isValid():
-                layer_features = list(fallback.getFeatures())
                 if layer_features:
+                    print(
+                        f"Read {len(layer_features)} feature(s) from {file_path} "
+                        f"(layer: {layer_name})"
+                    )
+                    return layer_features
+
+            best_features: List[Any] = []
+            best_layer_name: Optional[str] = None
+            for layer_name in fallback_names:
+                layer_features = self._try_read_geopackage_layer_features(
+                    read_path,
+                    layer_name,
+                    file_path,
+                    expected_geometry_type,
+                )
+                if len(layer_features) > len(best_features):
                     best_features = layer_features
-                    best_layer_name = self._geopackage_basename(file_path)
+                    best_layer_name = layer_name
 
-        if best_features:
-            print(
-                f"Read {len(best_features)} feature(s) from {file_path}"
-                f"{f' (layer: {best_layer_name})' if best_layer_name else ''}"
-            )
-        elif candidate_names:
-            print(f"No features read from {file_path} (tried: {', '.join(candidate_names)})")
+            if not best_features:
+                fallback = QgsVectorLayer(
+                    read_path,
+                    self._geopackage_basename(read_path) or "layer",
+                    "ogr",
+                )
+                if fallback.isValid():
+                    layer_features = self._read_fresh_layer_features(fallback)
+                    if layer_features:
+                        best_features = layer_features
+                        best_layer_name = self._geopackage_basename(read_path)
 
-        return best_features
+            if best_features:
+                print(
+                    f"Read {len(best_features)} feature(s) from {file_path}"
+                    f"{f' (layer: {best_layer_name})' if best_layer_name else ''}"
+                )
+            elif preferred_names or fallback_names:
+                tried = preferred_names + fallback_names
+                print(f"No features read from {file_path} (tried: {', '.join(tried)})")
+
+            return best_features
+        finally:
+            self._cleanup_geopackage_snapshot(snapshot_path)
 
     def _load_geopackage_layer(
         self,
@@ -1937,6 +2138,8 @@ class FieldProjectImportService(QObject):
         """
         if not file_path or not os.path.isfile(file_path):
             return None
+
+        self._release_ogr_handles_for_geopackage(file_path)
 
         candidates: List[str] = []
         for name in preferred_layer_names or []:

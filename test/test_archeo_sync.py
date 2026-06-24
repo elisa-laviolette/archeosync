@@ -101,6 +101,15 @@ class TestArcheoSyncRunImportData:
         ):
             layer_service.get_layer_by_name.assert_any_call(name)
 
+    def _mock_pending_import_dialog_continue_review(self):
+        """Mock QMessageBox so the user chooses to continue a pending import."""
+        continue_button = object()
+        discard_button = object()
+        msg_box = Mock()
+        msg_box.addButton.side_effect = [continue_button, discard_button]
+        msg_box.clickedButton.return_value = continue_button
+        return patch("qgis.PyQt.QtWidgets.QMessageBox", return_value=msg_box)
+
     def test_run_import_data_rebuilds_summary_when_temporary_layers_even_if_dock_exists(self):
         """Pending temp layers always rebuild the summary so detectors and the dock UI stay in sync."""
         layer_service = Mock()
@@ -118,9 +127,10 @@ class TestArcheoSyncRunImportData:
         plugin = self._plugin_with_layer_service(layer_service)
         plugin._iface.mainWindow.return_value = main_window
 
-        with patch("archeo_sync.ImportDataDialog") as dialog_cls:
-            with patch.object(plugin, "_show_import_summary") as show_summary:
-                plugin.run_import_data()
+        with self._mock_pending_import_dialog_continue_review():
+            with patch("archeo_sync.ImportDataDialog") as dialog_cls:
+                with patch.object(plugin, "_show_import_summary") as show_summary:
+                    plugin.run_import_data()
 
         dialog_cls.assert_not_called()
         show_summary.assert_called_once()
@@ -142,15 +152,41 @@ class TestArcheoSyncRunImportData:
         plugin = self._plugin_with_layer_service(layer_service)
         plugin._iface.mainWindow.return_value = main_window
 
-        with patch("archeo_sync.ImportDataDialog") as dialog_cls:
-            with patch.object(plugin, "_show_import_summary") as show_summary:
-                plugin.run_import_data()
+        with self._mock_pending_import_dialog_continue_review():
+            with patch("archeo_sync.ImportDataDialog") as dialog_cls:
+                with patch.object(plugin, "_show_import_summary") as show_summary:
+                    plugin.run_import_data()
 
         dialog_cls.assert_not_called()
         show_summary.assert_called_once()
         args, _kwargs = show_summary.call_args
         assert args[0]["objects_count"] == 3
         assert args[0]["csv_points_count"] == 0
+
+    def test_run_import_data_discard_pending_import_opens_selection_dialog(self):
+        """Users can discard a pending import and start a new import session."""
+        layer_service = Mock()
+        temp_layer = Mock()
+        layer_service.get_layer_by_name.side_effect = (
+            lambda name: temp_layer if name == "New Objects" else None
+        )
+
+        plugin = self._plugin_with_layer_service(layer_service)
+        continue_button = object()
+        discard_button = object()
+        msg_box = Mock()
+        msg_box.addButton.side_effect = [continue_button, discard_button]
+        msg_box.clickedButton.return_value = discard_button
+        dialog_instance = Mock()
+
+        with patch("qgis.PyQt.QtWidgets.QMessageBox", return_value=msg_box):
+            with patch.object(plugin, "_clear_pending_import_layers_before_new_import") as clear_pending:
+                with patch("archeo_sync.ImportDataDialog", return_value=dialog_instance) as dialog_cls:
+                    with patch.object(ArcheoSyncPlugin, "_execute_dialog", return_value=False):
+                        plugin.run_import_data()
+
+        clear_pending.assert_called_once()
+        dialog_cls.assert_called_once()
 
 
 @pytest.mark.unit
@@ -281,6 +317,26 @@ class TestArcheoSyncImportArchiveScope:
         _summary_data, kwargs = show_summary.call_args
         assert kwargs["archive_csv"] is False
         assert kwargs["archive_projects"] is True
+
+    @pytest.mark.skipif(
+        not QGIS_AVAILABLE,
+        reason="ArcheoSyncPlugin import requires QGIS",
+    )
+    def test_handle_import_data_accepted_clears_pending_layers_before_import(self):
+        plugin = self._plugin()
+        dialog = Mock()
+        dialog.get_selected_csv_files.return_value = []
+        dialog.get_selected_completed_projects.return_value = ["/data/project_a"]
+
+        plugin._layer_service = Mock()
+        plugin._process_completed_projects = Mock(return_value=None)
+
+        with patch.object(plugin, "_apply_configured_map_theme"), \
+             patch.object(plugin, "_clear_pending_import_layers_before_new_import") as clear_pending:
+            plugin._handle_import_data_accepted(dialog)
+
+        clear_pending.assert_called_once()
+        plugin._process_completed_projects.assert_called_once_with(["/data/project_a"])
 
     @pytest.mark.skipif(
         not QGIS_AVAILABLE,

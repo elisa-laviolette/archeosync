@@ -442,6 +442,36 @@ class TestProjectCreationService:
         empty_layer_ids = {call.kwargs["source_layer_id"] for call in mock_empty_export.call_args_list}
         assert empty_layer_ids == {"obj", "feat", "sf", "alt"}
 
+    def test_copy_layer_structure_to_geopackage_preserves_no_geometry(self, tmp_path):
+        """Empty structure export must keep alternative objects layers without geometry."""
+        from qgis.core import QgsWkbTypes
+
+        source_layer = QgsVectorLayer(
+            "NoGeometry?crs=EPSG:4326&field=numero:integer",
+            "Alt Objects",
+            "memory",
+        )
+        assert source_layer.isValid()
+
+        output_path = str(tmp_path / "alt.gpkg")
+        layer_name = "Alt Objects"
+
+        with patch.object(
+            self.project_service,
+            "_copy_layer_properties_to_geopackage",
+            return_value=True,
+        ):
+            result = self.project_service._copy_layer_structure_to_geopackage(
+                source_layer,
+                output_path,
+                layer_name,
+            )
+
+        assert result is True
+        exported = QgsVectorLayer(f"{output_path}|layername={layer_name}", "test", "ogr")
+        assert exported.isValid()
+        assert exported.geometryType() == QgsWkbTypes.NullGeometry
+
     def test_has_relationship_with_recording_areas_with_relation(self):
         """Test relationship detection when a proper QGIS relation exists."""
         # Mock QGIS project and relation manager
