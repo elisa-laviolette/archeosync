@@ -236,6 +236,107 @@ class TestImportSummaryDialog(unittest.TestCase):
         self.assertIn("Out-of-Bounds Warnings:", texts)
         self.assertTrue(any("Features 2 outside boundary" in t for t in texts))
 
+    def test_effective_warnings_keep_import_lists_when_detector_returns_empty_mid_refresh(self):
+        """Empty detector output must not hide import warnings until refresh completes."""
+        self.dialog._warnings_analysis_running = True
+        self.dialog._warning_refresh_results = {"duplicate_objects_warnings": []}
+        self.assertEqual(len(self.dialog._effective_warnings("duplicate_objects_warnings")), 1)
+        self.assertEqual(len(self.dialog._effective_warnings("skipped_numbers_warnings")), 1)
+
+        self.dialog._warnings_analysis_running = False
+        self.assertEqual(len(self.dialog._effective_warnings("duplicate_objects_warnings")), 1)
+
+        self.dialog._apply_accumulated_warning_refresh_results()
+        self.assertEqual(self.dialog._summary_data.duplicate_objects_warnings, [])
+
+    def test_effective_warnings_shows_detector_output_when_non_empty(self):
+        """New detector warnings replace import-time lists immediately during refresh."""
+        refreshed = WarningData(
+            message="Refreshed duplicate warning",
+            recording_area_name="Zone A",
+            layer_name="New Objects",
+            filter_expression='"fid" = 1',
+        )
+        self.dialog._warnings_analysis_running = True
+        self.dialog._warning_refresh_results = {"duplicate_objects_warnings": [refreshed]}
+        effective = self.dialog._effective_warnings("duplicate_objects_warnings")
+        self.assertEqual(len(effective), 1)
+        self.assertEqual(effective[0].message, "Refreshed duplicate warning")
+
+    def test_pending_warning_categories_remain_visible_after_partial_refresh_steps(self):
+        """Warnings for not-yet-run detectors must stay visible while earlier steps finish."""
+        oob_warning = WarningData(
+            message="import oob warning",
+            recording_area_name="Zone",
+            layer_name="New Features",
+            filter_expression='"fid" = 1',
+        )
+        data = ImportSummaryData(
+            csv_points_count=10,
+            objects_count=3,
+            features_count=1,
+            duplicate_objects_warnings=[
+                WarningData(
+                    message="import dup warning",
+                    recording_area_name="Zone",
+                    layer_name="New Objects",
+                    filter_expression='"fid" = 2',
+                )
+            ],
+            skipped_numbers_warnings=[
+                WarningData(
+                    message="import skipped warning",
+                    recording_area_name="Zone",
+                    layer_name="New Objects",
+                    filter_expression='"fid" = 3',
+                    skipped_numbers=[4],
+                )
+            ],
+            out_of_bounds_warnings=[oob_warning],
+        )
+        dock = ImportSummaryDockWidget(
+            summary_data=data,
+            iface=self.mock_iface,
+            settings_manager=self.mock_settings_manager,
+            csv_import_service=self.mock_csv_import_service,
+            field_project_import_service=self.mock_field_project_import_service,
+            layer_service=self.mock_layer_service,
+            parent=self.parent,
+        )
+        dock._warnings_analysis_running = True
+        dock._warning_refresh_results = {
+            "duplicate_objects_warnings": [],
+            "skipped_numbers_warnings": [],
+        }
+        dock._recreate_summary_content()
+
+        texts = {lbl.text() for lbl in dock.findChildren(QtWidgets.QLabel)}
+        self.assertTrue(any("import dup warning" in t for t in texts))
+        self.assertTrue(any("import skipped warning" in t for t in texts))
+        self.assertTrue(any("import oob warning" in t for t in texts))
+
+    def test_finalize_preserves_warnings_outside_refresh_plan(self):
+        """Categories not scanned by the current plan must keep import-time warnings."""
+        missing_warning = WarningData(
+            message="missing total station warning",
+            recording_area_name="Zone",
+            layer_name="New Objects",
+            filter_expression='"fid" = 1',
+        )
+        self.dialog._summary_data.csv_points_count = 5
+        self.dialog._summary_data.objects_count = 0
+        self.dialog._summary_data.missing_total_station_warnings = [missing_warning]
+        self.dialog._warning_refresh_plan = self.dialog._build_warning_refresh_plan()
+        self.dialog._warning_refresh_results = {"out_of_bounds_warnings": []}
+
+        self.dialog._apply_accumulated_warning_refresh_results()
+        planned_keys = self.dialog._planned_warning_result_keys()
+        for result_key in self.dialog._WARNING_RESULT_KEYS:
+            if result_key in planned_keys and result_key not in self.dialog._warning_refresh_results:
+                setattr(self.dialog._summary_data, result_key, [])
+
+        self.assertEqual(len(self.dialog._summary_data.missing_total_station_warnings), 1)
+
     def test_refresh_warnings_button_exists(self):
         """Test that the refresh warnings button is created."""
         self.assertIsNotNone(self.dialog._refresh_button)

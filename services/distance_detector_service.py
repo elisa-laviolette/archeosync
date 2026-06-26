@@ -58,16 +58,31 @@ class DistanceDetectorService:
         'identifier', 'identifiant', 'id', 'code', 'label', 'label_court', 'label_long',
         'object_number', 'number', 'numero', 'ptid', 'pt_id', 'num', 'no',
     })
+    # Relation keys shared by more points than this are treated as non-unique (e.g. recording area id).
+    _MAX_POINTS_PER_RELATION_KEY = 20
+    _MAX_POINT_OBJECT_PAIRINGS = 100
+    _EXACT_TOPO_FIRST_FIELD_NAMES = frozenset({
+        'first_identifier', 'first_identifiant', 'premier_identifiant',
+        'first_ptid', 'first_pt_id',
+    })
+    _EXACT_TOPO_LAST_FIELD_NAMES = frozenset({
+        'last_identifier', 'last_identifiant', 'dernier_identifiant',
+        'last_ptid', 'last_pt_id',
+    })
     
-    def __init__(self, settings_manager, layer_service):
+    def __init__(self, settings_manager, layer_service, import_context=None):
         """
         Initialize the service with required dependencies.
         Args:
             settings_manager: Service for managing settings
             layer_service: Service for layer operations
+            import_context: Optional dict with current import summary counters
+                (``csv_points_count``, ``objects_count``) so stale temporary layers
+                from a previous session are not used for distance checks.
         """
         self._settings_manager = settings_manager
         self._layer_service = layer_service
+        self._import_context = import_context or {}
         # Get configurable thresholds from settings with defaults, always as float
         self._max_distance_meters = float(self._settings_manager.get_value('distance_max_distance', 0.05))
     
@@ -96,6 +111,14 @@ class DistanceDetectorService:
             # Get all possible layers
             temp_total_station_points_layer = self._layer_service.get_layer_by_name("Imported_CSV_Points")
             temp_objects_layer = self._layer_service.get_layer_by_name("New Objects")
+            csv_points_count = self._import_context.get('csv_points_count')
+            if csv_points_count is not None and int(csv_points_count) == 0:
+                if temp_total_station_points_layer is not None:
+                    print(
+                        "[DEBUG] Distance detection: ignoring stale Imported_CSV_Points layer "
+                        "(current import has no CSV points)"
+                    )
+                temp_total_station_points_layer = None
             definitive_total_station_points_layer = self._layer_service.get_layer_by_id(total_station_points_layer_id)
             definitive_objects_layer = self._layer_service.get_layer_by_id(objects_layer_id)
             print(
@@ -106,13 +129,30 @@ class DistanceDetectorService:
                 f"def_objects={bool(definitive_objects_layer)})"
             )
 
+            # Object-only import: never run QGIS relation / recording-area pairing without CSV points.
+            if temp_objects_layer and not temp_total_station_points_layer:
+                print("[DEBUG] Distance detection: object-only import (no Imported_CSV_Points)")
+                if self._objects_layer_has_topo_identifier_fields(temp_objects_layer):
+                    warnings.extend(
+                        self._detect_distance_by_topo_identifiers(
+                            temp_objects_layer,
+                            primary_points_layer=None,
+                            definitive_points_layer=definitive_total_station_points_layer,
+                        )
+                    )
+                else:
+                    print(
+                        "[DEBUG] Distance detection: skipped — no topo link fields on objects "
+                        "and no pending CSV points layer"
+                    )
+                return warnings
+
             # List of (points_layer, objects_layer, points_layer_type, objects_layer_type)
             # We avoid definitive-definitive checks while temporary import layers exist, because
             # distance warnings in the import workflow must target pending imported data first.
             layer_combinations = [
                 (temp_total_station_points_layer, temp_objects_layer, 'temp', 'temp'),
                 (temp_total_station_points_layer, definitive_objects_layer, 'temp', 'definitive'),
-                (definitive_total_station_points_layer, temp_objects_layer, 'definitive', 'temp'),
             ]
             if not temp_total_station_points_layer and not temp_objects_layer:
                 layer_combinations.append(
@@ -135,6 +175,40 @@ class DistanceDetectorService:
                     print("[DEBUG] Distance detection: missing definitive points or objects layer from settings")
                     continue
 
+                if self._objects_layer_has_topo_identifier_fields(objects_layer):
+                    topo_warnings = self._detect_distance_by_topo_identifiers(
+                        objects_layer,
+                        primary_points_layer=points_layer if self._layer_has_features(points_layer) else None,
+                        definitive_points_layer=definitive_total_station_points_layer,
+                    )
+                    print(
+                        "[DEBUG] Distance detection: topo identifier check completed "
+                        f"(warnings={len(topo_warnings)})"
+                    )
+                    warnings.extend(topo_warnings)
+                    continue
+
+                if not self._layer_has_features(points_layer):
+                    print(
+                        "[DEBUG] Distance detection: skipping relation check — "
+                        f"points layer '{points_layer.name()}' has no features"
+                    )
+                    continue
+
+                recording_area_link_fields = self._collect_recording_area_link_field_names(
+                    definitive_total_station_points_layer,
+                    definitive_objects_layer,
+                )
+
+                # Never pair pending objects with definitive points via direct relation fields
+                # (e.g. recording-area id). Indirect mobilier paths are handled below.
+                skip_direct_relation = points_type == 'definitive' and objects_type == 'temp'
+
+                recording_areas_layer_id = self._settings_manager.get_value('recording_areas_layer')
+                forbidden_layer_ids: Optional[AbstractSet[str]] = None
+                if recording_areas_layer_id:
+                    forbidden_layer_ids = frozenset({str(recording_areas_layer_id)})
+
                 # Direct relations between the two definitive layers, plus a path for multi-hop
                 # detection. BFS skips direct point<->object relations so a useless or CSV-incompatible
                 # direct link does not hide a valid longer path (e.g. points -> mobilier -> objects).
@@ -155,6 +229,7 @@ class DistanceDetectorService:
                     definitive_total_station_points_layer,
                     definitive_objects_layer,
                     forbidden_relation_ids=forbidden_relation_ids,
+                    forbidden_layer_ids=forbidden_layer_ids,
                 )
                 if indirect_path:
                     print(f"[DEBUG] Distance detection: indirect path hops = {len(indirect_path)}")
@@ -174,83 +249,96 @@ class DistanceDetectorService:
 
                 matched_relation = False
                 direct_warnings_count = 0
-                for relation in ordered_relations:
-                    field_pairs = relation.fieldPairs()
-                    if not field_pairs:
-                        print("[DEBUG] Distance detection: skipping relation without field pairs")
-                        continue
+                if not skip_direct_relation:
+                    for relation in ordered_relations:
+                        field_pairs = relation.fieldPairs()
+                        if not field_pairs:
+                            print("[DEBUG] Distance detection: skipping relation without field pairs")
+                            continue
 
-                    # Determine which layer is referencing and which is referenced in this relation
-                    if relation.referencingLayer() == definitive_total_station_points_layer:
-                        def_points_field = list(field_pairs.keys())[0]
-                        def_objects_field = list(field_pairs.values())[0]
-                        points_layer_is_referencing = True
-                    else:
-                        def_objects_field = list(field_pairs.keys())[0]
-                        def_points_field = list(field_pairs.values())[0]
-                        points_layer_is_referencing = False
+                        # Determine which layer is referencing and which is referenced in this relation
+                        if relation.referencingLayer() == definitive_total_station_points_layer:
+                            def_points_field = list(field_pairs.keys())[0]
+                            def_objects_field = list(field_pairs.values())[0]
+                            points_layer_is_referencing = True
+                        else:
+                            def_objects_field = list(field_pairs.keys())[0]
+                            def_points_field = list(field_pairs.values())[0]
+                            points_layer_is_referencing = False
 
-                    points_field = self._find_relation_field_on_layer(
-                        points_layer, def_points_field, is_point_layer=True
-                    )
-                    objects_field = self._find_relation_field_on_layer(
-                        objects_layer, def_objects_field, is_point_layer=False
-                    )
-                    if points_field is None or objects_field is None:
-                        p_names = [f.name() for f in points_layer.fields()]
-                        o_names = [f.name() for f in objects_layer.fields()]
-                        print(
-                            "[DEBUG] Distance detection: relation fields not resolved on current layers "
-                            f"(relation expects points='{def_points_field}', objects='{def_objects_field}'; "
-                            f"resolved points_field={points_field!r}, objects_field={objects_field!r}; "
-                            f"points fields={p_names}; objects fields={o_names}); trying next relation"
+                        points_field = self._find_relation_field_on_layer(
+                            points_layer, def_points_field, is_point_layer=True
                         )
-                        continue
-
-                    points_field_idx = points_layer.fields().indexOf(points_field)
-                    if points_field_idx < 0:
-                        for i, field in enumerate(points_layer.fields()):
-                            if field.name().lower() == points_field.lower():
-                                points_field_idx = i
-                                break
-
-                    objects_field_idx = objects_layer.fields().indexOf(objects_field)
-                    if objects_field_idx < 0:
-                        for i, field in enumerate(objects_layer.fields()):
-                            if field.name().lower() == objects_field.lower():
-                                objects_field_idx = i
-                                break
-
-                    if points_field_idx < 0 or objects_field_idx < 0:
-                        print(
-                            "[DEBUG] Distance detection: resolved fields but invalid indexes "
-                            f"(points_idx={points_field_idx}, objects_idx={objects_field_idx})"
+                        objects_field = self._find_relation_field_on_layer(
+                            objects_layer, def_objects_field, is_point_layer=False
                         )
-                        continue
+                        if points_field is None or objects_field is None:
+                            p_names = [f.name() for f in points_layer.fields()]
+                            o_names = [f.name() for f in objects_layer.fields()]
+                            print(
+                                "[DEBUG] Distance detection: relation fields not resolved on current layers "
+                                f"(relation expects points='{def_points_field}', objects='{def_objects_field}'; "
+                                f"resolved points_field={points_field!r}, objects_field={objects_field!r}; "
+                                f"points fields={p_names}; objects fields={o_names}); trying next relation"
+                            )
+                            continue
 
-                    matched_relation = True
-                    print(
-                        "[DEBUG] Distance detection: running direct check with fields "
-                        f"points='{points_field}' (idx={points_field_idx}) and "
-                        f"objects='{objects_field}' (idx={objects_field_idx})"
-                    )
-                    distance_warnings = self._detect_distance_issues(
-                        points_layer, objects_layer,
-                        points_field_idx, objects_field_idx,
-                        points_layer_is_referencing
-                    )
-                    direct_warnings_count = len(distance_warnings)
-                    print(
-                        "[DEBUG] Distance detection: direct check completed "
-                        f"(warnings={direct_warnings_count})"
-                    )
-                    warnings.extend(distance_warnings)
-                    # Use the first relation whose field mapping exists on both current layers
-                    break
+                        if (
+                            self._is_recording_area_link_field(points_field, recording_area_link_fields)
+                            or self._is_recording_area_link_field(objects_field, recording_area_link_fields)
+                        ):
+                            print(
+                                "[DEBUG] Distance detection: skipping relation using recording-area fields "
+                                f"(points='{points_field}', objects='{objects_field}')"
+                            )
+                            continue
+
+                        points_field_idx = points_layer.fields().indexOf(points_field)
+                        if points_field_idx < 0:
+                            for i, field in enumerate(points_layer.fields()):
+                                if field.name().lower() == points_field.lower():
+                                    points_field_idx = i
+                                    break
+
+                        objects_field_idx = objects_layer.fields().indexOf(objects_field)
+                        if objects_field_idx < 0:
+                            for i, field in enumerate(objects_layer.fields()):
+                                if field.name().lower() == objects_field.lower():
+                                    objects_field_idx = i
+                                    break
+
+                        if points_field_idx < 0 or objects_field_idx < 0:
+                            print(
+                                "[DEBUG] Distance detection: resolved fields but invalid indexes "
+                                f"(points_idx={points_field_idx}, objects_idx={objects_field_idx})"
+                            )
+                            continue
+
+                        matched_relation = True
+                        print(
+                            "[DEBUG] Distance detection: running direct check with fields "
+                            f"points='{points_field}' (idx={points_field_idx}) and "
+                            f"objects='{objects_field}' (idx={objects_field_idx})"
+                        )
+                        distance_warnings = self._detect_distance_issues(
+                            points_layer, objects_layer,
+                            points_field_idx, objects_field_idx,
+                            points_layer_is_referencing
+                        )
+                        direct_warnings_count = len(distance_warnings)
+                        print(
+                            "[DEBUG] Distance detection: direct check completed "
+                            f"(warnings={direct_warnings_count})"
+                        )
+                        warnings.extend(distance_warnings)
+                        # Use the first relation whose field mapping exists on both current layers
+                        break
 
                 # If direct mapping was unusable, or usable but yielded no warnings,
                 # try the indirect chain as a fallback.
-                if (not matched_relation or direct_warnings_count == 0) and indirect_path:
+                if (not skip_direct_relation and (not matched_relation or direct_warnings_count == 0) and indirect_path) or (
+                    skip_direct_relation and indirect_path
+                ):
                     print(
                         "[DEBUG] Distance detection: running indirect fallback "
                         f"(matched_relation={matched_relation}, direct_warnings={direct_warnings_count})"
@@ -350,6 +438,19 @@ class DistanceDetectorService:
             for relation_value in common_relation_values:
                 points_features = points_by_relation[relation_value]
                 objects_features = objects_by_relation[relation_value]
+                if len(points_features) > self._MAX_POINTS_PER_RELATION_KEY:
+                    print(
+                        "[DEBUG] Distance detection: skipping non-unique relation key "
+                        f"'{relation_value}' ({len(points_features)} points)"
+                    )
+                    continue
+                pairing_count = len(points_features) * len(objects_features)
+                if pairing_count > self._MAX_POINT_OBJECT_PAIRINGS:
+                    print(
+                        "[DEBUG] Distance detection: skipping relation key "
+                        f"'{relation_value}' (too many pairings: {pairing_count})"
+                    )
+                    continue
                 for pf in points_features:
                     for of in objects_features:
                         maybe_yield_to_ui(every=10)
@@ -504,6 +605,7 @@ class DistanceDetectorService:
         layer_end: Any,
         max_hops: int = 8,
         forbidden_relation_ids: Optional[AbstractSet[str]] = None,
+        forbidden_layer_ids: Optional[AbstractSet[str]] = None,
     ) -> Optional[List[Any]]:
         """
         Shortest chain of QgsRelation instances connecting ``layer_start`` to ``layer_end``.
@@ -518,6 +620,7 @@ class DistanceDetectorService:
             forbidden_relation_ids: Relations whose ids must not appear on the path (typically
                 all direct point↔object relations so a longer path through an intermediate layer
                 can still be found).
+            forbidden_layer_ids: Layer ids that must not appear on the path (e.g. recording areas).
 
         Returns:
             Ordered list of relations, or None if no path exists within ``max_hops``.
@@ -542,6 +645,8 @@ class DistanceDetectorService:
                     if not nxt:
                         continue
                     nid = nxt.id()
+                    if forbidden_layer_ids and str(nid) in forbidden_layer_ids:
+                        continue
                     new_path = path + [relation]
                     if nid == layer_end.id():
                         return new_path
@@ -796,6 +901,20 @@ class DistanceDetectorService:
             points_field_idx = hops[0][0]
             objects_field_idx = hops[-1][1]
             for relation_value, issues in by_relation_value.items():
+                unique_point_ids = {issue['point_feature'].id() for issue in issues}
+                unique_object_ids = {issue['object_feature'].id() for issue in issues}
+                if len(unique_point_ids) > self._MAX_POINTS_PER_RELATION_KEY:
+                    print(
+                        "[DEBUG] Distance detection (indirect): skipping non-unique key "
+                        f"'{relation_value}' ({len(unique_point_ids)} points)"
+                    )
+                    continue
+                if len(unique_point_ids) * len(unique_object_ids) > self._MAX_POINT_OBJECT_PAIRINGS:
+                    print(
+                        "[DEBUG] Distance detection (indirect): skipping key "
+                        f"'{relation_value}' (too many pairings)"
+                    )
+                    continue
                 points_filter_value = issues[0]['point_feature'].attribute(points_field_idx)
                 objects_filter_value = issues[0]['object_feature'].attribute(objects_field_idx)
                 points_filter = (
@@ -951,6 +1070,303 @@ class DistanceDetectorService:
         """Normalize a relation value to a stable case-insensitive key."""
         return str(relation_value).strip().lower()
 
+    def _layer_has_features(self, layer: Any) -> bool:
+        """Return whether a vector layer contains at least one feature."""
+        if not layer:
+            return False
+        try:
+            for _feature in layer.getFeatures():
+                return True
+        except Exception:
+            return False
+        return False
+
+    def _find_topo_link_field_indices(self, objects_layer: Any) -> Tuple[int, int]:
+        """
+        Locate object-layer columns that store topo point identifiers (first/last).
+
+        Supports common English and French field names used in field-survey schemas.
+        """
+        if not objects_layer:
+            return -1, -1
+        first_idx = -1
+        last_idx = -1
+        for i, field in enumerate(objects_layer.fields()):
+            name = field.name().strip().lower()
+            if name in self._EXACT_TOPO_FIRST_FIELD_NAMES:
+                first_idx = i
+            elif name in self._EXACT_TOPO_LAST_FIELD_NAMES:
+                last_idx = i
+        if first_idx >= 0 or last_idx >= 0:
+            return first_idx, last_idx
+        for i, field in enumerate(objects_layer.fields()):
+            name = field.name().strip().lower()
+            if first_idx < 0 and ('first' in name or 'premier' in name):
+                if 'identif' in name or 'ptid' in name or 'pt_id' in name:
+                    first_idx = i
+            if last_idx < 0 and ('last' in name or 'dernier' in name):
+                if 'identif' in name or 'ptid' in name or 'pt_id' in name:
+                    last_idx = i
+        return first_idx, last_idx
+
+    def _collect_recording_area_link_field_names(
+        self,
+        definitive_points_layer: Any,
+        definitive_objects_layer: Any,
+    ) -> frozenset:
+        """
+        Return lower-case field names that reference recording areas, not topo point ids.
+
+        These fields must never be used to pair points with objects for distance checks.
+        """
+        names: set = set()
+        recording_areas_layer_id = self._settings_manager.get_value('recording_areas_layer')
+        recording_areas_layer = (
+            self._layer_service.get_layer_by_id(recording_areas_layer_id)
+            if recording_areas_layer_id
+            else None
+        )
+        try:
+            project = QgsProject.instance()
+            relation_manager = project.relationManager()
+            for relation in relation_manager.relations().values():
+                referencing_layer = relation.referencingLayer()
+                referenced_layer = relation.referencedLayer()
+                if not referencing_layer or not referenced_layer or not recording_areas_layer:
+                    continue
+                if referenced_layer.id() != recording_areas_layer.id():
+                    continue
+                field_pairs = relation.fieldPairs()
+                if not field_pairs:
+                    continue
+                if definitive_objects_layer and referencing_layer.id() == definitive_objects_layer.id():
+                    names.update(field_pairs.keys())
+                if definitive_points_layer and referencing_layer.id() == definitive_points_layer.id():
+                    names.update(field_pairs.keys())
+        except Exception as e:
+            print(f"[DEBUG] Distance detection: could not collect recording-area fields: {e}")
+
+        for setting_key in (
+            'objects_recording_area_field',
+            'alternative_objects_recording_area_field',
+        ):
+            configured = self._settings_manager.get_value(setting_key, '')
+            if configured:
+                names.add(str(configured).strip().lower())
+
+        return frozenset(str(name).strip().lower() for name in names if name)
+
+    def _is_recording_area_link_field(
+        self,
+        field_name: Optional[str],
+        recording_area_link_fields: AbstractSet[str],
+    ) -> bool:
+        """Return whether ``field_name`` is a recording-area foreign key."""
+        if not field_name or not recording_area_link_fields:
+            return False
+        return field_name.strip().lower() in recording_area_link_fields
+
+    def _objects_layer_has_topo_identifier_fields(self, objects_layer: Any) -> bool:
+        """Return whether the objects layer stores topo point links in first/last columns."""
+        first_idx, last_idx = self._find_topo_link_field_indices(objects_layer)
+        return first_idx >= 0 or last_idx >= 0
+
+    def _index_points_layers_by_topo_identifier(
+        self,
+        *points_layers: Any,
+    ) -> Dict[str, List[Tuple[Any, Any]]]:
+        """
+        Build a case-insensitive index of topo points keyed by their identifier field value.
+
+        When several layers are provided (temporary CSV + definitive), all are merged into one
+        index so imported objects can be checked against either source.
+        """
+        index: Dict[str, List[Tuple[Any, Any]]] = {}
+        for layer in points_layers:
+            if not layer:
+                continue
+            identifier_field = self._find_identifier_field(layer, is_point_layer=True)
+            if not identifier_field:
+                print(
+                    "[DEBUG] Distance detection (topo ids): no identifier field on "
+                    f"layer '{layer.name()}'"
+                )
+                continue
+            field_idx = layer.fields().indexOf(identifier_field)
+            if field_idx < 0:
+                for i, field in enumerate(layer.fields()):
+                    if field.name().lower() == identifier_field.lower():
+                        field_idx = i
+                        break
+            if field_idx < 0:
+                continue
+            for feature in layer.getFeatures():
+                maybe_yield_to_ui()
+                relation_value = feature.attribute(field_idx)
+                if not self._is_valid_relation_value(relation_value):
+                    continue
+                key = self._relation_value_key(relation_value)
+                if key not in index:
+                    index[key] = []
+                index[key].append((layer, feature))
+        return index
+
+    def _get_object_topo_identifier_keys(self, feature: Any, objects_layer: Any) -> List[str]:
+        """Return normalized first/last topo identifiers declared on an object feature."""
+        if not feature or not objects_layer:
+            return []
+        first_idx, last_idx = self._find_topo_link_field_indices(objects_layer)
+        keys: List[str] = []
+        for field_idx in (first_idx, last_idx):
+            if field_idx < 0:
+                continue
+            value = feature.attribute(field_idx)
+            if self._is_valid_relation_value(value):
+                key = self._relation_value_key(value)
+                if key not in keys:
+                    keys.append(key)
+        return keys
+
+    def _detect_distance_by_topo_identifiers(
+        self,
+        objects_layer: Any,
+        primary_points_layer: Any = None,
+        definitive_points_layer: Any = None,
+    ) -> List[Union[str, WarningData]]:
+        """
+        Pair objects with topo points via ``first_identifier`` / ``last_identifier``.
+
+        This avoids false positives when QGIS relations (or indirect paths through recording
+        areas) use non-unique keys such as a recording-area id.
+        """
+        warnings: List[Union[str, WarningData]] = []
+        try:
+            points_index = self._index_points_layers_by_topo_identifier(
+                primary_points_layer,
+                definitive_points_layer
+                if definitive_points_layer is not primary_points_layer
+                else None,
+            )
+            if not points_index:
+                print("[DEBUG] Distance detection (topo ids): no indexed topo points")
+                return warnings
+
+            first_idx, last_idx = self._find_topo_link_field_indices(objects_layer)
+            distance_issues: List[Dict[str, Any]] = []
+            seen_pairings: AbstractSet[Tuple[int, int]] = set()
+
+            for object_feature in objects_layer.getFeatures():
+                maybe_yield_to_ui()
+                if not self._object_feature_has_point_association(object_feature, objects_layer):
+                    continue
+                topo_keys = self._get_object_topo_identifier_keys(object_feature, objects_layer)
+                if not topo_keys:
+                    continue
+
+                matched_points: List[Tuple[Any, Any]] = []
+                for topo_key in topo_keys:
+                    matched_points.extend(points_index.get(topo_key, []))
+
+                if not matched_points:
+                    continue
+
+                unique_points: Dict[Tuple[str, int], Tuple[Any, Any]] = {}
+                for point_layer, point_feature in matched_points:
+                    unique_points[(point_layer.id(), point_feature.id())] = (
+                        point_layer,
+                        point_feature,
+                    )
+
+                for point_layer, point_feature in unique_points.values():
+                    pairing_key = (object_feature.id(), point_feature.id())
+                    if pairing_key in seen_pairings:
+                        continue
+                    seen_pairings.add(pairing_key)
+
+                    point_geom = point_feature.geometry()
+                    object_geom = object_feature.geometry()
+                    if point_geom.intersects(object_geom):
+                        continue
+                    distance = point_geom.distance(object_geom)
+                    if distance <= self._max_distance_meters:
+                        continue
+
+                    relation_value = topo_keys[0]
+                    distance_issues.append({
+                        'point_feature': point_feature,
+                        'object_feature': object_feature,
+                        'point_layer': point_layer,
+                        'point_identifier': self._get_feature_identifier(point_feature, "Total Station Point"),
+                        'object_identifier': self._get_feature_identifier(object_feature, "Object"),
+                        'distance': distance,
+                        'relation_value': relation_value,
+                    })
+
+            if not distance_issues:
+                return warnings
+
+            by_topo_key: Dict[str, List[Dict[str, Any]]] = {}
+            for issue in distance_issues:
+                key = issue['relation_value']
+                if key not in by_topo_key:
+                    by_topo_key[key] = []
+                by_topo_key[key].append(issue)
+
+            for relation_value, issues in by_topo_key.items():
+                point_layer = issues[0]['point_layer']
+                point_feature = issues[0]['point_feature']
+                object_feature = issues[0]['object_feature']
+                identifier_field = self._find_identifier_field(point_layer, is_point_layer=True)
+                points_filter = ""
+                if identifier_field:
+                    field_idx = point_layer.fields().indexOf(identifier_field)
+                    if field_idx >= 0:
+                        filter_value = point_feature.attribute(field_idx)
+                        points_filter = (
+                            f'"{identifier_field}" = \'{filter_value}\''
+                        )
+                if not points_filter:
+                    points_filter = f"$id = {point_feature.id()}"
+
+                objects_filter_parts = []
+                for field_name, field_idx in (
+                    ("first_identifier", first_idx),
+                    ("last_identifier", last_idx),
+                ):
+                    if field_idx < 0:
+                        continue
+                    fields = objects_layer.fields()
+                    actual_name = fields[field_idx].name()
+                    value = object_feature.attribute(field_idx)
+                    if self._is_valid_relation_value(value):
+                        objects_filter_parts.append(f'"{actual_name}" = \'{value}\'')
+                objects_filter = (
+                    " OR ".join(objects_filter_parts)
+                    if objects_filter_parts
+                    else f"$id = {object_feature.id()}"
+                )
+
+                point_identifiers = sorted({issue['point_identifier'] for issue in issues})
+                object_identifiers = sorted({issue['object_identifier'] for issue in issues})
+                max_distance = max(issue['distance'] for issue in issues)
+                warnings.append(WarningData(
+                    message=self._create_distance_warning(
+                        point_identifiers, object_identifiers, max_distance, relation_value
+                    ),
+                    recording_area_name=f"Topo {relation_value}",
+                    layer_name=point_layer.name(),
+                    filter_expression=points_filter,
+                    second_layer_name=objects_layer.name(),
+                    second_filter_expression=objects_filter,
+                    distance_issues=issues,
+                ))
+        except Exception as e:
+            print(f"[DEBUG] Error in _detect_distance_by_topo_identifiers: {e}")
+            import traceback
+            traceback.print_exc()
+
+        return warnings
+
     def _object_feature_has_point_association(self, feature: Any, objects_layer: Any) -> bool:
         """
         Return whether an object feature has an explicit point association.
@@ -961,9 +1377,7 @@ class DistanceDetectorService:
         """
         if not feature or not objects_layer:
             return False
-        fields = objects_layer.fields()
-        first_idx = fields.indexOf("first_identifier")
-        last_idx = fields.indexOf("last_identifier")
+        first_idx, last_idx = self._find_topo_link_field_indices(objects_layer)
         if first_idx < 0 and last_idx < 0:
             return True
         first_val = feature.attribute(first_idx) if first_idx >= 0 else None

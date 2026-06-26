@@ -275,7 +275,7 @@ class ImportSummaryDockWidget(QDockWidget):
         Each structured warning can open the temporary layer attribute table with a filter
         applied so the user can inspect offending features.
         """
-        warnings_list = getattr(self._summary_data, "out_of_bounds_warnings", None) or []
+        warnings_list = self._effective_warnings("out_of_bounds_warnings")
         if not warnings_list:
             return
         print(f"[DEBUG][UI] Displaying {len(warnings_list)} out-of-bounds warnings")
@@ -386,8 +386,8 @@ class ImportSummaryDockWidget(QDockWidget):
         """Return True when the summary should include the objects group box."""
         return (
             self._summary_data.objects_count > 0
-            or getattr(self._summary_data, "duplicate_objects_warnings", [])
-            or getattr(self._summary_data, "skipped_numbers_warnings", [])
+            or self._effective_warnings("duplicate_objects_warnings")
+            or self._effective_warnings("skipped_numbers_warnings")
             or getattr(self._summary_data, "alternative_objects_merged_count", 0) > 0
         )
 
@@ -528,13 +528,14 @@ class ImportSummaryDockWidget(QDockWidget):
             content_layout.addWidget(small_finds_group)
 
         # Distance warnings section
-        if hasattr(self._summary_data, 'distance_warnings') and self._summary_data.distance_warnings:
-            print(f"[DEBUG][UI] Displaying {len(self._summary_data.distance_warnings)} distance warnings")
+        distance_warnings = self._effective_warnings("distance_warnings")
+        if distance_warnings:
+            print(f"[DEBUG][UI] Displaying {len(distance_warnings)} distance warnings")
             warnings_layout = QtWidgets.QVBoxLayout()
             warnings_label = QtWidgets.QLabel(self.tr("Distance Warnings:"))
             warnings_label.setStyleSheet("font-weight: bold; color: #DC143C;")
             warnings_layout.addWidget(warnings_label)
-            for i, warning in enumerate(self._summary_data.distance_warnings):
+            for i, warning in enumerate(distance_warnings):
                 warning_item_layout = QtWidgets.QHBoxLayout()
                 if hasattr(warning, 'message'):
                     warning_text = warning.message
@@ -588,13 +589,16 @@ class ImportSummaryDockWidget(QDockWidget):
             layout.addLayout(duplicates_layout)
         
         # Duplicate total station identifiers warnings
-        if hasattr(self._summary_data, 'duplicate_total_station_identifiers_warnings') and self._summary_data.duplicate_total_station_identifiers_warnings:
+        duplicate_ts_warnings = self._effective_warnings(
+            "duplicate_total_station_identifiers_warnings"
+        )
+        if duplicate_ts_warnings:
             warnings_layout = QtWidgets.QVBoxLayout()
             warnings_label = QtWidgets.QLabel(self.tr("Duplicate Identifiers Warnings:"))
             warnings_label.setStyleSheet("font-weight: bold; color: #FF4500;")
             warnings_layout.addWidget(warnings_label)
             
-            for warning in self._summary_data.duplicate_total_station_identifiers_warnings:
+            for warning in duplicate_ts_warnings:
                 warning_item_layout = QtWidgets.QHBoxLayout()
                 
                 # Warning text - check if it has the expected attributes
@@ -628,13 +632,14 @@ class ImportSummaryDockWidget(QDockWidget):
             layout.addLayout(warnings_layout)
         
         # Height difference warnings
-        if hasattr(self._summary_data, 'height_difference_warnings') and self._summary_data.height_difference_warnings:
+        height_difference_warnings = self._effective_warnings("height_difference_warnings")
+        if height_difference_warnings:
             warnings_layout = QtWidgets.QVBoxLayout()
             warnings_label = QtWidgets.QLabel(self.tr("Height Difference Warnings:"))
             warnings_label.setStyleSheet("font-weight: bold; color: #FF4500;")
             warnings_layout.addWidget(warnings_label)
             
-            for warning in self._summary_data.height_difference_warnings:
+            for warning in height_difference_warnings:
                 warning_item_layout = QtWidgets.QHBoxLayout()
                 
                 # Warning text - check if it has the expected attributes
@@ -668,13 +673,14 @@ class ImportSummaryDockWidget(QDockWidget):
             layout.addLayout(warnings_layout)
         
         # Missing total station warnings
-        if hasattr(self._summary_data, 'missing_total_station_warnings') and self._summary_data.missing_total_station_warnings:
+        missing_total_station_warnings = self._effective_warnings("missing_total_station_warnings")
+        if missing_total_station_warnings:
             warnings_layout = QtWidgets.QVBoxLayout()
             warnings_label = QtWidgets.QLabel(self.tr("Missing Total Station Warnings:"))
             warnings_label.setStyleSheet("font-weight: bold; color: #8B0000;")
             warnings_layout.addWidget(warnings_label)
             
-            for i, warning in enumerate(self._summary_data.missing_total_station_warnings):
+            for i, warning in enumerate(missing_total_station_warnings):
                 warning_item_layout = QtWidgets.QHBoxLayout()
                 
                 # Warning text - check if it has the expected attributes
@@ -773,7 +779,7 @@ class ImportSummaryDockWidget(QDockWidget):
             "#FF4500",
             "#FF4500",
             "#FF6B35",
-            getattr(self._summary_data, "duplicate_objects_warnings", []) or [],
+            self._effective_warnings("duplicate_objects_warnings"),
         )
 
         # Skipped numbers warnings
@@ -783,7 +789,7 @@ class ImportSummaryDockWidget(QDockWidget):
             "#FF8C00",
             "#FF8C00",
             "#FF6B35",
-            getattr(self._summary_data, "skipped_numbers_warnings", []) or [],
+            self._effective_warnings("skipped_numbers_warnings"),
         )
         
         return group
@@ -1390,12 +1396,35 @@ class ImportSummaryDockWidget(QDockWidget):
             if step[0] is not None
         }
 
+    def _effective_warnings(self, result_key: str) -> List[Any]:
+        """
+        Return the warning list to display for one summary-data attribute.
+
+        While the incremental refresh pipeline is running, a detector that has
+        finished with new warnings replaces the import-time list immediately.
+        An empty detector result keeps showing import-time warnings until the
+        full refresh completes, so unrelated categories do not vanish step by
+        step while the progress bar is still advancing.
+        """
+        import_warnings = list(getattr(self._summary_data, result_key, None) or [])
+        if not self._warnings_analysis_running:
+            return import_warnings
+
+        refreshed = getattr(self, "_warning_refresh_results", None)
+        if not refreshed or result_key not in refreshed:
+            return import_warnings
+
+        detector_warnings = list(refreshed[result_key] or [])
+        if detector_warnings:
+            return detector_warnings
+        return import_warnings
+
     def _apply_accumulated_warning_refresh_results(self) -> None:
         """
-        Apply detector results collected so far onto ``ImportSummaryData``.
+        Apply detector results collected during refresh onto ``ImportSummaryData``.
 
-        Only attributes present in ``_warning_refresh_results`` are updated so a
-        completed step never clears warnings from another step that is still pending.
+        Called when the refresh pipeline finishes so empty detector output can
+        replace import-time warnings only after every planned step has run.
         """
         for result_key, warnings in self._warning_refresh_results.items():
             setattr(self._summary_data, result_key, list(warnings or []))
@@ -1447,7 +1476,6 @@ class ImportSummaryDockWidget(QDockWidget):
                 return
             if result_key is not None:
                 self._warning_refresh_results[result_key] = list(warnings or [])
-                self._apply_accumulated_warning_refresh_results()
                 self._recreate_summary_content()
             self._warning_refresh_index += 1
             self._update_warnings_analysis_progress(
@@ -1478,10 +1506,7 @@ class ImportSummaryDockWidget(QDockWidget):
             self._apply_accumulated_warning_refresh_results()
             planned_keys = self._planned_warning_result_keys()
             for result_key in self._WARNING_RESULT_KEYS:
-                if result_key in planned_keys:
-                    if result_key not in self._warning_refresh_results:
-                        setattr(self._summary_data, result_key, [])
-                elif result_key not in self._warning_refresh_results:
+                if result_key in planned_keys and result_key not in self._warning_refresh_results:
                     setattr(self._summary_data, result_key, [])
 
             QTimer.singleShot(1, self._complete_warning_refresh_ui)
@@ -1564,6 +1589,10 @@ class ImportSummaryDockWidget(QDockWidget):
         detector = service_class(
             settings_manager=self._settings_manager,
             layer_service=self._layer_service,
+            import_context={
+                'csv_points_count': getattr(self._summary_data, 'csv_points_count', None),
+                'objects_count': getattr(self._summary_data, 'objects_count', None),
+            },
         )
         return detector.detect_distance_warnings()
 
@@ -1678,13 +1707,14 @@ class ImportSummaryDockWidget(QDockWidget):
             content_layout.addWidget(small_finds_group)
 
         # Distance warnings section
-        if hasattr(self._summary_data, 'distance_warnings') and self._summary_data.distance_warnings:
-            print(f"[DEBUG][UI] Displaying {len(self._summary_data.distance_warnings)} distance warnings")
+        distance_warnings = self._effective_warnings("distance_warnings")
+        if distance_warnings:
+            print(f"[DEBUG][UI] Displaying {len(distance_warnings)} distance warnings")
             warnings_layout = QtWidgets.QVBoxLayout()
             warnings_label = QtWidgets.QLabel(self.tr("Distance Warnings:"))
             warnings_label.setStyleSheet("font-weight: bold; color: #DC143C;")
             warnings_layout.addWidget(warnings_label)
-            for i, warning in enumerate(self._summary_data.distance_warnings):
+            for i, warning in enumerate(distance_warnings):
                 warning_item_layout = QtWidgets.QHBoxLayout()
                 if hasattr(warning, 'message'):
                     warning_text = warning.message

@@ -301,6 +301,103 @@ class TestDistanceDetectorService(unittest.TestCase):
 
         self.assertEqual(warnings, [])
 
+    def test_detect_distance_warnings_ignores_stale_csv_layer_when_import_has_no_csv(self):
+        """A leftover Imported_CSV_Points layer must not affect an object-only import."""
+        temp_points_layer = Mock()
+        temp_points_layer.name.return_value = "Imported_CSV_Points"
+        points_fields = QgsFields()
+        points_fields.append(QgsField("identifier", QVariant.String))
+        temp_points_layer.fields.return_value = points_fields
+
+        point_features = []
+        for i in range(50):
+            point = QgsFeature(points_fields)
+            point.setGeometry(QgsGeometry.fromPointXY(QgsPointXY(float(i), 0)))
+            point.setAttribute("identifier", "7")
+            point_features.append(point)
+        temp_points_layer.getFeatures.return_value = point_features
+
+        objects_fields = QgsFields()
+        objects_fields.append(QgsField("recording_area_id", QVariant.Int))
+        temp_objects_layer = Mock()
+        temp_objects_layer.name.return_value = "New Objects"
+        temp_objects_layer.fields.return_value = objects_fields
+
+        object_feature = QgsFeature(objects_fields)
+        object_feature.setGeometry(QgsGeometry.fromPointXY(QgsPointXY(100, 100)))
+        object_feature.setAttribute("recording_area_id", 7)
+        temp_objects_layer.getFeatures.return_value = [object_feature]
+
+        definitive_points_layer = Mock()
+        definitive_points_layer.name.return_value = "Points topo"
+        definitive_points_layer.id.return_value = "points_id"
+        definitive_objects_layer = Mock()
+        definitive_objects_layer.name.return_value = "Objets"
+        definitive_objects_layer.id.return_value = "objects_id"
+
+        self.settings_manager.get_value.side_effect = lambda key, default=None: {
+            'enable_distance_warnings': True,
+            'distance_max_distance': 0.05,
+            'total_station_points_layer': 'points_id',
+            'objects_layer': 'objects_id',
+            'recording_areas_layer': 'zones_id',
+            'objects_recording_area_field': 'recording_area_id',
+        }.get(key, default)
+
+        self.layer_service.get_layer_by_name.side_effect = (
+            lambda name: (
+                temp_objects_layer if name == "New Objects"
+                else temp_points_layer if name == "Imported_CSV_Points"
+                else None
+            )
+        )
+        self.layer_service.get_layer_by_id.side_effect = lambda lid: (
+            definitive_points_layer if lid == 'points_id'
+            else definitive_objects_layer if lid == 'objects_id'
+            else None
+        )
+
+        service = DistanceDetectorService(
+            settings_manager=self.settings_manager,
+            layer_service=self.layer_service,
+            import_context={'csv_points_count': 0, 'objects_count': 1},
+        )
+        warnings = service.detect_distance_warnings()
+        self.assertEqual(warnings, [])
+
+    def test_detect_distance_warnings_object_only_import_returns_empty_without_topo_fields(self):
+        """Object-only import must not run relation/recording-area distance pairing."""
+        temp_objects_layer = Mock()
+        temp_objects_layer.name.return_value = "New Objects"
+        temp_objects_layer.fields.return_value = QgsFields()
+
+        definitive_points_layer = Mock()
+        definitive_points_layer.name.return_value = "Points topo"
+        definitive_points_layer.getFeatures.return_value = [Mock()] * 1625
+
+        definitive_objects_layer = Mock()
+        definitive_objects_layer.name.return_value = "Objets relevés"
+
+        self.settings_manager.get_value.side_effect = lambda key, default=None: {
+            'enable_distance_warnings': True,
+            'distance_max_distance': 0.05,
+            'total_station_points_layer': 'points_id',
+            'objects_layer': 'objects_id',
+            'recording_areas_layer': 'zones_id',
+        }.get(key, default)
+
+        self.layer_service.get_layer_by_name.side_effect = (
+            lambda name: temp_objects_layer if name == "New Objects" else None
+        )
+        self.layer_service.get_layer_by_id.side_effect = lambda lid: (
+            definitive_points_layer if lid == 'points_id'
+            else definitive_objects_layer if lid == 'objects_id'
+            else None
+        )
+
+        warnings = self.service.detect_distance_warnings()
+        self.assertEqual(warnings, [])
+
     def test_detect_distance_warnings_skips_definitive_points_to_temp_objects(self):
         """Imported objects without imported points should not be matched to definitive points."""
         temp_objects_layer = Mock()
@@ -373,6 +470,112 @@ class TestDistanceDetectorService(unittest.TestCase):
 
             warnings = self.service.detect_distance_warnings()
 
+        self.assertEqual(warnings, [])
+
+    def test_detect_distance_by_topo_identifiers_no_warning_when_points_missing(self):
+        """Objects linked via first_identifier must not warn when topo points are absent."""
+        points_fields = QgsFields()
+        points_fields.append(QgsField("identifier", QVariant.String))
+        points_layer = Mock()
+        points_layer.name.return_value = "Imported_CSV_Points"
+        points_layer.fields.return_value = points_fields
+        points_layer.getFeatures.return_value = []
+
+        objects_fields = QgsFields()
+        objects_fields.append(QgsField("first_identifier", QVariant.String))
+        objects_fields.append(QgsField("last_identifier", QVariant.String))
+        objects_fields.append(QgsField("recording_area_id", QVariant.Int))
+        objects_layer = Mock()
+        objects_layer.name.return_value = "New Objects"
+        objects_layer.fields.return_value = objects_fields
+
+        object_feature = QgsFeature(objects_fields)
+        object_feature.setGeometry(QgsGeometry.fromPointXY(QgsPointXY(0, 0)))
+        object_feature.setAttribute("first_identifier", "I103_28")
+        object_feature.setAttribute("last_identifier", "")
+        object_feature.setAttribute("recording_area_id", 7)
+        objects_layer.getFeatures.return_value = [object_feature]
+
+        warnings = self.service._detect_distance_by_topo_identifiers(
+            objects_layer,
+            primary_points_layer=points_layer,
+            definitive_points_layer=None,
+        )
+        self.assertEqual(warnings, [])
+
+    def test_detect_distance_by_topo_identifiers_uses_topo_not_recording_area(self):
+        """Many points sharing a recording-area key must not pair with imported objects."""
+        points_fields = QgsFields()
+        points_fields.append(QgsField("identifier", QVariant.String))
+        points_features = []
+        for i in range(50):
+            point = QgsFeature(points_fields)
+            point.setGeometry(QgsGeometry.fromPointXY(QgsPointXY(float(i), 0)))
+            point.setAttribute("identifier", f"P{i}")
+            points_features.append(point)
+
+        points_layer = Mock()
+        points_layer.name.return_value = "Points topo"
+        points_layer.fields.return_value = points_fields
+        points_layer.getFeatures.return_value = points_features
+
+        objects_fields = QgsFields()
+        objects_fields.append(QgsField("first_identifier", QVariant.String))
+        objects_fields.append(QgsField("last_identifier", QVariant.String))
+        objects_fields.append(QgsField("recording_area_id", QVariant.Int))
+        objects_layer = Mock()
+        objects_layer.name.return_value = "New Objects"
+        objects_layer.fields.return_value = objects_fields
+
+        object_feature = QgsFeature(objects_fields)
+        object_feature.setGeometry(QgsGeometry.fromPointXY(QgsPointXY(100, 100)))
+        object_feature.setAttribute("first_identifier", "MISSING_TOPO")
+        object_feature.setAttribute("last_identifier", "")
+        object_feature.setAttribute("recording_area_id", 7)
+        objects_layer.getFeatures.return_value = [object_feature]
+
+        warnings = self.service._detect_distance_by_topo_identifiers(
+            objects_layer,
+            primary_points_layer=None,
+            definitive_points_layer=points_layer,
+        )
+        self.assertEqual(warnings, [])
+
+    def test_detect_distance_issues_skips_high_multiplicity_relation_keys(self):
+        """Relation keys shared by too many points must not trigger cartesian distance checks."""
+        points_fields = QgsFields()
+        points_fields.append(QgsField("zone_id", QVariant.Int))
+        points_layer = Mock()
+        points_layer.name.return_value = "Imported_CSV_Points"
+        points_layer.fields.return_value = points_fields
+
+        objects_fields = QgsFields()
+        objects_fields.append(QgsField("zone_id", QVariant.Int))
+        objects_layer = Mock()
+        objects_layer.name.return_value = "New Objects"
+        objects_layer.fields.return_value = objects_fields
+
+        point_features = []
+        for i in range(30):
+            point = QgsFeature(points_fields)
+            point.setGeometry(QgsGeometry.fromPointXY(QgsPointXY(float(i), 0)))
+            point.setAttribute("zone_id", 7)
+            point_features.append(point)
+
+        object_feature = QgsFeature(objects_fields)
+        object_feature.setGeometry(QgsGeometry.fromPointXY(QgsPointXY(100, 100)))
+        object_feature.setAttribute("zone_id", 7)
+
+        points_layer.getFeatures.return_value = point_features
+        objects_layer.getFeatures.return_value = [object_feature]
+
+        warnings = self.service._detect_distance_issues(
+            points_layer,
+            objects_layer,
+            0,
+            0,
+            True,
+        )
         self.assertEqual(warnings, [])
 
     def test_object_feature_has_point_association_with_empty_identifiers(self):
@@ -869,6 +1072,10 @@ class TestDistanceDetectorService(unittest.TestCase):
         inter.fields.return_value = _fields(['pt_pk', 'obj_fk'])
         def_obj.fields.return_value = _fields(['obj_pk'])
 
+        temp_pts = Mock()
+        temp_pts.name.return_value = "Imported_CSV_Points"
+        temp_pts.fields.return_value = _fields(['pt_fk'])
+
         self.settings_manager.get_value.side_effect = lambda key, default=None: {
             'enable_distance_warnings': True,
             'distance_max_distance': 0.05,
@@ -885,7 +1092,11 @@ class TestDistanceDetectorService(unittest.TestCase):
         temp_obj.name.return_value = 'New Objects'
         temp_obj.fields.return_value = _fields(['obj_pk'])
         self.layer_service.get_layer_by_name.side_effect = (
-            lambda name: temp_obj if name == 'New Objects' else None
+            lambda name: (
+                temp_obj if name == 'New Objects'
+                else temp_pts if name == 'Imported_CSV_Points'
+                else None
+            )
         )
 
         point_feature = Mock()
@@ -903,6 +1114,7 @@ class TestDistanceDetectorService(unittest.TestCase):
         object_feature.attribute.return_value = 'O9'
 
         def_pts.getFeatures.return_value = [point_feature]
+        temp_pts.getFeatures.return_value = [point_feature]
         inter.getFeatures.return_value = [inter_feature]
         def_obj.getFeatures.return_value = [object_feature]
         temp_obj.getFeatures.return_value = [object_feature]
