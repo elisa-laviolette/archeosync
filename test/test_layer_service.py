@@ -478,4 +478,85 @@ class TestLayerService(unittest.TestCase):
             
             self.assertEqual(len(no_geom_layers), 1)
             self.assertEqual(no_geom_layers[0]['id'], "no_geom_layer_1")
-            self.assertEqual(no_geom_layers[0]['name'], "No Geometry Layer 1") 
+            self.assertEqual(no_geom_layers[0]['name'], "No Geometry Layer 1")
+
+    def test_fix_valuerelation_layer_references_maps_each_field_to_its_layer(self):
+        """ValueRelation widgets must remap by LayerName, not always to Matériaux."""
+        mock_types_layer = Mock()
+        mock_types_layer.id.return_value = "types_new_id"
+        mock_types_layer.name.return_value = "Types d'objets"
+
+        mock_materials_layer = Mock()
+        mock_materials_layer.id.return_value = "materials_new_id"
+        mock_materials_layer.name.return_value = "Matériaux"
+
+        mock_project = Mock()
+        mock_project.mapLayers.return_value = {
+            "types_new_id": mock_types_layer,
+            "materials_new_id": mock_materials_layer,
+        }
+
+        objet_widget = Mock()
+        objet_widget.type.return_value = "ValueRelation"
+        objet_widget.config.return_value = {
+            "Layer": "types_old_id",
+            "LayerName": "Types d'objets",
+            "Key": "Type valeur",
+        }
+
+        materiau_widget = Mock()
+        materiau_widget.type.return_value = "ValueRelation"
+        materiau_widget.config.return_value = {
+            "Layer": "materials_old_id",
+            "LayerName": "Materiaux",
+            "Key": "Valeur",
+        }
+
+        mock_fields = Mock()
+        mock_fields.count.return_value = 2
+
+        mock_target_layer = Mock()
+        mock_target_layer.fields.return_value = mock_fields
+        mock_target_layer.editorWidgetSetup.side_effect = [objet_widget, materiau_widget]
+
+        with patch("services.layer_service.QgsEditorWidgetSetup") as mock_widget_setup:
+            self.layer_service._fix_valuerelation_layer_references(
+                mock_target_layer,
+                mock_project,
+            )
+
+        self.assertEqual(mock_target_layer.setEditorWidgetSetup.call_count, 2)
+        objet_config = mock_widget_setup.call_args_list[0][0][1]
+        materiau_config = mock_widget_setup.call_args_list[1][0][1]
+        self.assertEqual(objet_config["Layer"], "types_new_id")
+        self.assertEqual(materiau_config["Layer"], "materials_new_id")
+
+    def test_fix_valuerelation_layer_references_keeps_valid_layer_ids(self):
+        """ValueRelation widgets already pointing at project layers must stay unchanged."""
+        mock_types_layer = Mock()
+        mock_types_layer.id.return_value = "types_new_id"
+        mock_types_layer.name.return_value = "Types d'objets"
+
+        mock_project = Mock()
+        mock_project.mapLayers.return_value = {"types_new_id": mock_types_layer}
+
+        objet_widget = Mock()
+        objet_widget.type.return_value = "ValueRelation"
+        objet_widget.config.return_value = {
+            "Layer": "types_new_id",
+            "LayerName": "Types d'objets",
+        }
+
+        mock_fields = Mock()
+        mock_fields.count.return_value = 1
+
+        mock_target_layer = Mock()
+        mock_target_layer.fields.return_value = mock_fields
+        mock_target_layer.editorWidgetSetup.return_value = objet_widget
+
+        self.layer_service._fix_valuerelation_layer_references(
+            mock_target_layer,
+            mock_project,
+        )
+
+        mock_target_layer.setEditorWidgetSetup.assert_not_called() 

@@ -25,6 +25,7 @@ Usage:
 from typing import List, Optional, Dict, Any, Tuple
 import os
 import tempfile
+import unicodedata
 import uuid
 from qgis.core import (
     QgsProject,
@@ -40,6 +41,7 @@ from qgis.core import (
     QgsPointXY,
     QgsEditFormConfig,
     QgsDefaultValue,
+    QgsEditorWidgetSetup,
     QgsCoordinateReferenceSystem,
     QgsCoordinateTransform,
     QgsWkbTypes,
@@ -2082,36 +2084,71 @@ class QGISLayerService(ILayerService):
         except Exception as e:
             print(f"Error copying advanced layer properties: {e}")
     
+    @staticmethod
+    def _normalize_layer_name_for_match(name: str) -> str:
+        """Normalize layer names for accent- and case-insensitive comparison."""
+        normalized = unicodedata.normalize("NFC", name or "")
+        without_accents = "".join(
+            character
+            for character in unicodedata.normalize("NFKD", normalized)
+            if not unicodedata.combining(character)
+        )
+        return " ".join(without_accents.lower().strip().split())
+
+    def _find_layer_by_name_in_project(
+        self,
+        layer_name: str,
+        project: 'QgsProject',
+    ) -> Optional['QgsMapLayer']:
+        """Resolve a project layer from a ValueRelation LayerName value."""
+        if not layer_name:
+            return None
+
+        for layer in project.mapLayers().values():
+            if layer.name() == layer_name:
+                return layer
+
+        target_normalized = self._normalize_layer_name_for_match(layer_name)
+        for layer in project.mapLayers().values():
+            if self._normalize_layer_name_for_match(layer.name()) == target_normalized:
+                return layer
+
+        return None
+
     def _fix_valuerelation_layer_references(self, target_layer: QgsVectorLayer, project: 'QgsProject') -> None:
         """
         Fix ValueRelation widget configurations to use correct layer IDs in the field project.
+
+        After layers are copied into a recording project, ValueRelation widgets may still
+        reference layer IDs from the central project. Each widget is remapped using its
+        stored ``LayerName`` (with accent-insensitive fallback, e.g. Materiaux/Matériaux).
         """
         try:
             target_fields = target_layer.fields()
-            
+            project_layers = project.mapLayers()
+
             for i in range(target_fields.count()):
-                field_name = target_fields[i].name()
                 editor_widget = target_layer.editorWidgetSetup(i)
-                
-                if editor_widget and editor_widget.type() == 'ValueRelation':
-                    config_dict = editor_widget.config()
-                    old_layer_id = config_dict.get('Layer')
-                    
-                    if old_layer_id:
-                        # Try to find the layer by name in the project
-                        found_layer = None
-                        for layer in project.mapLayers().values():
-                            if layer.name() == 'Matériaux' and old_layer_id != layer.id():
-                                found_layer = layer
-                                break
-                        
-                        if found_layer:
-                            # Update the configuration with the new layer ID
-                            config_dict['Layer'] = found_layer.id()
-                            from qgis.core import QgsEditorWidgetSetup
-                            new_widget_setup = QgsEditorWidgetSetup('ValueRelation', config_dict)
-                            target_layer.setEditorWidgetSetup(i, new_widget_setup)
-            
+
+                if not editor_widget or editor_widget.type() != 'ValueRelation':
+                    continue
+
+                config_dict = dict(editor_widget.config())
+                old_layer_id = config_dict.get('Layer')
+
+                if not old_layer_id or old_layer_id in project_layers:
+                    continue
+
+                found_layer = self._find_layer_by_name_in_project(
+                    config_dict.get('LayerName'),
+                    project,
+                )
+
+                if found_layer:
+                    config_dict['Layer'] = found_layer.id()
+                    new_widget_setup = QgsEditorWidgetSetup('ValueRelation', config_dict)
+                    target_layer.setEditorWidgetSetup(i, new_widget_setup)
+
         except Exception as e:
             print(f"Error fixing ValueRelation layer references: {e}")
             import traceback
