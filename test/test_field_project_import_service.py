@@ -2013,9 +2013,9 @@ class TestFieldProjectImportService:
 
         self.field_import_service._apply_definitive_layer_style(temp_layer, setting_key)
 
-        self.layer_service.configure_temporary_import_layer.assert_called_once()
-        call_args = self.layer_service.configure_temporary_import_layer.call_args
-        self.assertEqual(call_args.args[0], definitive_layer)
-        self.assertEqual(call_args.args[1], temp_layer)
-        self.assertIn("peer_layer_replacements", call_args.kwargs)
+        self.layer_service.configure_temporary_field_import_layer.assert_called_once()
+        call_args = self.layer_service.configure_temporary_field_import_layer.call_args
+        assert call_args.args[0] is definitive_layer
+        assert call_args.args[1] is temp_layer
+        assert "peer_layer_replacements" in call_args.kwargs
         self.settings_manager.get_value.assert_called_with(setting_key, "")

@@ -441,6 +441,29 @@ class TestRemovePendingImportLayers(unittest.TestCase):
         self.assertEqual(removed, 1)
         project.removeMapLayer.assert_called_once_with("temp_objects_id")
         layer_service.invalidate_layer_cache.assert_called_once_with("temp_objects_id")
+        layer_service.repair_definitive_project_relations.assert_called_once()
+
+    def test_remove_pending_import_layers_skips_relation_repair_without_temp_layers(self):
+        """Fresh imports should not rebuild all project relations when no temp layers exist."""
+        other_layer = Mock()
+        other_layer.name.return_value = "Recording Areas"
+        project = Mock()
+        project.mapLayers.return_value = {
+            "areas_id": other_layer,
+        }
+
+        layer_service = Mock()
+        layer_service.remove_import_clone_relations.return_value = 0
+
+        removed = remove_pending_import_layers(
+            project,
+            layer_service=layer_service,
+            get_setting=lambda key, default="": default,
+        )
+
+        self.assertEqual(removed, 0)
+        layer_service.repair_definitive_project_relations.assert_not_called()
+        layer_service.remove_import_clone_relations.assert_called_once()
 
     def test_temporary_import_layer_names_match_mappings(self):
         self.assertEqual(

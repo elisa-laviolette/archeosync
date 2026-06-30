@@ -88,10 +88,12 @@ class TestArcheoSyncRunImportData:
         plugin = self._plugin_with_layer_service(layer_service)
         dialog_instance = Mock()
 
-        with patch("archeo_sync.ImportDataDialog", return_value=dialog_instance) as dialog_cls:
-            with patch.object(ArcheoSyncPlugin, "_execute_dialog", return_value=False):
-                plugin.run_import_data()
+        with patch.object(plugin, "_dispose_all_import_summary_docks") as dispose_docks:
+            with patch("archeo_sync.ImportDataDialog", return_value=dialog_instance) as dialog_cls:
+                with patch.object(ArcheoSyncPlugin, "_execute_dialog", return_value=False):
+                    plugin.run_import_data()
 
+        dispose_docks.assert_called_once()
         dialog_cls.assert_called_once()
         for name in (
             "New Objects",
@@ -128,14 +130,16 @@ class TestArcheoSyncRunImportData:
         plugin._iface.mainWindow.return_value = main_window
 
         with self._mock_pending_import_dialog_continue_review():
-            with patch("archeo_sync.ImportDataDialog") as dialog_cls:
-                with patch.object(plugin, "_show_import_summary") as show_summary:
-                    plugin.run_import_data()
+            with patch.object(plugin, "_dispose_all_import_summary_docks"):
+                with patch("archeo_sync.ImportDataDialog") as dialog_cls:
+                    with patch.object(plugin, "_show_import_summary") as show_summary:
+                        plugin.run_import_data()
 
         dialog_cls.assert_not_called()
         show_summary.assert_called_once()
-        args, _kwargs = show_summary.call_args
+        args, kwargs = show_summary.call_args
         assert args[0]["objects_count"] == 3
+        assert kwargs.get("auto_refresh_warnings") is False
 
     def test_run_import_data_rebuilds_summary_when_temporary_layers_but_no_dock(self):
         """Pending temp layers without a dock trigger a new summary from layer feature counts."""
@@ -153,15 +157,17 @@ class TestArcheoSyncRunImportData:
         plugin._iface.mainWindow.return_value = main_window
 
         with self._mock_pending_import_dialog_continue_review():
-            with patch("archeo_sync.ImportDataDialog") as dialog_cls:
-                with patch.object(plugin, "_show_import_summary") as show_summary:
-                    plugin.run_import_data()
+            with patch.object(plugin, "_dispose_all_import_summary_docks"):
+                with patch("archeo_sync.ImportDataDialog") as dialog_cls:
+                    with patch.object(plugin, "_show_import_summary") as show_summary:
+                        plugin.run_import_data()
 
         dialog_cls.assert_not_called()
         show_summary.assert_called_once()
-        args, _kwargs = show_summary.call_args
+        args, kwargs = show_summary.call_args
         assert args[0]["objects_count"] == 3
         assert args[0]["csv_points_count"] == 0
+        assert kwargs.get("auto_refresh_warnings") is False
 
     def test_run_import_data_discard_pending_import_opens_selection_dialog(self):
         """Users can discard a pending import and start a new import session."""
@@ -180,13 +186,106 @@ class TestArcheoSyncRunImportData:
         dialog_instance = Mock()
 
         with patch("qgis.PyQt.QtWidgets.QMessageBox", return_value=msg_box):
-            with patch.object(plugin, "_clear_pending_import_layers_before_new_import") as clear_pending:
-                with patch("archeo_sync.ImportDataDialog", return_value=dialog_instance) as dialog_cls:
-                    with patch.object(ArcheoSyncPlugin, "_execute_dialog", return_value=False):
-                        plugin.run_import_data()
+            with patch.object(plugin, "_dispose_all_import_summary_docks"):
+                with patch.object(plugin, "_clear_pending_import_layers_before_new_import") as clear_pending:
+                    with patch("archeo_sync.ImportDataDialog", return_value=dialog_instance) as dialog_cls:
+                        with patch.object(ArcheoSyncPlugin, "_execute_dialog", return_value=False):
+                            plugin.run_import_data()
 
         clear_pending.assert_called_once()
         dialog_cls.assert_called_once()
+
+    def test_dispose_all_import_summary_docks_aborts_tracked_and_orphan_docks(self):
+        """Every hidden import summary dock must be aborted and removed."""
+        layer_service = Mock()
+        plugin = self._plugin_with_layer_service(layer_service)
+        tracked = Mock()
+        tracked.__class__.__name__ = "ImportSummaryDockWidget"
+        orphan = Mock()
+        orphan.__class__.__name__ = "ImportSummaryDockWidget"
+        orphan.windowTitle.return_value = "Import Summary"
+        plugin._import_summary_dock = tracked
+        plugin._iface.mainWindow.return_value.findChildren.return_value = [tracked, orphan]
+
+        plugin._dispose_all_import_summary_docks()
+
+        tracked.abort_async_operations.assert_called_once()
+        orphan.abort_async_operations.assert_called_once()
+        assert plugin._iface.removeDockWidget.call_count == 2
+        assert plugin._import_summary_dock is None
+
+
+@pytest.mark.qgis
+@pytest.mark.skipif(not QGIS_AVAILABLE, reason="QGIS not available")
+class TestArcheoSyncProjectLifecycle:
+    """Import state must reset when the QGIS project changes."""
+
+    def _plugin(self):
+        iface = Mock()
+        iface.mainWindow.return_value = Mock()
+        plugin = ArcheoSyncPlugin.__new__(ArcheoSyncPlugin)
+        plugin._iface = iface
+        plugin._csv_import_service = Mock()
+        plugin._field_project_import_service = Mock()
+        plugin._layer_service = Mock()
+        plugin._import_summary_dock = Mock()
+        return plugin
+
+    def test_reset_import_state_disposes_docks_and_clears_tracking(self):
+        plugin = self._plugin()
+        with patch.object(plugin, "_dispose_all_import_summary_docks") as dispose, \
+             patch("services.import_validation_service.reset_import_session_tracking") as reset_tracking:
+            plugin._reset_import_state_for_project_change()
+
+        dispose.assert_called_once()
+        reset_tracking.assert_called_once_with(
+            csv_import_service=plugin._csv_import_service,
+            field_project_import_service=plugin._field_project_import_service,
+            layer_service=plugin._layer_service,
+        )
+
+    def test_connect_project_lifecycle_signals_wires_qgis_hooks(self):
+        plugin = self._plugin()
+        project = Mock()
+        project.aboutToBeCleared = Mock()
+        project.aboutToBeCleared.connect = Mock()
+        plugin._iface.projectRead = Mock()
+        plugin._iface.projectRead.connect = Mock()
+        plugin._iface.newProjectCreated = Mock()
+        plugin._iface.newProjectCreated.connect = Mock()
+        with patch("qgis.core.QgsProject") as mock_project_cls:
+            mock_project_cls.instance.return_value = project
+            plugin._connect_project_lifecycle_signals()
+
+        project.aboutToBeCleared.connect.assert_called_once_with(
+            plugin._on_project_about_to_change
+        )
+        plugin._iface.projectRead.connect.assert_called_once_with(
+            plugin._on_project_about_to_change
+        )
+        plugin._iface.newProjectCreated.connect.assert_called_once_with(
+            plugin._on_project_about_to_change
+        )
+
+    def test_connect_project_lifecycle_signals_skips_non_signal_attributes(self):
+        """Methods such as iface.newProject() must not be wired as signals."""
+        slot = Mock()
+
+        class _IfaceWithNewProjectMethod:
+            def newProject(self, prompt_to_save_flag=False):
+                return True
+
+        connected = ArcheoSyncPlugin._connect_qt_signal_if_available(
+            _IfaceWithNewProjectMethod(), "newProject", slot
+        )
+
+        assert connected is False
+
+    def test_on_project_about_to_change_delegates_to_reset(self):
+        plugin = self._plugin()
+        with patch.object(plugin, "_reset_import_state_for_project_change") as reset:
+            plugin._on_project_about_to_change()
+        reset.assert_called_once()
 
 
 @pytest.mark.unit

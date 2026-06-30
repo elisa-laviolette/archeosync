@@ -44,6 +44,7 @@ from typing import Optional, List, Dict, Any, Union, Callable, Tuple
 from qgis.PyQt import QtWidgets
 from qgis.PyQt.QtWidgets import QMessageBox, QDockWidget
 from qgis.PyQt.QtCore import Qt, QTimer
+from qgis.PyQt.QtGui import QCloseEvent
 
 try:
     from ..core.interfaces import ISettingsManager, ILayerService
@@ -254,16 +255,60 @@ class ImportSummaryDockWidget(QDockWidget):
         self._parent = parent
         
         self._validation_running = False
+        self._async_aborted = False
         self._validation_jobs: List[LayerCopyJob] = []
         self._validation_job_index = 0
         self._validation_copied_counts: Dict[str, int] = {}
         self._validation_missing_configurations: List[str] = []
         self._validation_canvas_rendering_was_enabled: Optional[bool] = None
         self._feature_copier = ImportFeatureCopier()
+        self._active_warning_detection_task = None
 
         # Initialize UI
         self._setup_ui()
         self._setup_connections()
+
+    def abort_async_operations(self) -> None:
+        """
+        Stop in-flight warning refresh and validation work.
+
+        Called when the dock is closed with the window X, cancelled, validated,
+        or replaced so queued ``QTimer`` callbacks and ``QgsTask`` continuations
+        cannot touch freed UI or half-removed layers.
+        """
+        if self._async_aborted:
+            return
+        self._async_aborted = True
+        self._warnings_analysis_running = False
+        self._validation_running = False
+
+        task = self._active_warning_detection_task
+        if task is not None:
+            try:
+                cancel = getattr(task, "cancel", None)
+                if callable(cancel):
+                    cancel()
+            except Exception:
+                pass
+            self._active_warning_detection_task = None
+
+        if self._validation_jobs:
+            try:
+                self._unblock_all_validation_layer_signals()
+            except Exception:
+                pass
+            self._validation_jobs = []
+            self._validation_job_index = 0
+
+        try:
+            self._set_map_canvas_rendering(True)
+        except Exception:
+            pass
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        """Abort background work when the user dismisses the dock without Cancel."""
+        self.abort_async_operations()
+        super().closeEvent(event)
 
     def _append_out_of_bounds_warnings_section(
         self, content_layout: QtWidgets.QVBoxLayout
@@ -862,7 +907,7 @@ class ImportSummaryDockWidget(QDockWidget):
     
     def _handle_validate(self) -> None:
         """Handle the validate button click - copy features from temporary to definitive layers."""
-        if self._validation_running:
+        if self._async_aborted or self._validation_running:
             return
         try:
             if self._has_warnings():
@@ -983,6 +1028,8 @@ class ImportSummaryDockWidget(QDockWidget):
 
     def _run_validation_batch_step(self) -> None:
         """Load or copy one small chunk, then yield back to the Qt event loop."""
+        if self._async_aborted:
+            return
         try:
             if self._validation_job_index >= len(self._validation_jobs):
                 self._finalize_validation_success()
@@ -1118,6 +1165,7 @@ class ImportSummaryDockWidget(QDockWidget):
 
         if self._iface:
             self._iface.removeDockWidget(self)
+        self.abort_async_operations()
         self.deleteLater()
 
     def _handle_validation_failure(self, error: Exception) -> None:
@@ -1201,8 +1249,8 @@ class ImportSummaryDockWidget(QDockWidget):
                 # Delete the dock widget from the interface
                 if self._iface:
                     self._iface.removeDockWidget(self)
-                
-                # Delete the widget
+
+                self.abort_async_operations()
                 self.deleteLater()
                 
         except Exception as e:
@@ -1271,7 +1319,7 @@ class ImportSummaryDockWidget(QDockWidget):
         Each detector step is scheduled as a QgsTask so the QGIS UI stays
         responsive; the virtual-field preparation step remains on the main thread.
         """
-        if self._warnings_analysis_running:
+        if self._async_aborted or self._warnings_analysis_running:
             return
         if DuplicateObjectsDetectorService is None or SkippedNumbersDetectorService is None:
             if show_feedback:
@@ -1451,7 +1499,7 @@ class ImportSummaryDockWidget(QDockWidget):
 
     def _run_next_warning_refresh_step(self) -> None:
         """Schedule a single warning-detection step off the main thread when possible."""
-        if not self._warnings_analysis_running:
+        if self._async_aborted or not self._warnings_analysis_running:
             return
 
         total_steps = len(self._warning_refresh_plan)
@@ -1472,7 +1520,7 @@ class ImportSummaryDockWidget(QDockWidget):
         )
 
         def on_success(warnings: List[Any]) -> None:
-            if not self._warnings_analysis_running:
+            if self._async_aborted or not self._warnings_analysis_running:
                 return
             if result_key is not None:
                 self._warning_refresh_results[result_key] = list(warnings or [])
@@ -1502,6 +1550,8 @@ class ImportSummaryDockWidget(QDockWidget):
 
     def _finalize_warning_refresh(self) -> None:
         """Apply collected warnings and rebuild the summary panel on the next event-loop tick."""
+        if self._async_aborted:
+            return
         try:
             self._apply_accumulated_warning_refresh_results()
             planned_keys = self._planned_warning_result_keys()
@@ -1515,6 +1565,8 @@ class ImportSummaryDockWidget(QDockWidget):
 
     def _complete_warning_refresh_ui(self) -> None:
         """Rebuild summary widgets and clear the busy indicator."""
+        if self._async_aborted:
+            return
         try:
             self._recreate_summary_content()
 

@@ -1030,6 +1030,49 @@ class TestImportSummaryDialog(unittest.TestCase):
             
             # Verify the dock widget was NOT removed from the interface on error
             self.mock_iface.removeDockWidget.assert_not_called()
+
+    def test_close_event_aborts_async_operations(self):
+        """Closing the dock with the window X must stop background work."""
+        with patch.object(self.dialog, "abort_async_operations") as mock_abort:
+            from qgis.PyQt.QtGui import QCloseEvent
+
+            self.dialog.closeEvent(QCloseEvent())
+            mock_abort.assert_called_once()
+
+    def test_abort_async_operations_stops_validation_batch_step(self):
+        """Queued validation steps must not run after the dock is aborted."""
+        self.dialog._validation_running = True
+        self.dialog._validation_jobs = [Mock(feature_count=1, load_complete=True)]
+        self.dialog._validation_job_index = 0
+
+        with patch.object(self.dialog, "_finalize_validation_success") as mock_finalize:
+            self.dialog.abort_async_operations()
+            self.dialog._run_validation_batch_step()
+            mock_finalize.assert_not_called()
+
+    def test_abort_async_operations_stops_warning_refresh_step(self):
+        """Queued warning refresh steps must not run after the dock is aborted."""
+        self.dialog._warnings_analysis_running = True
+        self.dialog._warning_refresh_plan = [
+            (None, "Preparing layers...", lambda: []),
+        ]
+        self.dialog._warning_refresh_index = 0
+
+        with patch.object(self.dialog, "_finalize_warning_refresh") as mock_finalize:
+            self.dialog.abort_async_operations()
+            self.dialog._run_next_warning_refresh_step()
+            mock_finalize.assert_not_called()
+
+    def test_cancel_aborts_async_operations_before_delete(self):
+        """Cancel must abort timers/tasks before removing the dock widget."""
+        std_btns, default_no, yes_val, _no_val = _qmessagebox_yes_no_dialog_args()
+        with patch("qgis.PyQt.QtWidgets.QMessageBox.question") as mock_question, \
+             patch.object(self.dialog, "abort_async_operations") as mock_abort, \
+             patch.object(self.dialog, "_delete_temporary_layers"), \
+             patch.object(self.dialog, "deleteLater"):
+            mock_question.return_value = yes_val
+            self.dialog._handle_cancel()
+            mock_abort.assert_called_once()
     
     def test_has_warnings_with_duplicates(self):
         """Test that _has_warnings returns True when duplicate warnings exist."""

@@ -96,6 +96,8 @@ class ImportDataDialog(QtWidgets.QDialog):
         # Store data
         self._csv_files: List[str] = []
         self._completed_projects: List[str] = []
+        self._cached_selected_csv_files: Optional[List[str]] = None
+        self._cached_selected_completed_projects: Optional[List[str]] = None
         
         # Initialize UI
         self._setup_ui()
@@ -396,6 +398,8 @@ class ImportDataDialog(QtWidgets.QDialog):
         Returns:
             List of selected CSV file paths
         """
+        if self._cached_selected_csv_files is not None:
+            return list(self._cached_selected_csv_files)
         selected_files = []
         for i in range(self._csv_list_widget.count()):
             item = self._csv_list_widget.item(i)
@@ -413,6 +417,8 @@ class ImportDataDialog(QtWidgets.QDialog):
         Returns:
             List of selected completed project directory paths
         """
+        if self._cached_selected_completed_projects is not None:
+            return list(self._cached_selected_completed_projects)
         selected_projects = []
         for i in range(self._projects_list_widget.count()):
             item = self._projects_list_widget.item(i)
@@ -425,6 +431,8 @@ class ImportDataDialog(QtWidgets.QDialog):
     
     def _accept(self) -> None:
         """Handle dialog acceptance."""
-        # The import button is only enabled when there are valid selections,
-        # so we can directly accept the dialog
-        self.accept() 
+        # Read selections before accept() so callers can safely import after exec()
+        # returns, and so list widgets are still valid on all Qt runtimes.
+        self._cached_selected_csv_files = self.get_selected_csv_files()
+        self._cached_selected_completed_projects = self.get_selected_completed_projects()
+        self.accept()

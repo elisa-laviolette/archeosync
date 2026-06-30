@@ -1089,7 +1089,7 @@ class FieldProjectImportService(QObject):
         source_layer = self._get_existing_layer(layer_setting_key)
         if not source_layer or not temp_layer:
             return
-        self._layer_service.configure_temporary_import_layer(
+        self._layer_service.configure_temporary_field_import_layer(
             source_layer,
             temp_layer,
             peer_layer_replacements=self._build_peer_temp_layer_replacements(),

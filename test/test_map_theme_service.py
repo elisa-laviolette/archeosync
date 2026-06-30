@@ -67,12 +67,32 @@ class TestQGISMapThemeService:
 
         collection = Mock()
         collection.hasMapTheme.return_value = True
+        collection.mapThemeState.return_value = {"layer_a": Mock()}
         project = Mock()
         project.mapThemeCollection.return_value = collection
         project.layerTreeRoot.return_value = root
+        project.mapLayer.return_value = Mock()
 
         with patch("services.map_theme_service.QgsProject") as mock_project_cls:
             mock_project_cls.instance.return_value = project
             self.service.apply_theme_to_current_project("Field", iface)
 
         collection.applyTheme.assert_called_once_with("Field", root, model)
+
+    def test_apply_theme_skips_when_theme_references_missing_layers(self):
+        """Broken theme state after a project switch must not call applyTheme."""
+        iface = Mock()
+        collection = Mock()
+        collection.hasMapTheme.return_value = True
+        collection.mapThemeState.return_value = {"missing_layer_id": Mock()}
+        project = Mock()
+        project.mapThemeCollection.return_value = collection
+        project.mapLayer.return_value = None
+
+        with patch("services.map_theme_service.QgsProject") as mock_project_cls:
+            mock_project_cls.instance.return_value = project
+            with patch("builtins.print") as mock_print:
+                self.service.apply_theme_to_current_project("Field", iface)
+
+        collection.applyTheme.assert_not_called()
+        mock_print.assert_called()

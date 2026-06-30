@@ -46,7 +46,42 @@ class QGISMapThemeService(IMapThemeService):
             print(f"Warning: map theme '{theme_name}' is not defined in the current project.")
             return
 
+        if not self._map_theme_layers_exist(project, collection, theme_name):
+            print(
+                f"Warning: map theme '{theme_name}' references missing layers; "
+                "skipping theme application."
+            )
+            return
+
         layer_tree_view = iface.layerTreeView()
         model = layer_tree_view.layerTreeModel()
         root = project.layerTreeRoot()
-        collection.applyTheme(theme_name, root, model)
+        try:
+            collection.applyTheme(theme_name, root, model)
+        except Exception as exc:
+            print(f"Warning: could not apply map theme '{theme_name}': {exc}")
+
+    @staticmethod
+    def _map_theme_layers_exist(project, collection, theme_name: str) -> bool:
+        """
+        Return False when a theme still references layers absent from the project.
+
+        Applying such a theme can crash QGIS after switching projects while the
+        configured theme name remains in plugin settings.
+        """
+        if not hasattr(collection, "mapThemeState"):
+            return True
+        try:
+            theme_state = collection.mapThemeState(theme_name)
+        except Exception:
+            return True
+        if not theme_state:
+            return True
+        try:
+            layer_ids = theme_state.keys() if hasattr(theme_state, "keys") else theme_state
+            for layer_id in layer_ids:
+                if project.mapLayer(layer_id) is None:
+                    return False
+        except Exception:
+            return True
+        return True

@@ -467,8 +467,19 @@ def remove_pending_import_layers(
         return 0
 
     try:
-        if layer_service is not None and get_setting is not None and hasattr(
-            layer_service, "repair_definitive_project_relations"
+        layers_to_remove: List[str] = []
+        for layer in project.mapLayers().values():
+            if layer.name() in TEMPORARY_IMPORT_LAYER_NAMES:
+                layers_to_remove.append(layer.id())
+                print(f"Found temporary layer to delete: {layer.name()}")
+
+        # Relation repair walks and rebuilds project relations in C++; only run it
+        # when temporary import layers are actually present and about to be removed.
+        if (
+            layers_to_remove
+            and layer_service is not None
+            and get_setting is not None
+            and hasattr(layer_service, "repair_definitive_project_relations")
         ):
             peer_replacements = build_peer_temp_layer_replacements(
                 project.mapLayers(),
@@ -493,12 +504,6 @@ def remove_pending_import_layers(
                     f"Removed {removed} temporary import relation clone(s) "
                     "before deleting temp layers"
                 )
-
-        layers_to_remove: List[str] = []
-        for layer in project.mapLayers().values():
-            if layer.name() in TEMPORARY_IMPORT_LAYER_NAMES:
-                layers_to_remove.append(layer.id())
-                print(f"Found temporary layer to delete: {layer.name()}")
 
         if layer_service is not None and hasattr(layer_service, "invalidate_layer_cache"):
             for layer_id in layers_to_remove:

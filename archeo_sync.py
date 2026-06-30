@@ -101,6 +101,7 @@ class ArcheoSyncPlugin(QObject):
         self._first_start = True
         self._settings_dialog: Optional[SettingsDialog] = None
         self._import_data_dialog: Optional[ImportDataDialog] = None
+        self._import_summary_dock = None
     
     def _initialize_services(self) -> None:
         """Initialize all required services."""
@@ -254,9 +255,99 @@ class ArcheoSyncPlugin(QObject):
             callback=self.run_import_data,
             parent=self._iface.mainWindow()
         )
+
+        self._connect_project_lifecycle_signals()
+
+    @staticmethod
+    def _connect_qt_signal_if_available(source, signal_name: str, slot) -> bool:
+        """
+        Connect ``slot`` to a Qt signal when ``source.<signal_name>`` exposes ``connect``.
+
+        QGIS 4 exposes ``newProject()`` as an action method while the corresponding
+        notification signal is ``newProjectCreated``; this helper avoids wiring methods
+        by mistake.
+        """
+        if source is None:
+            return False
+        signal = getattr(source, signal_name, None)
+        if signal is None or not hasattr(signal, "connect"):
+            return False
+        signal.connect(slot)
+        return True
+
+    @staticmethod
+    def _disconnect_qt_signal_if_available(source, signal_name: str, slot) -> None:
+        """Disconnect ``slot`` from ``source.<signal_name>`` when connected."""
+        if source is None:
+            return
+        signal = getattr(source, signal_name, None)
+        if signal is None or not hasattr(signal, "disconnect"):
+            return
+        try:
+            signal.disconnect(slot)
+        except (TypeError, RuntimeError):
+            pass
+    
+    def _connect_project_lifecycle_signals(self) -> None:
+        """
+        Reset import UI and caches when the user opens another QGIS project.
+
+        The plugin instance outlives individual projects; without this hook, hidden
+        summary docks, queued timers, and layer-service caches can reference layers
+        from the previous project and crash the next import attempt.
+        """
+        from qgis.core import QgsProject
+
+        project = QgsProject.instance()
+        self._connect_qt_signal_if_available(
+            project, "aboutToBeCleared", self._on_project_about_to_change
+        )
+        self._connect_qt_signal_if_available(
+            self._iface, "projectRead", self._on_project_about_to_change
+        )
+        # QGIS 4: ``newProject`` is the menu action method; ``newProjectCreated`` is the signal.
+        self._connect_qt_signal_if_available(
+            self._iface, "newProjectCreated", self._on_project_about_to_change
+        )
+
+    def _disconnect_project_lifecycle_signals(self) -> None:
+        """Disconnect project lifecycle hooks during plugin unload."""
+        from qgis.core import QgsProject
+
+        project = QgsProject.instance()
+        self._disconnect_qt_signal_if_available(
+            project, "aboutToBeCleared", self._on_project_about_to_change
+        )
+        self._disconnect_qt_signal_if_available(
+            self._iface, "projectRead", self._on_project_about_to_change
+        )
+        self._disconnect_qt_signal_if_available(
+            self._iface, "newProjectCreated", self._on_project_about_to_change
+        )
+
+    def _on_project_about_to_change(self, *_args) -> None:
+        """Drop import session state tied to the project being closed or replaced."""
+        self._reset_import_state_for_project_change()
+
+    def _reset_import_state_for_project_change(self) -> None:
+        """
+        Dispose import summary UI and clear in-memory import bookkeeping.
+
+        Safe to call multiple times and when no import is active.
+        """
+        self._dispose_all_import_summary_docks()
+        from .services.import_validation_service import reset_import_session_tracking
+
+        reset_import_session_tracking(
+            csv_import_service=self._csv_import_service,
+            field_project_import_service=self._field_project_import_service,
+            layer_service=self._layer_service,
+        )
     
     def unload(self) -> None:
         """Remove the plugin menu item and icon from QGIS GUI."""
+        self._disconnect_project_lifecycle_signals()
+        self._reset_import_state_for_project_change()
         for action in self._actions:
             self._iface.removePluginMenu(self.tr(u'&ArcheoSync'), action)
             self._iface.removeToolBarIcon(action)
@@ -637,7 +728,21 @@ class ArcheoSyncPlugin(QObject):
             )
             return
 
-        if self._has_pending_import_temporary_layers():
+        # Hidden or half-destroyed summary docks can leave timers/tasks running and
+        # crash the next import attempt even when the panel is not visible.
+        self._dispose_all_import_summary_docks()
+
+        has_pending_layers = self._has_pending_import_temporary_layers()
+        if not has_pending_layers:
+            from .services.import_validation_service import reset_import_session_tracking
+
+            reset_import_session_tracking(
+                csv_import_service=self._csv_import_service,
+                field_project_import_service=self._field_project_import_service,
+                layer_service=self._layer_service,
+            )
+
+        if has_pending_layers:
             from qgis.PyQt.QtWidgets import QMessageBox
             from .services.import_validation_service import reset_import_session_tracking
 
@@ -646,8 +751,16 @@ class ArcheoSyncPlugin(QObject):
             msg_box.setWindowTitle(self.tr("Pending Import"))
             msg_box.setText(
                 self.tr(
-                    "A previous import is still pending in this project. "
-                    "Do you want to continue reviewing it or discard it and import new data?"
+                    "A previous import is still pending in this project "
+                    "(temporary layers are still loaded).\n\n"
+                    "Choose how to continue:"
+                )
+            )
+            msg_box.setInformativeText(
+                self.tr(
+                    "If the summary panel is no longer visible, use "
+                    "\"Discard and Import New Data\" to remove the temporary "
+                    "layers and start again."
                 )
             )
             continue_button = msg_box.addButton(
@@ -677,6 +790,7 @@ class ArcheoSyncPlugin(QObject):
                     archive_projects=bool(
                         self._field_project_import_service.get_last_imported_projects()
                     ),
+                    auto_refresh_warnings=False,
                 )
                 return
 
@@ -689,7 +803,20 @@ class ArcheoSyncPlugin(QObject):
         result = self._execute_dialog(dialog)
 
         if result:
-            self._handle_import_data_accepted(dialog)
+            selected_csv_files = list(dialog.get_selected_csv_files())
+            selected_completed_projects = list(dialog.get_selected_completed_projects())
+            # Defer import work until after Qt finishes closing the modal dialog.
+            # Running QgsProject / relation code in the same event-loop turn as
+            # accept() has caused hard crashes (SIGBUS) on macOS QGIS 4.
+            QTimer.singleShot(
+                0,
+                lambda csv_files=selected_csv_files, project_paths=selected_completed_projects: (
+                    self._handle_import_data_accepted(
+                        selected_csv_files=csv_files,
+                        selected_completed_projects=project_paths,
+                    )
+                ),
+            )
 
     def _has_pending_import_temporary_layers(self) -> bool:
         """True if any ArcheoSync temporary import layer is still in the project."""
@@ -750,15 +877,26 @@ class ArcheoSyncPlugin(QObject):
         if theme:
             self._map_theme_service.apply_theme_to_current_project(theme, self._iface)
     
-    def _handle_import_data_accepted(self, dialog) -> None:
+    def _handle_import_data_accepted(
+        self,
+        dialog=None,
+        *,
+        selected_csv_files: Optional[List[str]] = None,
+        selected_completed_projects: Optional[List[str]] = None,
+    ) -> None:
         """Handle the case when import data dialog is accepted."""
         try:
+            if selected_csv_files is None:
+                selected_csv_files = (
+                    dialog.get_selected_csv_files() if dialog is not None else []
+                )
+            if selected_completed_projects is None:
+                selected_completed_projects = (
+                    dialog.get_selected_completed_projects() if dialog is not None else []
+                )
+
             self._clear_pending_import_layers_before_new_import()
             self._apply_configured_map_theme('import_map_theme')
-
-            # Get selected items
-            selected_csv_files = dialog.get_selected_csv_files()
-            selected_completed_projects = dialog.get_selected_completed_projects()
 
             # Drop stale archive tracking for data types not part of this import session.
             if not selected_csv_files:
@@ -935,13 +1073,15 @@ class ArcheoSyncPlugin(QObject):
         *,
         archive_csv: bool = True,
         archive_projects: bool = True,
+        auto_refresh_warnings: bool = True,
     ) -> None:
         """
         Show the import summary dock widget.
 
         The dock is created first so users can interact immediately, then warning
-        detectors are triggered asynchronously through the dock refresh pipeline.
-        This avoids long UI freezes before the panel appears on large imports.
+        detectors are triggered asynchronously through the dock refresh pipeline
+        when ``auto_refresh_warnings`` is True. This avoids long UI freezes before
+        the panel appears on large imports.
         """
         try:
             from .ui.import_summary_dialog import (
@@ -949,13 +1089,7 @@ class ArcheoSyncPlugin(QObject):
                 ImportSummaryData,
                 DOCK_WIDGET_AREAS,
             )
-            # Drop any previous summary dock so we never show stale counts or warning layouts
-            # (e.g. reopening Import with pending layers used to only raise_() an old dock).
-            existing_summary = self._find_existing_import_summary_dock_widget()
-            if existing_summary is not None:
-                self._iface.removeDockWidget(existing_summary)
-                existing_summary.deleteLater()
-                QCoreApplication.processEvents()
+            self._dispose_all_import_summary_docks()
 
             # Create summary data
             summary = ImportSummaryData(
@@ -997,15 +1131,77 @@ class ArcheoSyncPlugin(QObject):
             
             # Add the dock widget to the main window
             self._iface.addDockWidget(DOCK_WIDGET_AREAS.right, dock_widget)
+            self._import_summary_dock = dock_widget
+            dock_widget.show()
+            dock_widget.raise_()
 
-            # Let Qt paint the dock first, then run warning detectors silently.
-            QCoreApplication.processEvents()
-            QTimer.singleShot(0, dock_widget.refresh_warnings_silently)
+            if auto_refresh_warnings:
+                QTimer.singleShot(0, dock_widget.refresh_warnings_silently)
             
         except Exception as e:
             print(f"Error showing import summary: {e}")
             import traceback
             traceback.print_exc()
+
+    def _dispose_import_summary_dock(self, dock) -> None:
+        """
+        Stop background work and detach one import summary dock from the main window.
+
+        Safe to call on hidden, half-closed, or already removed docks.
+        """
+        if dock is None:
+            return
+        try:
+            abort = getattr(dock, "abort_async_operations", None)
+            if callable(abort):
+                abort()
+        except RuntimeError:
+            pass
+        except Exception as exc:
+            print(f"Error aborting import summary dock: {exc}")
+        try:
+            if self._iface is not None:
+                self._iface.removeDockWidget(dock)
+        except RuntimeError:
+            pass
+        except Exception as exc:
+            print(f"Error removing import summary dock: {exc}")
+        try:
+            dock.deleteLater()
+        except RuntimeError:
+            pass
+        if self._import_summary_dock is dock:
+            self._import_summary_dock = None
+
+    def _dispose_all_import_summary_docks(self) -> None:
+        """
+        Remove every import summary dock, including hidden orphans.
+
+        Called before opening Import Data so a panel closed with the window X
+        cannot leave timers or QgsTasks that crash the next import attempt.
+        """
+        docks = []
+        if self._import_summary_dock is not None:
+            docks.append(self._import_summary_dock)
+        try:
+            main_window = self._iface.mainWindow() if self._iface else None
+            if main_window is not None:
+                for child in main_window.findChildren(QDockWidget):
+                    if child in docks:
+                        continue
+                    class_name = getattr(getattr(child, "__class__", None), "__name__", "")
+                    if "ImportSummaryDockWidget" in class_name:
+                        docks.append(child)
+                        continue
+                    title = child.windowTitle()
+                    if title in ("Import Summary", self.tr("Import Summary")):
+                        docks.append(child)
+        except Exception as exc:
+            print(f"Error collecting import summary docks: {exc}")
+
+        for dock in docks:
+            self._dispose_import_summary_dock(dock)
+        self._import_summary_dock = None
 
     def _find_existing_import_summary_dock_widget(self):
         """

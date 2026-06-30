@@ -501,6 +501,27 @@ class ILayerService(ABC):
         pass
 
     @abstractmethod
+    def configure_temporary_field_import_layer(
+        self,
+        source_layer: Any,
+        target_layer: Any,
+        peer_layer_replacements: Optional[Dict[str, str]] = None,
+    ) -> None:
+        """
+        Apply symbology and relations to field-project import temp layers without full QML.
+
+        Field import memory layers are merged from GeoPackage data and may not match the
+        definitive layer schema; loading the complete style/form tree can crash QGIS.
+
+        Args:
+            source_layer: Configured definitive project layer
+            target_layer: Temporary ``New Objects`` / ``New Features`` / ``New Small Finds`` layer
+            peer_layer_replacements: Optional map of definitive layer id to other active
+                temporary import layer ids
+        """
+        pass
+
+    @abstractmethod
     def configure_temporary_topo_csv_layer(
         self,
         source_layer: Any,

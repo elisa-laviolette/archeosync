@@ -960,6 +960,40 @@ class QGISLayerService(ILayerService):
             source_layer,
         )
 
+    def _configure_temporary_import_layer_safe(
+        self,
+        source_layer: QgsVectorLayer,
+        target_layer: QgsVectorLayer,
+        peer_layer_replacements: Optional[Dict[str, str]] = None,
+    ) -> None:
+        """
+        Configure a temporary import layer without loading definitive QML/forms.
+
+        Copies cloned project relations, renderer symbology, display expression, and
+        field widgets for overlapping columns only. Used when the temp layer schema
+        differs from the definitive layer (CSV topo and field-project imports).
+        """
+        if source_layer is None or target_layer is None:
+            return
+        if not isinstance(source_layer, QgsVectorLayer) or not isinstance(
+            target_layer, QgsVectorLayer
+        ):
+            return
+
+        relation_id_mapping = self.copy_layer_relations_for_temporary_layer(
+            source_layer,
+            target_layer,
+            peer_layer_replacements=peer_layer_replacements,
+        )
+        self._copy_renderer_fallback(source_layer, target_layer)
+        self._copy_layer_display_expression(source_layer, target_layer)
+        self._copy_overlapping_field_configurations(source_layer, target_layer)
+        self._remap_layer_relation_references(
+            target_layer,
+            relation_id_mapping,
+            source_layer,
+        )
+
     def configure_temporary_topo_csv_layer(
         self,
         source_layer: QgsVectorLayer,
@@ -980,23 +1014,38 @@ class QGISLayerService(ILayerService):
             peer_layer_replacements: Optional map of definitive layer id to active
                 temporary import layer ids for relation cloning
         """
-        if source_layer is None or target_layer is None:
-            return
-        if not isinstance(source_layer, QgsVectorLayer) or not isinstance(target_layer, QgsVectorLayer):
-            return
-
-        relation_id_mapping = self.copy_layer_relations_for_temporary_layer(
+        self._configure_temporary_import_layer_safe(
             source_layer,
             target_layer,
             peer_layer_replacements=peer_layer_replacements,
         )
-        self._copy_renderer_fallback(source_layer, target_layer)
-        self._copy_layer_display_expression(source_layer, target_layer)
-        self._copy_overlapping_field_configurations(source_layer, target_layer)
-        self._remap_layer_relation_references(
-            target_layer,
-            relation_id_mapping,
+
+    def configure_temporary_field_import_layer(
+        self,
+        source_layer: QgsVectorLayer,
+        target_layer: QgsVectorLayer,
+        peer_layer_replacements: Optional[Dict[str, str]] = None,
+    ) -> None:
+        """
+        Apply symbology and relations to a field-project import temp layer safely.
+
+        ``New Objects``, ``New Features``, and ``New Small Finds`` are built from
+        merged GeoPackage features and often diverge from the main-project definitive
+        layers (virtual fields, custom forms, ValueRelation widgets). Loading the full
+        definitive QML onto those memory layers can crash QGIS on the main project
+        while imports appear to work in empty projects where layer settings do not
+        resolve to a configured layer.
+
+        Args:
+            source_layer: Configured definitive project layer
+            target_layer: Temporary import layer to configure
+            peer_layer_replacements: Optional map of definitive layer id to other active
+                temporary import layer ids for relation cloning
+        """
+        self._configure_temporary_import_layer_safe(
             source_layer,
+            target_layer,
+            peer_layer_replacements=peer_layer_replacements,
         )
 
     def _restore_field_and_form_configuration_after_style_copy(
@@ -1426,14 +1475,20 @@ class QGISLayerService(ILayerService):
         """Re-create any definitive relation that was altered while cloning import relations."""
         project = project or QgsProject.instance()
         for relation_id, snapshot in snapshots.items():
-            current_relation = relation_manager.relation(relation_id)
-            if self._relation_snapshot_matches(current_relation, snapshot):
-                continue
-            self._restore_relation_from_snapshot(
-                relation_manager,
-                snapshot,
-                project,
-            )
+            try:
+                current_relation = relation_manager.relation(relation_id)
+                if self._relation_snapshot_matches(current_relation, snapshot):
+                    continue
+                self._restore_relation_from_snapshot(
+                    relation_manager,
+                    snapshot,
+                    project,
+                )
+            except Exception as exc:
+                print(
+                    f"Warning: could not restore definitive relation "
+                    f"'{relation_id}' after import clone: {exc}"
+                )
 
     def _restore_relation_from_snapshot(
         self,

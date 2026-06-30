@@ -183,6 +183,34 @@ class TestImportDataDialog(unittest.TestCase):
         # Check that the correct file is returned
         self.assertEqual(len(selected_files), 1)
         self.assertEqual(selected_files[0], '/path/to/total_station/file1.csv')
+
+    def test_accept_caches_selections_before_dialog_closes(self):
+        """Import selections must remain available after accept() closes the dialog."""
+        csv_files = [
+            '/path/to/total_station/file1.csv',
+            '/path/to/total_station/file2.csv',
+        ]
+        self.mock_file_system_service.list_files.return_value = csv_files
+
+        dialog = ImportDataDialog(
+            settings_manager=self.mock_settings_manager,
+            file_system_service=self.mock_file_system_service,
+        )
+
+        for i in range(dialog._csv_list_widget.count()):
+            dialog._csv_list_widget.item(i).setSelected(i == 0)
+
+        dialog._accept()
+
+        self.assertEqual(
+            dialog.get_selected_csv_files(),
+            ['/path/to/total_station/file1.csv'],
+        )
+        dialog._csv_list_widget.clear()
+        self.assertEqual(
+            dialog.get_selected_csv_files(),
+            ['/path/to/total_station/file1.csv'],
+        )
     
     def test_get_selected_completed_projects(self):
         """Test that selected completed projects are returned correctly."""
